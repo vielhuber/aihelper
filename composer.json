@@ -1,0 +1,18 @@
+{
+    "name": "vielhuber/aihelper",
+    "description": "Collection of useful shorthand string related functions in PHP.",
+    "require": {
+        "php": ">=7.1",
+        "vielhuber/stringhelper": "^6.8"
+    },
+    "license": "MIT",
+    "require-dev": {
+        "phpunit/phpunit": ">=6.5",
+        "vlucas/phpdotenv": ">=4.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "vielhuber\\aihelper\\": "src/"
+        }
+    }
+}
