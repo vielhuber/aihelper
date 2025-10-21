@@ -167,63 +167,63 @@ abstract class aihelper
 
         $input_tokens = 0;
         if (
-            __::x($response) &&
-            __::x($response->result) &&
-            __::x($response->result->usage) &&
-            __::x($response->result->usage->input_tokens)
+            __::x(@$response) &&
+            __::x(@$response->result) &&
+            __::x(@$response->result->usage) &&
+            __::x(@$response->result->usage->input_tokens)
         ) {
             $input_tokens += $response->result->usage->input_tokens;
         }
         if (
-            __::x($response) &&
-            __::x($response->result) &&
-            __::x($response->result->usageMetadata) &&
-            __::x($response->result->usageMetadata->promptTokenCount)
+            __::x(@$response) &&
+            __::x(@$response->result) &&
+            __::x(@$response->result->usageMetadata) &&
+            __::x(@$response->result->usageMetadata->promptTokenCount)
         ) {
             $input_tokens += $response->result->usageMetadata->promptTokenCount;
         }
 
         $input_cached_tokens = 0;
         if (
-            __::x($response) &&
-            __::x($response->result) &&
-            __::x($response->result->usage) &&
-            __::x($response->result->usage->input_tokens_details) &&
-            __::x($response->result->usage->input_tokens_details->cached_tokens)
+            __::x(@$response) &&
+            __::x(@$response->result) &&
+            __::x(@$response->result->usage) &&
+            __::x(@$response->result->usage->input_tokens_details) &&
+            __::x(@$response->result->usage->input_tokens_details->cached_tokens)
         ) {
             $input_cached_tokens += $response->result->usage->input_tokens_details->cached_tokens;
         }
         if (
-            __::x($response) &&
-            __::x($response->result) &&
-            __::x($response->result->usage) &&
-            __::x($response->result->usage->cache_creation_input_tokens)
+            __::x(@$response) &&
+            __::x(@$response->result) &&
+            __::x(@$response->result->usage) &&
+            __::x(@$response->result->usage->cache_creation_input_tokens)
         ) {
             $input_cached_tokens += $response->result->usage->cache_creation_input_tokens;
         }
         if (
-            __::x($response) &&
-            __::x($response->result) &&
-            __::x($response->result->usage) &&
-            __::x($response->result->usage->cache_read_input_tokens)
+            __::x(@$response) &&
+            __::x(@$response->result) &&
+            __::x(@$response->result->usage) &&
+            __::x(@$response->result->usage->cache_read_input_tokens)
         ) {
             $input_cached_tokens += $response->result->usage->cache_read_input_tokens;
         }
 
         $output_tokens = 0;
         if (
-            __::x($response) &&
-            __::x($response->result) &&
-            __::x($response->result->usage) &&
-            __::x($response->result->usage->output_tokens)
+            __::x(@$response) &&
+            __::x(@$response->result) &&
+            __::x(@$response->result->usage) &&
+            __::x(@$response->result->usage->output_tokens)
         ) {
             $output_tokens += $response->result->usage->output_tokens;
         }
         if (
-            __::x($response) &&
-            __::x($response->result) &&
-            __::x($response->result->usageMetadata) &&
-            __::x($response->result->usageMetadata->candidatesTokenCount)
+            __::x(@$response) &&
+            __::x(@$response->result) &&
+            __::x(@$response->result->usageMetadata) &&
+            __::x(@$response->result->usageMetadata->candidatesTokenCount)
         ) {
             $output_tokens += $response->result->usageMetadata->candidatesTokenCount;
         }
@@ -380,7 +380,7 @@ class ai_chatgpt extends aihelper
             'content' => $prompt
         ];
 
-        if (__::x($files)) {
+        if (__::x(@$files)) {
             if (!is_array($files)) {
                 $files = [$files];
             }
@@ -499,7 +499,7 @@ class ai_chatgpt extends aihelper
                     if (__::x(@$output__value->content)) {
                         foreach ($output__value->content as $content__value) {
                             if (__::x(@$content__value->text)) {
-                                if (__::x($output_text)) {
+                                if (__::x(@$output_text)) {
                                     $output_text .= PHP_EOL . '---' . PHP_EOL;
                                 }
                                 $output_text .= $content__value->text;
@@ -550,7 +550,7 @@ class ai_chatgpt extends aihelper
             $response = __::curl($this->url . '/files', ['limit' => 10000], 'GET', [
                 'Authorization' => 'Bearer ' . $this->api_key
             ]);
-            if (__::x($response) && __::x($response->result) && __::x($response->result->data)) {
+            if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->data)) {
                 foreach ($response->result->data as $res__value) {
                     if (__::x(@$res__value->id)) {
                         $response2 = __::curl($this->url . '/files/' . $res__value->id, null, 'DELETE', [
@@ -683,7 +683,7 @@ class ai_claude extends aihelper
             ];
         }
 
-        if (__::x($files)) {
+        if (__::x(@$files)) {
             if (!is_array($files)) {
                 $files = [$files];
             }
@@ -757,7 +757,7 @@ class ai_claude extends aihelper
         if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->content)) {
             foreach ($response->result->content as $content__value) {
                 if (__::x(@$content__value->text)) {
-                    if (__::x($output_text)) {
+                    if (__::x(@$output_text)) {
                         $output_text .= PHP_EOL . '---' . PHP_EOL;
                     }
                     $output_text .= $content__value->text;
@@ -927,7 +927,7 @@ class ai_gemini extends aihelper
             ];
         }
 
-        if (__::x($files)) {
+        if (__::x(@$files)) {
             if (!is_array($files)) {
                 $files = [$files];
             }
@@ -968,7 +968,7 @@ class ai_gemini extends aihelper
                 if (__::x(@$candidates__value->content) && __::x(@$candidates__value->content->parts)) {
                     foreach ($candidates__value->content->parts as $parts__value) {
                         if (__::x(@$parts__value->text)) {
-                            if (__::x($output_text)) {
+                            if (__::x(@$output_text)) {
                                 $output_text .= PHP_EOL . PHP_EOL . PHP_EOL . '---' . PHP_EOL . PHP_EOL . PHP_EOL;
                             }
                             $output_text .= $parts__value->text;
