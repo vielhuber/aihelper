@@ -1,6 +1,6 @@
 {
     "name": "vielhuber/aihelper",
-    "description": "Collection of useful shorthand string related functions in PHP.",
+    "description": "Consistent interface for multiple ai providers.",
     "require": {
         "php": ">=7.1",
         "vielhuber/stringhelper": "^6.8"
