@@ -344,6 +344,7 @@ class ai_chatgpt extends aihelper
                 $this->conversation_id = explode('=', $session_id)[1];
                 $this->session_id = $session_id;
             }
+            $this->cleanup_data[] = ['type' => 'conversation', 'id' => $this->conversation_id];
         }
     }
 
@@ -535,6 +536,11 @@ class ai_chatgpt extends aihelper
             }
             if ($cleanup_data__value['type'] === 'response') {
                 $response = __::curl($this->url . '/responses/' . $cleanup_data__value['id'], null, 'DELETE', [
+                    'Authorization' => 'Bearer ' . $this->api_key
+                ]);
+            }
+            if ($cleanup_data__value['type'] === 'conversation') {
+                $response = __::curl($this->url . '/conversations/' . $cleanup_data__value['id'], null, 'DELETE', [
                     'Authorization' => 'Bearer ' . $this->api_key
                 ]);
             }

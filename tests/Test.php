@@ -314,6 +314,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 ],
                 'POST'
             );
+            //$this->log('access token: ' . $return->result->access_token);
             $mcp_servers = [];
             foreach (explode(',', @$_SERVER['MCP_SERVER_URLS']) as $urls__value) {
                 $mcp_servers[] = [
