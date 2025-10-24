@@ -27,7 +27,8 @@ $ai = aihelper::create(
             'url' => 'https://modelcontextprotocol.io/mcp',
             'authorization_token' => '...'
         ]
-    ]
+    ],
+    stream: false // optional support for streaming (see /tests/stream/index.html)
 );
 
 $ai->ask('Wer wurde 2018 Fußball-Weltmeister?');

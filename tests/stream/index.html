@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="de">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, minimum-scale=1" />
+        <title>stream tes</title>
+        <script>
+            window.addEventListener('load', e => {
+                // Set your request input
+                const yourInput = 'Erstelle ein Gedicht über Fußball mit 48 Strophen.';
+
+                // Send the input data as a query parameter to your PHP script
+                const url = `stream.php?prompt=${encodeURIComponent(yourInput)}`;
+
+                // Create a new EventSource object for real-time server-sent events (SSE)
+                const source = new EventSource(url);
+
+                // Initialize the response content and current index for displaying typed characters
+                let responseContent = '';
+                const streamingTextElement = document.getElementById('streamingText');
+                let currentIndex = 0;
+
+                // Function that types out received chunks character by character
+                function typeCharacter() {
+                    if (currentIndex < responseContent.length) {
+                        streamingTextElement.textContent += responseContent.charAt(currentIndex);
+                        currentIndex++;
+                        setTimeout(typeCharacter, 100); // Adjust the typing speed by changing the delay (in milliseconds)
+                    }
+                }
+
+                console.log('START');
+
+                // Process the received SSE events
+                source.onmessage = function (event) {
+                    console.log(event);
+
+                    if (event.data === '[DONE]') {
+                        // All data received, logging it and closing the connection
+                        console.log('All data received:', responseContent);
+                        source.close(); // Close the connection
+                    } else {
+                        const data = JSON.parse(event.data);
+
+                        if (data.id) {
+                            // Process the data message chunk
+                            const choices = data.choices;
+                            if (choices && choices.length > 0) {
+                                const content = choices[0].delta.content;
+                                if (content) {
+                                    responseContent += content;
+                                    typeCharacter();
+
+                                    // Auto-scroll to the bottom as new content is added
+                                    streamingTextElement.scrollTop = streamingTextElement.scrollHeight;
+                                }
+                            }
+                        }
+                    }
+                };
+
+                // Handling errors in receiving SSE events
+                source.onerror = function (error) {
+                    console.error('Error:', error);
+                    source.close(); // Close the connection
+                };
+            });
+        </script>
+        <style>
+            * {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="streamingText" style="font-size: 22px; overflow: scroll"></div>
+    </body>
+</html>

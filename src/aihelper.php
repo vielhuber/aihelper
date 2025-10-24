@@ -16,6 +16,7 @@ abstract class aihelper
     public $log = null;
     public $max_tries = null;
     public $mcp_servers = null;
+    public $stream = null;
 
     public $session_id = null;
     public static $sessions = [];
@@ -31,22 +32,32 @@ abstract class aihelper
         $session_id = null,
         $log = null,
         $max_tries = null,
-        $mcp_servers = null
+        $mcp_servers = null,
+        $stream = null
     ) {
         if ($service === 'chatgpt') {
-            return new ai_chatgpt($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers);
+            return new ai_chatgpt($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers, $stream);
         }
         if ($service === 'claude') {
-            return new ai_claude($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers);
+            return new ai_claude($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers, $stream);
         }
         if ($service === 'gemini') {
-            return new ai_gemini($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers);
+            return new ai_gemini($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers, $stream);
         }
         if ($service === 'grok') {
-            return new ai_grok($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers);
+            return new ai_grok($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers, $stream);
         }
         if ($service === 'deepseek') {
-            return new ai_deepseek($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers);
+            return new ai_deepseek(
+                $model,
+                $temperature,
+                $api_key,
+                $session_id,
+                $log,
+                $max_tries,
+                $mcp_servers,
+                $stream
+            );
         }
         return null;
     }
@@ -58,7 +69,8 @@ abstract class aihelper
         $session_id,
         $log = null,
         $max_tries = null,
-        $mcp_servers = null
+        $mcp_servers = null,
+        $stream = null
     );
 
     public function ask($prompt = null, $files = null)
@@ -161,9 +173,19 @@ abstract class aihelper
         return null;
     }
 
+    public function getMaxTokensForModel()
+    {
+        foreach ($this->models as $models__value) {
+            if ($models__value['name'] === $this->model) {
+                return $models__value['max_tokens'];
+            }
+        }
+        return 4096;
+    }
+
     public function addCosts($response, &$return)
     {
-        $this->log($response);
+        $this->log($response, 'add costs');
 
         $input_tokens = 0;
         if (
@@ -253,36 +275,42 @@ class ai_chatgpt extends aihelper
     public $models = [
         [
             'name' => 'gpt-5',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'gpt-5-mini',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'gpt-5-nano',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4.1',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o-mini',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
@@ -296,7 +324,8 @@ class ai_chatgpt extends aihelper
         $session_id,
         $log = null,
         $max_tries = null,
-        $mcp_servers = null
+        $mcp_servers = null,
+        $stream = null
     ) {
         if ($model === null) {
             $model = $this->getDefaultModel();
@@ -315,6 +344,7 @@ class ai_chatgpt extends aihelper
                 $this->mcp_servers = [$mcp_servers];
             }
         }
+        $this->stream = $stream === true ? true : false;
 
         $this->model = $model;
         $this->temperature = $temperature;
@@ -405,17 +435,21 @@ class ai_chatgpt extends aihelper
                 copy($files__value, $files__value_new);
 
                 $files__value = $files__value_new;
+
+                $file_args = [
+                    'file' => new \CURLFile($files__value),
+                    'purpose' =>
+                        stripos($files__value, '.jpg') !== false ||
+                        stripos($files__value, '.jpeg') !== false ||
+                        stripos($files__value, '.png') !== false
+                            ? 'vision'
+                            : 'assistants'
+                ];
+
+                $this->log($file_args, 'create file');
                 $response = __::curl(
                     $this->url . '/files',
-                    [
-                        'file' => new \CURLFile($files__value),
-                        'purpose' =>
-                            stripos($files__value, '.jpg') !== false ||
-                            stripos($files__value, '.jpeg') !== false ||
-                            stripos($files__value, '.png') !== false
-                                ? 'vision'
-                                : 'assistants'
-                    ],
+                    $file_args,
                     'POST',
                     [
                         'Authorization' => 'Bearer ' . $this->api_key
@@ -423,11 +457,11 @@ class ai_chatgpt extends aihelper
                     false,
                     false // send as json
                 );
+                $this->log(@$response->result, 'response');
                 $this->addCosts($response, $return);
                 if (__::nx(@$response->result) || __::nx(@$response->result->id)) {
                     return $return;
                 }
-                $this->log(@$response->result, 'create file');
                 $file_ids[] = ['id' => $response->result->id, 'path' => $files__value];
                 $this->cleanup_data[] = ['type' => 'file', 'id' => $response->result->id];
             }
@@ -489,8 +523,8 @@ class ai_chatgpt extends aihelper
         $response = __::curl($this->url . '/responses', $args, 'POST', [
             'Authorization' => 'Bearer ' . $this->api_key
         ]);
-        $this->addCosts($response, $return);
         $this->log(@$response->result->output, 'response');
+        $this->addCosts($response, $return);
 
         $output_text = '';
         if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->output)) {
@@ -583,42 +617,49 @@ class ai_claude extends aihelper
     public $models = [
         [
             'name' => 'claude-sonnet-4-5',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'claude-haiku-4-5',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'claude-sonnet-4-0',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-1',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-0',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-3-7-sonnet-latest',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-3-5-haiku-latest',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
@@ -632,7 +673,8 @@ class ai_claude extends aihelper
         $session_id,
         $log = null,
         $max_tries = null,
-        $mcp_servers = null
+        $mcp_servers = null,
+        $stream = null
     ) {
         if ($model === null) {
             $model = $this->getDefaultModel();
@@ -651,6 +693,7 @@ class ai_claude extends aihelper
                 $this->mcp_servers = [$mcp_servers];
             }
         }
+        $this->stream = $stream === true ? true : false;
 
         $this->model = $model;
         $this->temperature = $temperature;
@@ -730,7 +773,7 @@ class ai_claude extends aihelper
 
         $args = [
             'model' => $this->model,
-            'max_tokens' => 1024,
+            'max_tokens' => $this->getMaxTokensForModel(),
             'messages' => self::$sessions[$this->session_id],
             'temperature' => $this->temperature
         ];
@@ -750,14 +793,83 @@ class ai_claude extends aihelper
             }
         }
 
+        $stream_callback = null;
+        if ($this->stream === true) {
+            $args['stream'] = true;
+            $stream_callback = function ($chunk) {
+                /*
+                echo $chunk;
+                return strlen($chunk);
+                */
+
+                // transform in uniform format
+                $this->log($chunk, 'chunk');
+                $lines = explode("\n", $chunk);
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if (strpos($line, 'event: ') === 0) {
+                        $eventType = trim(substr($line, 7));
+                        continue;
+                    }
+                    if (strpos($line, 'data: ') === 0) {
+                        $json = substr($line, 6);
+                        if ($json === '[DONE]') {
+                            echo "data: [DONE]\n\n";
+                            continue;
+                        }
+                        $parsed = json_decode($json, true);
+                        if (isset($parsed['type']) && $parsed['type'] === 'content_block_delta') {
+                            if (isset($parsed['delta']['text'])) {
+                                $text = $parsed['delta']['text'];
+                                echo 'data: ' .
+                                    json_encode([
+                                        'id' => uniqid(),
+                                        'choices' => [
+                                            [
+                                                'delta' => ['content' => $text]
+                                            ]
+                                        ]
+                                    ]) .
+                                    "\n\n";
+                            }
+                        }
+                        if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
+                            echo "data: [DONE]\n\n";
+                        }
+                    }
+                }
+                return strlen($chunk);
+            };
+            if (!headers_sent()) {
+                header('Content-Type: text/event-stream');
+                header('Cache-Control: no-cache');
+                header('Connection: keep-alive');
+                header('X-Accel-Buffering: no');
+            }
+            while (ob_get_level() > 0) {
+                ob_end_flush();
+            }
+            ob_implicit_flush(true);
+        }
+
         $this->log($args, 'ask');
-        $response = __::curl($this->url . '/messages', $args, 'POST', [
-            'x-api-key' => $this->api_key,
-            'anthropic-version' => '2023-06-01',
-            'anthropic-beta' => 'mcp-client-2025-04-04'
-        ]);
-        $this->addCosts($response, $return);
+        $response = __::curl(
+            url: $this->url . '/messages',
+            data: $args,
+            method: 'POST',
+            headers: [
+                'x-api-key' => $this->api_key,
+                'anthropic-version' => '2023-06-01',
+                'anthropic-beta' => 'mcp-client-2025-04-04'
+            ],
+            stream_callback: $stream_callback
+        );
         $this->log(@$response->result, 'response');
+        if ($this->stream === true) {
+            $return['success'] = true;
+            return $return;
+        }
+        $this->addCosts($response, $return);
 
         $output_text = '';
         if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->content)) {
@@ -839,30 +951,35 @@ class ai_gemini extends aihelper
     public $models = [
         [
             'name' => 'gemini-2.5-pro',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'gemini-2.5-flash',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gemini-2.5-flash-lite',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'gemini-2.0-flash',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gemini-2.0-flash-lite',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
@@ -876,7 +993,8 @@ class ai_gemini extends aihelper
         $session_id,
         $log = null,
         $max_tries = null,
-        $mcp_servers = null
+        $mcp_servers = null,
+        $stream = null
     ) {
         if ($model === null) {
             $model = $this->getDefaultModel();
@@ -895,6 +1013,7 @@ class ai_gemini extends aihelper
                 $this->mcp_servers = [$mcp_servers];
             }
         }
+        $this->stream = $stream === true ? true : false;
 
         $this->model = $model;
         $this->temperature = $temperature;
@@ -965,8 +1084,8 @@ class ai_gemini extends aihelper
             'POST',
             null
         );
-        $this->addCosts($response, $return);
         $this->log(@$response->result->candidates, 'response');
+        $this->addCosts($response, $return);
 
         $output_text = '';
         if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->candidates)) {
@@ -1029,36 +1148,42 @@ class ai_grok extends ai_claude
     public $models = [
         [
             'name' => 'grok-4',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'grok-4-fast-reasoning',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'grok-4-fast-non-reasoning',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-code-fast-1',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-3',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-3-mini',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
@@ -1078,12 +1203,14 @@ class ai_deepseek extends ai_claude
     public $models = [
         [
             'name' => 'deepseek-chat',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => true,
             'test' => true
         ],
         [
             'name' => 'deepseek-reasoner',
+            'max_tokens' => 8192,
             'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
             'default' => false,
             'test' => false
