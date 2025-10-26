@@ -137,7 +137,7 @@ abstract class aihelper
                 ' - ' .
                 $this->model .
                 ' - ' .
-                date('Y-m-d H:i:s', strtotime('now')) .
+                \DateTime::createFromFormat('U.u', microtime(true))->format('Y-m-d H:i:s.u') .
                 ($prefix !== null ? ' - ' . $prefix : '') .
                 ' ' .
                 'ℹ️' .
@@ -815,6 +815,8 @@ class ai_claude extends aihelper
                         $json = substr($line, 6);
                         if ($json === '[DONE]') {
                             echo "data: [DONE]\n\n";
+                            @ob_flush();
+                            @flush();
                             continue;
                         }
                         $parsed = json_decode($json, true);
@@ -831,10 +833,14 @@ class ai_claude extends aihelper
                                         ]
                                     ]) .
                                     "\n\n";
+                                @ob_flush();
+                                @flush();
                             }
                         }
                         if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
                             echo "data: [DONE]\n\n";
+                            @ob_flush();
+                            @flush();
                         }
                     }
                 }
@@ -845,11 +851,20 @@ class ai_claude extends aihelper
                 header('Cache-Control: no-cache');
                 header('Connection: keep-alive');
                 header('X-Accel-Buffering: no');
+                header('Cache-Control: no-cache, no-transform');
             }
             while (ob_get_level() > 0) {
-                ob_end_flush();
+                @ob_end_clean();
             }
-            ob_implicit_flush(true);
+            // set php settings
+            @ini_set('zlib.output_compression', '0');
+            @ini_set('output_buffering', '0');
+            @ini_set('implicit_flush', '1');
+            // 2k padding (for browsers)
+            @ob_implicit_flush(true);
+            echo ': pad ' . str_repeat(' ', 2048) . "\n\n";
+            @ob_flush();
+            @flush();
         }
 
         $this->log($args, 'ask');

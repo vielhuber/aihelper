@@ -27,8 +27,7 @@ $ai = aihelper::create(
             'url' => 'https://modelcontextprotocol.io/mcp',
             'authorization_token' => '...'
         ]
-    ],
-    stream: false // optional support for streaming (see /tests/stream/index.html)
+    ]
 );
 
 $ai->ask('Wer wurde 2018 Fußball-Weltmeister?');
@@ -49,4 +48,28 @@ $ai->ask('Was habe ich vorher gefragt?');
 $ai->cleanup(); // (remotely) deletes the data of the current session
 
 $ai->cleanup_all(); // (remotely) deletes all data
+```
+
+## streaming support
+
+```php
+$ai = aihelper::create(
+    /* ... */
+    stream: true
+    /* ... */
+);
+```
+
+aihelper can stream model output to a browser using server‑sent events (see). in this mode the php backend connects to the model provider with http streaming and forwards chunks to the client as sse events in real time.
+
+see an example implementation at `/tests/stream/index.html`.
+
+if streaming stutters on apache2 with php‑fpm, adjust your virtualhost so fastcgi forwards packets immediately (no buffering):
+
+```
+<Proxy "fcgi://localhost-stream/" enablereuse=on flushpackets=on>
+</Proxy>
+<LocationMatch "stream\.php$">
+SetHandler "proxy:unix:/var/run/php/phpX.X-fpm.sock|fcgi://localhost-stream/"
+</LocationMatch>
 ```
