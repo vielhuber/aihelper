@@ -2,79 +2,43 @@
 <html lang="de">
     <head>
         <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, minimum-scale=1" />
         <title>stream test</title>
         <script>
             window.addEventListener('load', e => {
-                // Set your request input
-                const yourInput = 'Erstelle ein Gedicht über Fußball mit 48 Strophen.';
-
-                // Send the input data as a query parameter to your PHP script
-                const url = `stream.php?prompt=${encodeURIComponent(yourInput)}`;
-
-                // Create a new EventSource object for real-time server-sent events (SSE)
-                const source = new EventSource(url);
-
-                // Initialize the response content and current index for displaying typed characters
-                let responseContent = '';
-                const streamingTextElement = document.getElementById('streamingText');
-                let currentIndex = 0;
-
-                // Function that types out received chunks character by character
-                function typeCharacter() {
-                    if (currentIndex < responseContent.length) {
-                        streamingTextElement.textContent += responseContent.charAt(currentIndex);
-                        currentIndex++;
-                        setTimeout(typeCharacter, 100); // Adjust the typing speed by changing the delay (in milliseconds)
-                    }
-                }
-
-                console.log('START');
-
-                // Process the received SSE events
-                source.onmessage = function (event) {
-                    console.log(event);
-
-                    if (event.data === '[DONE]') {
-                        // All data received, logging it and closing the connection
-                        console.log('All data received:', responseContent);
-                        source.close(); // Close the connection
-                    } else {
-                        const data = JSON.parse(event.data);
-
-                        if (data.id) {
-                            // Process the data message chunk
-                            const choices = data.choices;
-                            if (choices && choices.length > 0) {
-                                const content = choices[0].delta.content;
-                                if (content) {
-                                    responseContent += content;
-                                    typeCharacter();
-
-                                    // Auto-scroll to the bottom as new content is added
-                                    streamingTextElement.scrollTop = streamingTextElement.scrollHeight;
-                                }
-                            }
+                let prompt = 'Schreibe ein Gedicht über Fußball mit 24 Strophen.',
+                    url = 'stream.php?prompt=' + encodeURIComponent(prompt),
+                    source = new EventSource(url),
+                    content = '',
+                    $container = document.querySelector('.container'),
+                    curIndex = 0,
+                    typing = () => {
+                        let speed = 100;
+                        if (curIndex < content.length) {
+                            speed = Math.max(1, Math.round(1000 / (content.length - curIndex)));
+                            $container.textContent += content.charAt(curIndex);
+                            curIndex++;
                         }
+                        setTimeout(typing, speed);
+                    };
+                source.onmessage = event => {
+                    if (event.data === '[DONE]') {
+                        source.close();
+                        return;
+                    }
+                    let data = JSON.parse(event.data);
+                    if (data.id && data.choices && data.choices.length > 0 && data.choices[0].delta.content) {
+                        content += data.choices[0].delta.content;
                     }
                 };
-
-                // Handling errors in receiving SSE events
-                source.onerror = function (error) {
+                source.onerror = error => {
                     console.error('Error:', error);
-                    source.close(); // Close the connection
+                    source.close();
                 };
+                typing();
             });
         </script>
-        <style>
-            * {
-                box-sizing: border-box;
-                margin: 0;
-                padding: 0;
-            }
-        </style>
     </head>
     <body>
-        <div id="streamingText" style="font-size: 22px; overflow: scroll"></div>
+        <div class="container"></div>
     </body>
 </html>
