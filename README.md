@@ -60,7 +60,7 @@ $ai = aihelper::create(
 );
 ```
 
-aihelper can stream model output to a browser using server‑sent events (see). in this mode the php backend connects to the model provider with http streaming and forwards chunks to the client as sse events in real time. see an example implementation at `/tests/stream/index.html`.
+aihelper can stream model output to a browser using server‑sent events (see). in this mode the php backend connects to the model provider with http streaming and forwards chunks to the client as sse events in real time. see an example implementation at [/tests/stream/index.html](tests/stream/index.html).
 
 if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled for the streaming route and also adjust your virtualhost so fastcgi forwards packets immediately (no buffering):
 
@@ -68,6 +68,6 @@ if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled f
 <Proxy "fcgi://localhost-stream/" enablereuse=on flushpackets=on>
 </Proxy>
 <LocationMatch "stream\.php$">
-SetHandler "proxy:unix:/var/run/php/phpX.X-fpm.sock|fcgi://localhost-stream/"
+  SetHandler "proxy:unix:/var/run/php/phpX.X-fpm.sock|fcgi://localhost-stream/"
 </LocationMatch>
 ```
