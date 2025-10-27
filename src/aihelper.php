@@ -5,24 +5,29 @@ use vielhuber\stringhelper\__;
 
 abstract class aihelper
 {
-    public $provider = null;
-    public $name = null;
-    public $url = null;
-    public $models = [];
+    protected $provider = null;
+    protected $name = null;
+    protected $url = null;
+    protected $models = [];
 
-    public $model = null;
-    public $temperature = null;
-    public $api_key = null;
-    public $log = null;
-    public $max_tries = null;
-    public $mcp_servers = null;
-    public $stream = null;
+    protected $model = null;
+    protected $temperature = null;
+    protected $api_key = null;
+    protected $log = null;
+    protected $max_tries = null;
+    protected $mcp_servers = null;
 
-    public $session_id = null;
-    public static $sessions = [];
+    protected $stream = null;
+    protected $stream_response = null;
+    protected $stream_event = null;
+    protected $stream_buffer_in = null;
+    protected $stream_buffer_data = null;
 
-    public $conversation_id = null;
-    public $cleanup_data = [];
+    protected $session_id = null;
+    protected static $sessions = [];
+
+    protected $conversation_id = null;
+    protected $cleanup_data = [];
 
     public static function create(
         $service,
@@ -78,21 +83,19 @@ abstract class aihelper
         $return = ['response' => null, 'success' => false, 'content' => [], 'costs' => 0.0];
         $max_tries = $this->max_tries;
         while ($return['success'] === false && $max_tries > 0) {
-            //$this->log($this, 'ask');
-            //$this->log($prompt, 'ask');
-            //$this->log($prompt, 'ask');
             if ($max_tries < $this->max_tries) {
                 $this->log('⚠️ tries left: ' . $max_tries);
             }
             $return = $this->askThis($prompt, $files, $max_tries === $this->max_tries);
+            $this->log($return, 'return');
             $max_tries--;
         }
         return $return;
     }
 
-    abstract public function askThis($prompt = null, $files = null, $add_prompt_to_session = true);
+    abstract protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true);
 
-    public function parseJson($msg)
+    protected function parseJson($msg)
     {
         if (strpos(trim($msg), '```json') === 0 || __::string_is_json($msg)) {
             $msg = json_decode(trim(rtrim(ltrim(ltrim(trim($msg), '```json'), '```'), '```')));
@@ -112,6 +115,11 @@ abstract class aihelper
     public function disable_log()
     {
         $this->log = null;
+    }
+
+    public function getSessionId()
+    {
+        return $this->session_id;
     }
 
     public function log($msg, $prefix = null)
@@ -173,7 +181,7 @@ abstract class aihelper
         return null;
     }
 
-    public function getMaxTokensForModel()
+    protected function getMaxTokensForModel()
     {
         foreach ($this->models as $models__value) {
             if ($models__value['name'] === $this->model) {
@@ -183,7 +191,7 @@ abstract class aihelper
         return 4096;
     }
 
-    public function addCosts($response, &$return)
+    protected function addCosts($response, &$return)
     {
         $this->log($response, 'add costs');
 
@@ -262,56 +270,178 @@ abstract class aihelper
         }
         $return['costs'] += (float) round($costs, 5);
     }
+
+    protected function getStreamCallback()
+    {
+        if ($this->stream === false) {
+            return null;
+        }
+
+        // mimic non stream result
+        $this->stream_response = (object) [
+            'result' => (object) [
+                'content' => [
+                    (object) [
+                        'type' => 'text',
+                        'text' => ''
+                    ]
+                ],
+                'usage' => (object) [
+                    'input_tokens' => 0,
+                    'cache_creation_input_tokens' => 0,
+                    'cache_read_input_tokens' => 0,
+                    'output_tokens' => 0
+                ]
+            ]
+        ];
+
+        $this->stream_event = null;
+        $this->stream_buffer_in = '';
+        $this->stream_buffer_data = '';
+
+        $stream_callback = function ($chunk) {
+            /*
+            echo $chunk;
+            return strlen($chunk);
+            */
+
+            $this->log($chunk, 'chunk');
+            $this->stream_buffer_in .= $chunk;
+
+            // parse line by line
+            while (($pos = strpos($this->stream_buffer_in, "\n")) !== false) {
+                $line = rtrim(substr($this->stream_buffer_in, 0, $pos), "\r");
+                $this->stream_buffer_in = substr($this->stream_buffer_in, $pos + 1);
+
+                if (strpos($line, 'event: ') === 0) {
+                    $this->stream_event = substr($line, 7);
+                    continue;
+                }
+
+                if (strpos($line, 'data: ') === 0) {
+                    $dataLine = substr($line, 6);
+                    $this->stream_buffer_data =
+                        $this->stream_buffer_data === '' ? $dataLine : $this->stream_buffer_data . "\n" . $dataLine;
+                    continue;
+                }
+
+                if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
+                    $parsed = json_decode($this->stream_buffer_data, true);
+
+                    if (isset($parsed['type']) && $parsed['type'] === 'content_block_delta') {
+                        if (isset($parsed['delta']['text'])) {
+                            $text = $parsed['delta']['text'];
+                            $this->stream_response->result->content[0]->text .= $text;
+
+                            echo 'data: ' .
+                                json_encode([
+                                    'id' => uniqid(),
+                                    'choices' => [['delta' => ['content' => $text]]]
+                                ]) .
+                                "\n\n";
+                            @ob_flush();
+                            @flush();
+                        }
+                    }
+
+                    if (isset($parsed['usage'])) {
+                        $this->stream_response->result->usage->input_tokens += @$parsed['usage']['input_tokens'];
+                        $this->stream_response->result->usage->cache_creation_input_tokens += @$parsed['usage'][
+                            'cache_creation_input_tokens'
+                        ];
+                        $this->stream_response->result->usage->cache_read_input_tokens += @$parsed['usage'][
+                            'cache_read_input_tokens'
+                        ];
+                        $this->stream_response->result->usage->output_tokens += @$parsed['usage']['output_tokens'];
+                    }
+
+                    if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
+                        echo "data: [DONE]\n\n";
+                        @ob_flush();
+                        @flush();
+                    }
+                }
+
+                if ($line === '') {
+                    $this->stream_event = null;
+                    $this->stream_buffer_data = '';
+                    continue;
+                }
+            }
+            return strlen($chunk);
+        };
+        if (!headers_sent()) {
+            header('Content-Type: text/event-stream');
+            header('Cache-Control: no-cache');
+            header('Connection: keep-alive');
+            header('X-Accel-Buffering: no');
+            header('Cache-Control: no-cache, no-transform');
+        }
+        while (ob_get_level() > 0) {
+            @ob_end_clean();
+        }
+        // set php settings
+        @ini_set('zlib.output_compression', '0');
+        @ini_set('output_buffering', '0');
+        @ini_set('implicit_flush', '1');
+        // 2k padding (for browsers)
+        @ob_implicit_flush(true);
+        echo ': pad ' . str_repeat(' ', 2048) . "\n\n";
+        @ob_flush();
+        @flush();
+
+        return $stream_callback;
+    }
 }
 
 class ai_chatgpt extends aihelper
 {
-    public $provider = 'openai';
+    protected $provider = 'openai';
 
-    public $name = 'chatgpt';
+    protected $name = 'chatgpt';
 
-    public $url = 'https://api.openai.com/v1';
+    protected $url = 'https://api.openai.com/v1';
 
-    public $models = [
+    protected $models = [
         [
             'name' => 'gpt-5',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'gpt-5-mini',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'gpt-5-nano',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.00000025, 'input_cached' => 0.00000025, 'output' => 0.00000075],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4.1',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o-mini',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.00000015, 'input_cached' => 0.00000015, 'output' => 0.0000006],
             'default' => false,
             'test' => false
         ]
@@ -378,7 +508,7 @@ class ai_chatgpt extends aihelper
         }
     }
 
-    public function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
+    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
     {
         $return = ['response' => null, 'success' => false, 'content' => [], 'costs' => 0.0];
 
@@ -608,59 +738,59 @@ class ai_chatgpt extends aihelper
 
 class ai_claude extends aihelper
 {
-    public $provider = 'anthropic';
+    protected $provider = 'anthropic';
 
-    public $name = 'claude';
+    protected $name = 'claude';
 
-    public $url = 'https://api.anthropic.com/v1';
+    protected $url = 'https://api.anthropic.com/v1';
 
-    public $models = [
+    protected $models = [
         [
             'name' => 'claude-sonnet-4-5',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'claude-haiku-4-5',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.0000008, 'input_cached' => 0.0000008, 'output' => 0.000004],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'claude-sonnet-4-0',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-1',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.000075],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-0',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.000075],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-3-7-sonnet-latest',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-3-5-haiku-latest',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.0000008, 'input_cached' => 0.0000008, 'output' => 0.000004],
             'default' => false,
             'test' => false
         ]
@@ -708,7 +838,7 @@ class ai_claude extends aihelper
         }
     }
 
-    public function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
+    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
     {
         $return = ['response' => null, 'success' => false, 'content' => [], 'costs' => 0.0];
 
@@ -792,79 +922,8 @@ class ai_claude extends aihelper
                 $args['mcp_servers'][] = $mcp__value;
             }
         }
-
-        $stream_callback = null;
         if ($this->stream === true) {
             $args['stream'] = true;
-            $stream_callback = function ($chunk) {
-                /*
-                echo $chunk;
-                return strlen($chunk);
-                */
-
-                // transform in uniform format
-                $this->log($chunk, 'chunk');
-                $lines = explode("\n", $chunk);
-                foreach ($lines as $line) {
-                    $line = trim($line);
-                    if (strpos($line, 'event: ') === 0) {
-                        $eventType = trim(substr($line, 7));
-                        continue;
-                    }
-                    if (strpos($line, 'data: ') === 0) {
-                        $json = substr($line, 6);
-                        if ($json === '[DONE]') {
-                            echo "data: [DONE]\n\n";
-                            @ob_flush();
-                            @flush();
-                            continue;
-                        }
-                        $parsed = json_decode($json, true);
-                        if (isset($parsed['type']) && $parsed['type'] === 'content_block_delta') {
-                            if (isset($parsed['delta']['text'])) {
-                                $text = $parsed['delta']['text'];
-                                echo 'data: ' .
-                                    json_encode([
-                                        'id' => uniqid(),
-                                        'choices' => [
-                                            [
-                                                'delta' => ['content' => $text]
-                                            ]
-                                        ]
-                                    ]) .
-                                    "\n\n";
-                                @ob_flush();
-                                @flush();
-                            }
-                        }
-                        if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
-                            echo "data: [DONE]\n\n";
-                            @ob_flush();
-                            @flush();
-                        }
-                    }
-                }
-                return strlen($chunk);
-            };
-            if (!headers_sent()) {
-                header('Content-Type: text/event-stream');
-                header('Cache-Control: no-cache');
-                header('Connection: keep-alive');
-                header('X-Accel-Buffering: no');
-                header('Cache-Control: no-cache, no-transform');
-            }
-            while (ob_get_level() > 0) {
-                @ob_end_clean();
-            }
-            // set php settings
-            @ini_set('zlib.output_compression', '0');
-            @ini_set('output_buffering', '0');
-            @ini_set('implicit_flush', '1');
-            // 2k padding (for browsers)
-            @ob_implicit_flush(true);
-            echo ': pad ' . str_repeat(' ', 2048) . "\n\n";
-            @ob_flush();
-            @flush();
         }
 
         $this->log($args, 'ask');
@@ -877,13 +936,12 @@ class ai_claude extends aihelper
                 'anthropic-version' => '2023-06-01',
                 'anthropic-beta' => 'mcp-client-2025-04-04'
             ],
-            stream_callback: $stream_callback
+            stream_callback: $this->getStreamCallback()
         );
-        $this->log(@$response->result, 'response');
         if ($this->stream === true) {
-            $return['success'] = true;
-            return $return;
+            $response = $this->stream_response;
         }
+        $this->log(@$response->result, 'response');
         $this->addCosts($response, $return);
 
         $output_text = '';
@@ -929,10 +987,10 @@ class ai_claude extends aihelper
             }
             return $return;
         }
+
         $return['response'] = $output_text;
         $return['success'] = true;
         $return['content'] = @$response->result->content;
-
         self::$sessions[$this->session_id][] = [
             'role' => 'assistant',
             'content' => $response->result->content
@@ -957,45 +1015,45 @@ class ai_claude extends aihelper
 
 class ai_gemini extends aihelper
 {
-    public $provider = 'google';
+    protected $provider = 'google';
 
-    public $name = 'gemini';
+    protected $name = 'gemini';
 
-    public $url = 'https://generativelanguage.googleapis.com/v1beta';
+    protected $url = 'https://generativelanguage.googleapis.com/v1beta';
 
-    public $models = [
+    protected $models = [
         [
             'name' => 'gemini-2.5-pro',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.0000035, 'input_cached' => 0.0000035, 'output' => 0.00001],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'gemini-2.5-flash',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.00000035, 'input_cached' => 0.00000035, 'output' => 0.00000053],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gemini-2.5-flash-lite',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.0000001, 'input_cached' => 0.0000001, 'output' => 0.0000002],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'gemini-2.0-flash',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.00000035, 'input_cached' => 0.00000035, 'output' => 0.00000053],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gemini-2.0-flash-lite',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.0000001, 'input_cached' => 0.0000001, 'output' => 0.0000002],
             'default' => false,
             'test' => false
         ]
@@ -1043,7 +1101,7 @@ class ai_gemini extends aihelper
         }
     }
 
-    public function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
+    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
     {
         $return = ['response' => null, 'success' => false, 'content' => [], 'costs' => 0.0];
 
@@ -1154,52 +1212,52 @@ class ai_gemini extends aihelper
 /* compatible with the anthropic api */
 class ai_grok extends ai_claude
 {
-    public $provider = 'xai';
+    protected $provider = 'xai';
 
-    public $name = 'grok';
+    protected $name = 'grok';
 
-    public $url = 'https://api.x.ai/v1';
+    protected $url = 'https://api.x.ai/v1';
 
-    public $models = [
+    protected $models = [
         [
             'name' => 'grok-4',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'grok-4-fast-reasoning',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000002, 'input_cached' => 0.000002, 'output' => 0.000006],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'grok-4-fast-non-reasoning',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.0000015, 'input_cached' => 0.0000015, 'output' => 0.0000045],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-code-fast-1',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000001, 'input_cached' => 0.000001, 'output' => 0.000003],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-3',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000006, 'input_cached' => 0.000006, 'output' => 0.000018],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-3-mini',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.000001, 'input_cached' => 0.000001, 'output' => 0.000003],
             'default' => false,
             'test' => false
         ]
@@ -1209,24 +1267,24 @@ class ai_grok extends ai_claude
 /* compatible with the anthropic api */
 class ai_deepseek extends ai_claude
 {
-    public $provider = 'deepseek';
+    protected $provider = 'deepseek';
 
-    public $name = 'deepseek';
+    protected $name = 'deepseek';
 
-    public $url = 'https://api.deepseek.com/anthropic';
+    protected $url = 'https://api.deepseek.com/anthropic';
 
-    public $models = [
+    protected $models = [
         [
             'name' => 'deepseek-chat',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.00000027, 'input_cached' => 0.00000027, 'output' => 0.0000011],
             'default' => true,
             'test' => true
         ],
         [
             'name' => 'deepseek-reasoner',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0005, 'input_cached' => 0.0005, 'output' => 0.0005],
+            'costs' => ['input' => 0.00000055, 'input_cached' => 0.00000055, 'output' => 0.00000219],
             'default' => false,
             'test' => false
         ]

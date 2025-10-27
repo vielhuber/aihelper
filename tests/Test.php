@@ -197,7 +197,7 @@ class Test extends \PHPUnit\Framework\TestCase
         if ($supported === true) {
             $return = $ai->ask('Ich heiße David mit Vornamen. Bitte merk Dir das!');
             //$this->log($return);
-            $ai = aihelper::create($service, $model, 1.0, $api_key, $ai->session_id, 'tests/ai.log');
+            $ai = aihelper::create($service, $model, 1.0, $api_key, $ai->getSessionId(), 'tests/ai.log');
             $return = $ai->ask('Wie heiße ich mit Vornamen?');
             //$this->log($return);
             $success_this =
@@ -302,6 +302,26 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->log(($success_this ? '✅' : '⛔') . ' #8 (image+pdf)');
         }
 
+        $supported = in_array($service, ['claude']);
+        if ($supported === true) {
+            $ai_stream = aihelper::create($service, $model, 1.0, $api_key, null, 'tests/ai.log', null, null, true);
+            $return = $ai_stream->ask('Wer wurde 2018 Fußball-Weltmeister? Antworte bitte kurz.');
+            //$this->log($return);
+            $success_this =
+                $return['success'] &&
+                count($return['content']) > 0 &&
+                (stripos($return['response'], 'Frankreich') !== false ||
+                    stripos($return['response'], 'französisch') !== false);
+            if ($success_this) {
+                $success_count++;
+            } else {
+                $fail_count++;
+            }
+            $costs += $return['costs'];
+            $this->log(($success_this ? '✅' : '⛔') . ' #1 (stream)');
+            $ai_stream->cleanup();
+        }
+
         $supported = in_array($service, ['chatgpt', 'claude']);
         if ($supported === true) {
             $return = __::curl(
@@ -322,9 +342,9 @@ class Test extends \PHPUnit\Framework\TestCase
                     'authorization_token' => $return->result->access_token
                 ];
             }
-            $ai = aihelper::create($service, $model, 1.0, $api_key, null, 'tests/ai.log', 1, $mcp_servers);
+            $ai_mcp = aihelper::create($service, $model, 1.0, $api_key, null, 'tests/ai.log', 1, $mcp_servers);
 
-            $return = $ai->ask('
+            $return = $ai_mcp->ask('
                 Was ist das Gegenteil von "hell"?
                 Antworte bitte kurz.
             ');
@@ -338,7 +358,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #9 (mcp1)');
 
-            $return = $ai->ask('
+            $return = $ai_mcp->ask('
                 Welche Dateien befinden sich auf meinem PC im Ordner:
                 /var/www/aihelper?
                 Nutze Tools!
@@ -355,7 +375,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #9 (mcp2)');
 
-            $return = $ai->ask('
+            $return = $ai_mcp->ask('
                 Gibt es mehr als 1000 Kunden in der Datenbank?
                 Schau in die Datenbanktabelle "customer".
                 Nutze Tools!
@@ -369,6 +389,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #9 (mcp3)');
+            $ai_mcp->cleanup();
         }
 
         $ai->cleanup();
