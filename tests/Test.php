@@ -138,7 +138,8 @@ class Test extends \PHPUnit\Framework\TestCase
         $supported = true;
         if ($supported === true) {
             $return = $ai->ask('Wer wurde 2018 Fußball-Weltmeister? Antworte bitte kurz.');
-            //$this->log($return);
+            $this->log($return);
+            die('OK');
             $success_this =
                 $return['success'] &&
                 count($return['content']) > 0 &&

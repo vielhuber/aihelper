@@ -277,13 +277,115 @@ abstract class aihelper
             return null;
         }
 
-        // mimic non stream result
-        $this->stream_response = (object) [
-            'result' => (object) [
-                'content' => [
-                    (object) [
-                        'type' => 'text',
-                        'text' => ''
+        $this->stream_event = null;
+        $this->stream_buffer_in = '';
+        $this->stream_buffer_data = '';
+
+        if ($this->provider === 'anthropic') {
+            // mimic non stream result
+            $this->stream_response = (object) [
+                'result' => (object) [
+                    'content' => [
+                        (object) [
+                            'type' => 'text',
+                            'text' => ''
+                        ]
+                    ],
+                    'usage' => (object) [
+                        'input_tokens' => 0,
+                        'cache_creation_input_tokens' => 0,
+                        'cache_read_input_tokens' => 0,
+                        'output_tokens' => 0
+                    ]
+                ]
+            ];
+
+            $stream_callback = function ($chunk) {
+                /*
+                echo $chunk;
+                return strlen($chunk);
+                */
+
+                $this->log($chunk, 'chunk');
+                $this->stream_buffer_in .= $chunk;
+
+                // parse line by line
+                while (($pos = strpos($this->stream_buffer_in, "\n")) !== false) {
+                    $line = rtrim(substr($this->stream_buffer_in, 0, $pos), "\r");
+                    $this->stream_buffer_in = substr($this->stream_buffer_in, $pos + 1);
+
+                    if (strpos($line, 'event: ') === 0) {
+                        $this->stream_event = substr($line, 7);
+                        continue;
+                    }
+
+                    if (strpos($line, 'data: ') === 0) {
+                        $dataLine = substr($line, 6);
+                        $this->stream_buffer_data =
+                            $this->stream_buffer_data === '' ? $dataLine : $this->stream_buffer_data . "\n" . $dataLine;
+                        continue;
+                    }
+
+                    if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
+                        $parsed = json_decode($this->stream_buffer_data, true);
+
+                        if (isset($parsed['type']) && $parsed['type'] === 'content_block_delta') {
+                            if (isset($parsed['delta']['text'])) {
+                                $text = $parsed['delta']['text'];
+                                $this->stream_response->result->content[0]->text .= $text;
+
+                                echo 'data: ' .
+                                    json_encode([
+                                        'id' => uniqid(),
+                                        'choices' => [['delta' => ['content' => $text]]]
+                                    ]) .
+                                    "\n\n";
+                                @ob_flush();
+                                @flush();
+                            }
+                        }
+
+                        if (isset($parsed['usage'])) {
+                            $this->stream_response->result->usage->input_tokens += @$parsed['usage']['input_tokens'];
+                            $this->stream_response->result->usage->cache_creation_input_tokens += @$parsed['usage'][
+                                'cache_creation_input_tokens'
+                            ];
+                            $this->stream_response->result->usage->cache_read_input_tokens += @$parsed['usage'][
+                                'cache_read_input_tokens'
+                            ];
+                            $this->stream_response->result->usage->output_tokens += @$parsed['usage']['output_tokens'];
+                        }
+
+                        if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
+                            echo "data: [DONE]\n\n";
+                            @ob_flush();
+                            @flush();
+                        }
+                    }
+
+                    if ($line === '') {
+                        $this->stream_event = null;
+                        $this->stream_buffer_data = '';
+                        continue;
+                    }
+                }
+                return strlen($chunk);
+            };
+        }
+
+        if ($this->provider === 'openai') {
+            // mimic non stream result
+            $this->stream_response = (object) [
+                'result' => (object) [
+                    'output' => [
+                        (object) [
+                            'type' => 'text',
+                            'content' => [
+                                (object) [
+                                    'text' => ''
+                                ]
+                            ]
+                        ]
                     ]
                 ],
                 'usage' => (object) [
@@ -292,84 +394,15 @@ abstract class aihelper
                     'cache_read_input_tokens' => 0,
                     'output_tokens' => 0
                 ]
-            ]
-        ];
+            ];
 
-        $this->stream_event = null;
-        $this->stream_buffer_in = '';
-        $this->stream_buffer_data = '';
+            $stream_callback = function ($chunk) {
+                $this->log($chunk, 'chunk');
+                echo $chunk;
+                return strlen($chunk);
+            };
+        }
 
-        $stream_callback = function ($chunk) {
-            /*
-            echo $chunk;
-            return strlen($chunk);
-            */
-
-            $this->log($chunk, 'chunk');
-            $this->stream_buffer_in .= $chunk;
-
-            // parse line by line
-            while (($pos = strpos($this->stream_buffer_in, "\n")) !== false) {
-                $line = rtrim(substr($this->stream_buffer_in, 0, $pos), "\r");
-                $this->stream_buffer_in = substr($this->stream_buffer_in, $pos + 1);
-
-                if (strpos($line, 'event: ') === 0) {
-                    $this->stream_event = substr($line, 7);
-                    continue;
-                }
-
-                if (strpos($line, 'data: ') === 0) {
-                    $dataLine = substr($line, 6);
-                    $this->stream_buffer_data =
-                        $this->stream_buffer_data === '' ? $dataLine : $this->stream_buffer_data . "\n" . $dataLine;
-                    continue;
-                }
-
-                if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
-                    $parsed = json_decode($this->stream_buffer_data, true);
-
-                    if (isset($parsed['type']) && $parsed['type'] === 'content_block_delta') {
-                        if (isset($parsed['delta']['text'])) {
-                            $text = $parsed['delta']['text'];
-                            $this->stream_response->result->content[0]->text .= $text;
-
-                            echo 'data: ' .
-                                json_encode([
-                                    'id' => uniqid(),
-                                    'choices' => [['delta' => ['content' => $text]]]
-                                ]) .
-                                "\n\n";
-                            @ob_flush();
-                            @flush();
-                        }
-                    }
-
-                    if (isset($parsed['usage'])) {
-                        $this->stream_response->result->usage->input_tokens += @$parsed['usage']['input_tokens'];
-                        $this->stream_response->result->usage->cache_creation_input_tokens += @$parsed['usage'][
-                            'cache_creation_input_tokens'
-                        ];
-                        $this->stream_response->result->usage->cache_read_input_tokens += @$parsed['usage'][
-                            'cache_read_input_tokens'
-                        ];
-                        $this->stream_response->result->usage->output_tokens += @$parsed['usage']['output_tokens'];
-                    }
-
-                    if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
-                        echo "data: [DONE]\n\n";
-                        @ob_flush();
-                        @flush();
-                    }
-                }
-
-                if ($line === '') {
-                    $this->stream_event = null;
-                    $this->stream_buffer_data = '';
-                    continue;
-                }
-            }
-            return strlen($chunk);
-        };
         if (!headers_sent()) {
             header('Content-Type: text/event-stream');
             header('Cache-Control: no-cache');
@@ -648,16 +681,33 @@ class ai_chatgpt extends aihelper
                 $args['tools'][] = $mcp__value;
             }
         }
+        if ($this->stream === true) {
+            $args['stream'] = true;
+        }
 
         $this->log($args, 'ask');
-        $response = __::curl($this->url . '/responses', $args, 'POST', [
-            'Authorization' => 'Bearer ' . $this->api_key
-        ]);
+        $response = __::curl(
+            url: $this->url . '/responses',
+            data: $args,
+            method: 'POST',
+            headers: [
+                'Authorization' => 'Bearer ' . $this->api_key
+            ],
+            stream_callback: $this->getStreamCallback()
+        );
+        if ($this->stream === true) {
+            $response = $this->stream_response;
+        }
         $this->log(@$response->result->output, 'response');
         $this->addCosts($response, $return);
 
         $output_text = '';
-        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->output)) {
+        if (
+            __::x(@$response) &&
+            __::x(@$response->result) &&
+            __::x(@$response->result->id) &&
+            __::x(@$response->result->output)
+        ) {
             $this->cleanup_data[] = ['type' => 'response', 'id' => $response->result->id];
             foreach ($response->result->output as $output__value) {
                 if (__::x(@$output__value->type) && $output__value->type === 'message') {

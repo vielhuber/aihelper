@@ -5,8 +5,9 @@
         <title>stream test</title>
         <script>
             window.addEventListener('load', e => {
-                let prompt = 'Erzähle einen Witz über Computer.',
-                    url = 'stream.php?prompt=' + encodeURIComponent(prompt),
+                let model = 'chatgpt',
+                    prompt = 'Erzähle einen Witz über Computer.',
+                    url = 'stream.php?model=' + model + '&prompt=' + encodeURIComponent(prompt),
                     source = new EventSource(url),
                     content = '',
                     $container = document.querySelector('.container'),
