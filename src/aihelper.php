@@ -377,28 +377,99 @@ abstract class aihelper
             // mimic non stream result
             $this->stream_response = (object) [
                 'result' => (object) [
+                    'id' => null,
                     'output' => [
                         (object) [
-                            'type' => 'text',
+                            'type' => 'message',
                             'content' => [
                                 (object) [
+                                    'type' => 'output_text',
                                     'text' => ''
                                 ]
                             ]
                         ]
+                    ],
+                    'usage' => (object) [
+                        'input_tokens' => 0,
+                        'cache_creation_input_tokens' => 0,
+                        'cache_read_input_tokens' => 0,
+                        'output_tokens' => 0
                     ]
-                ],
-                'usage' => (object) [
-                    'input_tokens' => 0,
-                    'cache_creation_input_tokens' => 0,
-                    'cache_read_input_tokens' => 0,
-                    'output_tokens' => 0
                 ]
             ];
 
             $stream_callback = function ($chunk) {
-                $this->log($chunk, 'chunk');
+                /*
                 echo $chunk;
+                return strlen($chunk);
+                */
+
+                $this->log($chunk, 'chunk');
+                $this->stream_buffer_in .= $chunk;
+
+                // parse line by line
+                while (($pos = strpos($this->stream_buffer_in, "\n")) !== false) {
+                    $line = rtrim(substr($this->stream_buffer_in, 0, $pos), "\r");
+                    $this->stream_buffer_in = substr($this->stream_buffer_in, $pos + 1);
+
+                    if (strpos($line, 'event: ') === 0) {
+                        $this->stream_event = substr($line, 7);
+                        continue;
+                    }
+
+                    if (strpos($line, 'data: ') === 0) {
+                        $dataLine = substr($line, 6);
+                        $this->stream_buffer_data =
+                            $this->stream_buffer_data === '' ? $dataLine : $this->stream_buffer_data . "\n" . $dataLine;
+                        continue;
+                    }
+
+                    if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
+                        $parsed = json_decode($this->stream_buffer_data, true);
+
+                        if (isset($parsed['type']) && $parsed['type'] === 'response.output_text.delta') {
+                            if (isset($parsed['delta'])) {
+                                $text = $parsed['delta'];
+                                $this->stream_response->result->output[0]->content[0]->text .= $text;
+
+                                echo 'data: ' .
+                                    json_encode([
+                                        'id' => uniqid(),
+                                        'choices' => [['delta' => ['content' => $text]]]
+                                    ]) .
+                                    "\n\n";
+                                @ob_flush();
+                                @flush();
+                            }
+                        }
+
+                        if (isset($parsed['response']) && isset($parsed['response']['usage'])) {
+                            $this->stream_response->result->usage->input_tokens += @$parsed['response']['usage'][
+                                'input_tokens'
+                            ];
+                            $this->stream_response->result->usage->cache_creation_input_tokens += @$parsed['response'][
+                                'usage'
+                            ]['input_tokens_details']['cached_tokens'];
+                            $this->stream_response->result->usage->cache_read_input_tokens += 0;
+                            $this->stream_response->result->usage->output_tokens += @$parsed['response']['usage'][
+                                'output_tokens'
+                            ];
+                        }
+
+                        if (isset($parsed['type']) && $parsed['type'] === 'response.completed') {
+                            $this->stream_response->result->id = @$parsed['response']['id'];
+                            echo "data: [DONE]\n\n";
+                            @ob_flush();
+                            @flush();
+                        }
+                    }
+
+                    if ($line === '') {
+                        $this->stream_event = null;
+                        $this->stream_buffer_data = '';
+                        continue;
+                    }
+                }
                 return strlen($chunk);
             };
         }
@@ -698,7 +769,7 @@ class ai_chatgpt extends aihelper
         if ($this->stream === true) {
             $response = $this->stream_response;
         }
-        $this->log(@$response->result->output, 'response');
+        $this->log(@$response->result, 'response');
         $this->addCosts($response, $return);
 
         $output_text = '';
@@ -1207,7 +1278,7 @@ class ai_gemini extends aihelper
             'POST',
             null
         );
-        $this->log(@$response->result->candidates, 'response');
+        $this->log(@$response->result, 'response');
         $this->addCosts($response, $return);
 
         $output_text = '';

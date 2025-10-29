@@ -5,41 +5,80 @@
         <title>stream test</title>
         <script>
             window.addEventListener('load', e => {
-                let model = 'chatgpt',
-                    prompt = 'Erzähle einen Witz über Computer.',
-                    url = 'stream.php?model=' + model + '&prompt=' + encodeURIComponent(prompt),
-                    source = new EventSource(url),
-                    content = '',
-                    $container = document.querySelector('.container'),
-                    curIndex = 0,
-                    typing = () => {
-                        let speed = 100;
-                        if (curIndex < content.length) {
-                            speed = Math.max(1, Math.round(1000 / (content.length - curIndex)));
-                            $container.textContent += content.charAt(curIndex);
-                            curIndex++;
-                        }
-                        setTimeout(typing, speed);
-                    };
-                source.onmessage = event => {
-                    if (event.data === '[DONE]') {
-                        source.close();
-                        return;
-                    }
-                    let data = JSON.parse(event.data);
-                    if (data.id && data.choices && data.choices.length > 0 && data.choices[0].delta.content) {
-                        content += data.choices[0].delta.content;
-                    }
-                };
-                source.onerror = error => {
-                    console.error('Error:', error);
-                    source.close();
-                };
-                typing();
+                if (document.querySelector('.container') !== null) {
+                    document.querySelectorAll('.container').forEach($container => {
+                        let prompt = 'Erzähle einen Witz mit ca. 100 Zeichen über das Thema "Computer".',
+                            url =
+                                'stream.php?prompt=' +
+                                encodeURIComponent(prompt) +
+                                '&service=' +
+                                $container.getAttribute('data-service') +
+                                '&model=' +
+                                $container.getAttribute('data-model') +
+                                '&api_key=' +
+                                $container.getAttribute('data-api-key') +
+                                '&log=' +
+                                $container.getAttribute('data-log'),
+                            source = new EventSource(url),
+                            content = '',
+                            curIndex = 0,
+                            started = false,
+                            typing = () => {
+                                let speed = 100;
+                                if (content === '') {
+                                    if ($container.textContent.length >= 3) {
+                                        $container.textContent = '';
+                                    }
+                                    $container.textContent += '.';
+                                } else {
+                                    if (started === false) {
+                                        started = true;
+                                        $container.textContent = '';
+                                    }
+                                    if (curIndex < content.length) {
+                                        speed = Math.max(1, Math.round(1000 / (content.length - curIndex)));
+                                        $container.textContent += content.charAt(curIndex);
+                                        curIndex++;
+                                    }
+                                }
+                                setTimeout(typing, speed);
+                            };
+                        source.onmessage = event => {
+                            if (event.data === '[DONE]') {
+                                source.close();
+                                return;
+                            }
+                            let data = JSON.parse(event.data);
+                            if (data.id && data.choices && data.choices.length > 0 && data.choices[0].delta.content) {
+                                content += data.choices[0].delta.content;
+                            }
+                        };
+                        source.onerror = error => {
+                            console.error('Error:', error);
+                            source.close();
+                        };
+                        typing();
+                    });
+                }
             });
         </script>
     </head>
     <body>
-        <div class="container"></div>
+        <h2>claude-haiku-4-5</h2>
+        <div
+            class="container"
+            data-service="claude"
+            data-model="claude-haiku-4-5"
+            data-api-key="CLAUDE_API_KEY"
+            data-log="stream-claude.log"
+        ></div>
+        <h2>gpt-5-mini</h2>
+        <div
+            class="container"
+            data-service="chatgpt"
+            data-model="gpt-5-mini"
+            data-api-key="OPENAI_API_KEY"
+            data-log="stream-chatgpt.log"
+        ></div>
     </body>
 </html>
