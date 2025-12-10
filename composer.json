@@ -3,7 +3,7 @@
     "description": "Consistent interface for multiple ai providers.",
     "require": {
         "php": ">=7.1",
-        "vielhuber/stringhelper": "^6.8"
+        "vielhuber/stringhelper": "*"
     },
     "license": "MIT",
     "require-dev": {
