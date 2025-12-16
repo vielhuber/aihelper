@@ -20,7 +20,7 @@ $ai = aihelper::create(
     api_key: '**API Key**',
     session_id: null, // submit session to continue a conversation (see $ai->getSessionId())
     log: 'output.log',
-    max_tries = 3,
+    max_tries: 3,
     mcp_servers: [
         [
             'name' => 'example-mcp',
