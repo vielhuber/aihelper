@@ -52,6 +52,8 @@ $ai->cleanup_all(); // (remotely) deletes all data
 
 ### streaming
 
+aihelper can stream model output to a browser using server‑sent events (see). in this mode the php backend connects to the model provider with http streaming and forwards chunks to the client as sse events in real time. see an example implementation at [/tests/stream/index.html](tests/stream/index.html).
+
 ```php
 $ai = aihelper::create(
     /* ... */
@@ -65,8 +67,6 @@ $ai->ask('Wer wurde 2018 Fußball-Weltmeister?');
 /* ... */
 // ['response' => 'Frankreich.', 'success' => true, 'content' => [...], 'costs' => 0.001]
 ```
-
-aihelper can stream model output to a browser using server‑sent events (see). in this mode the php backend connects to the model provider with http streaming and forwards chunks to the client as sse events in real time. see an example implementation at [/tests/stream/index.html](tests/stream/index.html).
 
 if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled for the streaming route and also adjust your virtualhost so fastcgi forwards packets immediately (no buffering):
 
