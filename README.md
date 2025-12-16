@@ -18,7 +18,7 @@ $ai = aihelper::create(
     model: 'gpt-5', // gpt-5|gemini-2.5-pro|claude-opus-4-1|grok-4|deepseek-chat|...
     temperature: 1.0, // controls the randomness of the text generated
     api_key: '**API Key**',
-    session_id: null, // submit session to continue a conversation (see $ai->getSessionId())
+    session_id: null, // submit session to continue a conversation (see also $ai->getSessionId())
     log: 'output.log',
     max_tries: 3,
     mcp_servers: [
