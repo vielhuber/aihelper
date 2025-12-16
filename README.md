@@ -70,10 +70,35 @@ aihelper can stream model output to a browser using server‑sent events (see). 
 
 if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled for the streaming route and also adjust your virtualhost so fastcgi forwards packets immediately (no buffering):
 
+**before**
+
 ```conf
-<Proxy "fcgi://localhost-stream/" enablereuse=on flushpackets=on>
-</Proxy>
-<LocationMatch "stream\.php$">
-  SetHandler "proxy:unix:/var/run/php/phpX.X-fpm.sock|fcgi://localhost-stream/"
-</LocationMatch>
+<VirtualHost ...>
+  ...
+  <FilesMatch \.php$>
+    SetHandler "proxy:unix:/var/run/php/php8.3-fpm.sock|fcgi://localhost/"
+  </FilesMatch>
+  ...
+</VirtualHost>
+```
+
+**after**
+
+```conf
+<VirtualHost ...>
+  ...
+  <Proxy "fcgi://localhost-stream/" enablereuse=on flushpackets=on>
+  </Proxy>
+  <FilesMatch \.php$>
+    <If "%{HTTP:Accept} -strmatch '*text/event-stream*'">
+      SetHandler "proxy:unix:/var/run/php/php8.3-fpm.sock|fcgi://localhost-stream/"
+      SetEnv no-gzip 1
+      RequestHeader unset Accept-Encoding
+    </If>
+    <Else>
+      SetHandler "proxy:unix:/var/run/php/php8.3-fpm.sock|fcgi://localhost/"
+    </Else>
+  </FilesMatch>
+  ...
+</VirtualHost>
 ```
