@@ -5,13 +5,13 @@ if (file_exists(__DIR__ . '/../../.env')) {
     $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/../../');
     $dotenv->load();
 }
-if (!isset($_GET['service']) || !isset($_GET['model']) || !isset($_GET['api_key']) || !isset($_GET['log'])) {
+if (!isset($_GET['provider']) || !isset($_GET['model']) || !isset($_GET['api_key']) || !isset($_GET['log'])) {
     die();
 }
 
 @unlink($_GET['log']);
 $ai = aihelper::create(
-    service: $_GET['service'],
+    provider: $_GET['provider'],
     model: $_GET['model'],
     temperature: 1.0,
     api_key: $_SERVER[$_GET['api_key']],

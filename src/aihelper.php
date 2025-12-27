@@ -5,10 +5,11 @@ use vielhuber\stringhelper\__;
 
 abstract class aihelper
 {
-    protected $provider = null;
-    protected $name = null;
+    public $provider = null;
+    public $title = null;
+    public $name = null;
     protected $url = null;
-    protected $models = [];
+    public $models = [];
 
     protected $model = null;
     protected $temperature = null;
@@ -27,7 +28,7 @@ abstract class aihelper
     protected static $sessions = [];
 
     public static function create(
-        $service,
+        $provider,
         $model = null,
         $temperature = null,
         $api_key = null,
@@ -38,7 +39,7 @@ abstract class aihelper
         $history = null,
         $stream = null
     ) {
-        if ($service === 'chatgpt') {
+        if ($provider === 'chatgpt') {
             return new ai_chatgpt(
                 $model,
                 $temperature,
@@ -51,7 +52,7 @@ abstract class aihelper
                 $stream
             );
         }
-        if ($service === 'claude') {
+        if ($provider === 'claude') {
             return new ai_claude(
                 $model,
                 $temperature,
@@ -64,7 +65,7 @@ abstract class aihelper
                 $stream
             );
         }
-        if ($service === 'gemini') {
+        if ($provider === 'gemini') {
             return new ai_gemini(
                 $model,
                 $temperature,
@@ -77,7 +78,7 @@ abstract class aihelper
                 $stream
             );
         }
-        if ($service === 'grok') {
+        if ($provider === 'grok') {
             return new ai_grok(
                 $model,
                 $temperature,
@@ -90,7 +91,7 @@ abstract class aihelper
                 $stream
             );
         }
-        if ($service === 'deepseek') {
+        if ($provider === 'deepseek') {
             return new ai_deepseek(
                 $model,
                 $temperature,
@@ -106,10 +107,37 @@ abstract class aihelper
         return null;
     }
 
+    public static function getProviders()
+    {
+        $data = [];
+        foreach (
+            [new ai_claude(), new ai_gemini(), new ai_chatgpt(), new ai_grok(), new ai_deepseek()]
+            as $providers__value
+        ) {
+            $data[] = [
+                'provider' => $providers__value->provider,
+                'title' => $providers__value->title,
+                'name' => $providers__value->name,
+                'models' => $providers__value->models
+            ];
+        }
+        return $data;
+    }
+
+    protected function getDefaultModel()
+    {
+        foreach ($this->models as $models__value) {
+            if ($models__value['default'] === true) {
+                return $models__value['name'];
+            }
+        }
+        return null;
+    }
+
     public function __construct(
-        $model,
-        $temperature,
-        $api_key,
+        $model = null,
+        $temperature = null,
+        $api_key = null,
         $log = null,
         $max_tries = null,
         $mcp_servers = null,
@@ -246,16 +274,6 @@ abstract class aihelper
         );
     }
 
-    public function getDefaultModel()
-    {
-        foreach ($this->models as $models__value) {
-            if ($models__value['default'] === true) {
-                return $models__value['name'];
-            }
-        }
-        return null;
-    }
-
     protected function getMaxTokensForModel()
     {
         foreach ($this->models as $models__value) {
@@ -356,7 +374,7 @@ abstract class aihelper
         $this->stream_buffer_in = '';
         $this->stream_buffer_data = '';
 
-        if ($this->provider === 'anthropic') {
+        if ($this->name === 'claude') {
             // mimic non stream result
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -452,7 +470,7 @@ abstract class aihelper
             };
         }
 
-        if ($this->provider === 'openai') {
+        if ($this->name === 'chatgpt') {
             // mimic non stream result
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -586,13 +604,15 @@ abstract class aihelper
 
 class ai_chatgpt extends aihelper
 {
-    protected $provider = 'openai';
+    public $provider = 'OpenAI';
 
-    protected $name = 'chatgpt';
+    public $title = 'ChatGPT';
+
+    public $name = 'chatgpt';
 
     protected $url = 'https://api.openai.com/v1';
 
-    protected $models = [
+    public $models = [
         [
             'name' => 'gpt-5',
             'max_tokens' => 8192,
@@ -819,13 +839,15 @@ class ai_chatgpt extends aihelper
 
 class ai_claude extends aihelper
 {
-    protected $provider = 'anthropic';
+    public $provider = 'Anthropic';
 
-    protected $name = 'claude';
+    public $title = 'Claude';
+
+    public $name = 'claude';
 
     protected $url = 'https://api.anthropic.com/v1';
 
-    protected $models = [
+    public $models = [
         [
             'name' => 'claude-sonnet-4-5',
             'max_tokens' => 8192,
@@ -1046,13 +1068,15 @@ class ai_claude extends aihelper
 
 class ai_gemini extends aihelper
 {
-    protected $provider = 'google';
+    public $provider = 'Google';
 
-    protected $name = 'gemini';
+    public $title = 'Gemini';
+
+    public $name = 'gemini';
 
     protected $url = 'https://generativelanguage.googleapis.com/v1beta';
 
-    protected $models = [
+    public $models = [
         [
             'name' => 'gemini-2.5-pro',
             'max_tokens' => 8192,
@@ -1191,13 +1215,15 @@ class ai_gemini extends aihelper
 /* compatible with the anthropic api */
 class ai_grok extends ai_claude
 {
-    protected $provider = 'xai';
+    public $provider = 'xAI';
 
-    protected $name = 'grok';
+    public $title = 'Grok';
+
+    public $name = 'grok';
 
     protected $url = 'https://api.x.ai/v1';
 
-    protected $models = [
+    public $models = [
         [
             'name' => 'grok-4',
             'max_tokens' => 8192,
@@ -1246,13 +1272,15 @@ class ai_grok extends ai_claude
 /* compatible with the anthropic api */
 class ai_deepseek extends ai_claude
 {
-    protected $provider = 'deepseek';
+    public $provider = 'DeepSeek';
 
-    protected $name = 'deepseek';
+    public $title = 'DeepSeek';
+
+    public $name = 'deepseek';
 
     protected $url = 'https://api.deepseek.com/anthropic';
 
-    protected $models = [
+    public $models = [
         [
             'name' => 'deepseek-chat',
             'max_tokens' => 8192,

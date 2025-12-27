@@ -11,8 +11,8 @@
                             url =
                                 'stream.php?prompt=' +
                                 encodeURIComponent(prompt) +
-                                '&service=' +
-                                $container.getAttribute('data-service') +
+                                '&provider=' +
+                                $container.getAttribute('data-provider') +
                                 '&model=' +
                                 $container.getAttribute('data-model') +
                                 '&api_key=' +
@@ -67,7 +67,7 @@
         <h2>claude-haiku-4-5</h2>
         <div
             class="container"
-            data-service="claude"
+            data-provider="claude"
             data-model="claude-haiku-4-5"
             data-api-key="CLAUDE_API_KEY"
             data-log="stream-claude.log"
@@ -75,7 +75,7 @@
         <h2>gpt-5-mini</h2>
         <div
             class="container"
-            data-service="chatgpt"
+            data-provider="chatgpt"
             data-model="gpt-5-mini"
             data-api-key="OPENAI_API_KEY"
             data-log="stream-chatgpt.log"

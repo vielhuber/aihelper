@@ -104,20 +104,20 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('deepseek', @$_SERVER['DEEPSEEK_API_KEY'], $stats);
     }
 
-    function ai_test_prepare($service, $api_key, &$stats = [])
+    function ai_test_prepare($provider, $api_key, &$stats = [])
     {
-        $models = aihelper::create(service: $service)->getTestModels();
+        $models = aihelper::create(provider: $provider)->getTestModels();
         foreach ($models as $models__value) {
             __::log_begin('ai');
-            [$costs, $success_count, $fail_count] = $this->ai_test($service, $models__value, $api_key);
+            [$costs, $success_count, $fail_count] = $this->ai_test($provider, $models__value, $api_key);
             $time = __::log_end('ai', false)['time'];
-            if (!isset($stats[$service])) {
-                $stats[$service] = [];
+            if (!isset($stats[$provider])) {
+                $stats[$provider] = [];
             }
-            if (!isset($stats[$service][$models__value])) {
-                $stats[$service][$models__value] = [];
+            if (!isset($stats[$provider][$models__value])) {
+                $stats[$provider][$models__value] = [];
             }
-            $stats[$service][$models__value][] = [
+            $stats[$provider][$models__value][] = [
                 'time' => $time,
                 'costs' => $costs,
                 'fail_count' => $fail_count,
@@ -126,12 +126,12 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function ai_test($service, $model, $api_key)
+    function ai_test($provider, $model, $api_key)
     {
-        $this->log('Testing ' . $service . ' (' . $model . ')...');
+        $this->log('Testing ' . $provider . ' (' . $model . ')...');
 
         $ai = aihelper::create(
-            service: $service,
+            provider: $provider,
             model: $model,
             temperature: 1.0,
             api_key: $api_key,
@@ -215,7 +215,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $return = $ai->ask('Ich heiße David mit Vornamen. Bitte merk Dir das!');
             //$this->log($return);
             $ai = aihelper::create(
-                service: $service,
+                provider: $provider,
                 model: $model,
                 temperature: 1.0,
                 api_key: $api_key,
@@ -241,7 +241,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $supported = true;
         if ($supported === true) {
             $ai = aihelper::create(
-                service: $service,
+                provider: $provider,
                 model: $model,
                 temperature: 1.0,
                 api_key: $api_key,
@@ -264,7 +264,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($service, ['claude', 'gemini', 'chatgpt', 'grok']);
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok']);
         if ($supported === true) {
             $return = $ai->ask('Was ist auf dem Bild zu sehen?', 'tests/assets/iptc_write.jpg');
 
@@ -288,7 +288,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($service, ['claude', 'gemini', 'chatgpt', 'grok']);
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok']);
         if ($supported === true) {
             $return = $ai->ask('Welches Bild habe ich im Gesprächsverlauf hochgeladen?');
 
@@ -312,7 +312,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($service, ['claude', 'gemini', 'chatgpt']);
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt']);
         if ($supported === true) {
             $return = $ai->ask(
                 'Wie lautet die Kundennummer (Key: customer_nr)? Wann wurde der Brief verfasst (Key: date)? Von wem wurde der Brief verfasst (Key: author)? Bitte antworte nur im JSON-Format. Wenn Du unsicher bist, gib den wahrscheinlichsten Wert zurück. Wenn Du einen Wert gar nicht findest, gib einen leeren String zurück.',
@@ -337,7 +337,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($service, ['claude', 'gemini', 'chatgpt']);
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt']);
         if ($supported === true) {
             $return = $ai->ask(
                 'Wie lautet die Kundennummer (Key: customer_nr)? Wie lautet die Zählernummer (Key: meter_number)? Welche Blume ist auf dem Bild zu sehen (Key: flower)? Bitte antworte nur im JSON-Format. Wenn Du unsicher bist, gib den wahrscheinlichsten Wert zurück. Wenn Du einen Wert gar nicht findest, gib einen leeren String zurück.',
@@ -380,10 +380,10 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($service, ['claude']);
+        $supported = in_array($provider, ['claude']);
         if ($supported === true) {
             $ai_stream = aihelper::create(
-                service: $service,
+                provider: $provider,
                 model: $model,
                 temperature: 1.0,
                 api_key: $api_key,
@@ -413,7 +413,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
 
         if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
-            $supported = in_array($service, ['claude', 'chatgpt']);
+            $supported = in_array($provider, ['claude', 'chatgpt']);
             if ($supported === true) {
                 $return = __::curl(
                     @$_SERVER['MCP_SERVER_TEST_AUTH_TOKEN_URL'],
@@ -434,7 +434,7 @@ class Test extends \PHPUnit\Framework\TestCase
                     ];
                 }
                 $ai_mcp = aihelper::create(
-                    service: $service,
+                    provider: $provider,
                     model: $model,
                     temperature: 1.0,
                     api_key: $api_key,

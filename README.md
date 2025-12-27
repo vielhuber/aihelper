@@ -16,7 +16,7 @@ composer require vielhuber/aihelper
 use vielhuber\aihelper\aihelper;
 
 $ai = aihelper::create(
-    service: 'claude', // claude|gemini|chatgpt|grok|deepseek
+    provider: 'claude', // claude|gemini|chatgpt|grok|deepseek
     model: 'claude-opus-4-1', // claude-opus-4-1|gemini-2.5-pro|gpt-5|grok-4|deepseek-chat|...
     temperature: 1.0, // controls the randomness of the text generated
     api_key: '**API Key**',
