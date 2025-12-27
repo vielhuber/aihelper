@@ -220,7 +220,7 @@ abstract class aihelper
                 ' - ' .
                 $this->model .
                 ' - ' .
-                \DateTime::createFromFormat('U.u', microtime(true))->format('Y-m-d H:i:s.u') .
+                \DateTime::createFromFormat('U.u', sprintf('%.6F', microtime(true)))->format('Y-m-d H:i:s.u') .
                 ($prefix !== null ? ' - ' . $prefix : '') .
                 ' ' .
                 'ℹ️' .
