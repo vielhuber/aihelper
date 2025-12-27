@@ -26,57 +26,131 @@ abstract class aihelper
     protected $session_id = null;
     protected static $sessions = [];
 
-    protected $conversation_id = null;
-    protected $cleanup_data = [];
-
     public static function create(
         $service,
         $model = null,
         $temperature = null,
         $api_key = null,
-        $session_id = null,
         $log = null,
         $max_tries = null,
         $mcp_servers = null,
+        $session_id = null,
+        $history = null,
         $stream = null
     ) {
         if ($service === 'chatgpt') {
-            return new ai_chatgpt($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers, $stream);
+            return new ai_chatgpt(
+                $model,
+                $temperature,
+                $api_key,
+                $log,
+                $max_tries,
+                $mcp_servers,
+                $session_id,
+                $history,
+                $stream
+            );
         }
         if ($service === 'claude') {
-            return new ai_claude($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers, $stream);
+            return new ai_claude(
+                $model,
+                $temperature,
+                $api_key,
+                $log,
+                $max_tries,
+                $mcp_servers,
+                $session_id,
+                $history,
+                $stream
+            );
         }
         if ($service === 'gemini') {
-            return new ai_gemini($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers, $stream);
+            return new ai_gemini(
+                $model,
+                $temperature,
+                $api_key,
+                $log,
+                $max_tries,
+                $mcp_servers,
+                $session_id,
+                $history,
+                $stream
+            );
         }
         if ($service === 'grok') {
-            return new ai_grok($model, $temperature, $api_key, $session_id, $log, $max_tries, $mcp_servers, $stream);
+            return new ai_grok(
+                $model,
+                $temperature,
+                $api_key,
+                $log,
+                $max_tries,
+                $mcp_servers,
+                $session_id,
+                $history,
+                $stream
+            );
         }
         if ($service === 'deepseek') {
             return new ai_deepseek(
                 $model,
                 $temperature,
                 $api_key,
-                $session_id,
                 $log,
                 $max_tries,
                 $mcp_servers,
+                $session_id,
+                $history,
                 $stream
             );
         }
         return null;
     }
 
-    abstract public function __construct(
+    public function __construct(
         $model,
         $temperature,
         $api_key,
-        $session_id,
         $log = null,
         $max_tries = null,
         $mcp_servers = null,
+        $session_id = null,
+        $history = null,
         $stream = null
-    );
+    ) {
+        if ($model === null) {
+            $model = $this->getDefaultModel();
+        }
+        if ($temperature === null) {
+            $temperature = 1.0;
+        }
+        if ($log !== null) {
+            $this->log = $log;
+        }
+        $this->max_tries = $max_tries !== null ? $max_tries : 1;
+        if ($mcp_servers !== null) {
+            if (is_array(current($mcp_servers))) {
+                $this->mcp_servers = $mcp_servers;
+            } else {
+                $this->mcp_servers = [$mcp_servers];
+            }
+        }
+        $this->stream = $stream === true ? true : false;
+
+        $this->model = $model;
+        $this->temperature = $temperature;
+        $this->api_key = $api_key;
+        if (__::nx($session_id)) {
+            $this->session_id = md5(uniqid());
+        } else {
+            $this->session_id = $session_id;
+        }
+        if (!array_key_exists($this->session_id, self::$sessions)) {
+            self::$sessions[$this->session_id] = [];
+        }
+        if (__::x($history)) {
+            self::$sessions[$this->session_id] = $history;
+        }
+    }
 
     public function ask($prompt = null, $files = null)
     {
@@ -103,10 +177,6 @@ abstract class aihelper
         return $msg;
     }
 
-    abstract public function cleanup();
-
-    abstract public function cleanup_all();
-
     public function enable_log($filename)
     {
         $this->log = $filename;
@@ -120,6 +190,11 @@ abstract class aihelper
     public function getSessionId()
     {
         return $this->session_id;
+    }
+
+    public function getSessionContent()
+    {
+        return self::$sessions[$this->session_id];
     }
 
     public function log($msg, $prefix = null)
@@ -340,7 +415,9 @@ abstract class aihelper
                                         'choices' => [['delta' => ['content' => $text]]]
                                     ]) .
                                     "\n\n";
-                                @ob_flush();
+                                if (ob_get_level() > 0) {
+                                    @ob_flush();
+                                }
                                 @flush();
                             }
                         }
@@ -358,7 +435,9 @@ abstract class aihelper
 
                         if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
                             echo "data: [DONE]\n\n";
-                            @ob_flush();
+                            if (ob_get_level() > 0) {
+                                @ob_flush();
+                            }
                             @flush();
                         }
                     }
@@ -438,7 +517,9 @@ abstract class aihelper
                                         'choices' => [['delta' => ['content' => $text]]]
                                     ]) .
                                     "\n\n";
-                                @ob_flush();
+                                if (ob_get_level() > 0) {
+                                    @ob_flush();
+                                }
                                 @flush();
                             }
                         }
@@ -459,7 +540,9 @@ abstract class aihelper
                         if (isset($parsed['type']) && $parsed['type'] === 'response.completed') {
                             $this->stream_response->result->id = @$parsed['response']['id'];
                             echo "data: [DONE]\n\n";
-                            @ob_flush();
+                            if (ob_get_level() > 0) {
+                                @ob_flush();
+                            }
                             @flush();
                         }
                     }
@@ -481,7 +564,8 @@ abstract class aihelper
             header('X-Accel-Buffering: no');
             header('Cache-Control: no-cache, no-transform');
         }
-        while (ob_get_level() > 0) {
+        $initial_ob_level = ob_get_level();
+        while (ob_get_level() > $initial_ob_level) {
             @ob_end_clean();
         }
         // set php settings
@@ -491,7 +575,9 @@ abstract class aihelper
         // 2k padding (for browsers)
         @ob_implicit_flush(true);
         echo ': pad ' . str_repeat(' ', 2048) . "\n\n";
-        @ob_flush();
+        if (ob_get_level() > 0) {
+            @ob_flush();
+        }
         @flush();
 
         return $stream_callback;
@@ -519,14 +605,14 @@ class ai_chatgpt extends aihelper
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
             'default' => false,
-            'test' => true
+            'test' => false
         ],
         [
             'name' => 'gpt-5-nano',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.00000025, 'output' => 0.00000075],
             'default' => false,
-            'test' => false
+            'test' => true
         ],
         [
             'name' => 'gpt-4.1',
@@ -551,77 +637,11 @@ class ai_chatgpt extends aihelper
         ]
     ];
 
-    public function __construct(
-        $model,
-        $temperature,
-        $api_key,
-        $session_id,
-        $log = null,
-        $max_tries = null,
-        $mcp_servers = null,
-        $stream = null
-    ) {
-        if ($model === null) {
-            $model = $this->getDefaultModel();
-        }
-        if ($temperature === null) {
-            $temperature = 1.0;
-        }
-        if ($log !== null) {
-            $this->log = $log;
-        }
-        $this->max_tries = $max_tries !== null ? $max_tries : 1;
-        if ($mcp_servers !== null) {
-            if (is_array(current($mcp_servers))) {
-                $this->mcp_servers = $mcp_servers;
-            } else {
-                $this->mcp_servers = [$mcp_servers];
-            }
-        }
-        $this->stream = $stream === true ? true : false;
-
-        $this->model = $model;
-        $this->temperature = $temperature;
-        $this->api_key = $api_key;
-
-        if ($this->api_key !== null) {
-            if (__::nx($session_id)) {
-                $max_tries = $this->max_tries;
-                while ($max_tries > 0) {
-                    $response = __::curl($this->url . '/conversations', [], 'POST', [
-                        'Authorization' => 'Bearer ' . $this->api_key
-                    ]);
-                    if (__::nx(@$response->result) || __::nx(@$response->result->id)) {
-                        $max_tries--;
-                        if ($max_tries === 0) {
-                            __::exception(__::v(@$response->result->error->message, 'error creating conversation'));
-                        }
-                        continue;
-                    } else {
-                        break;
-                    }
-                }
-                $this->log(@$response->result, 'create conversation');
-                $this->conversation_id = $response->result->id;
-                $this->session_id = 'conversation_id=' . $this->conversation_id;
-            } else {
-                $this->conversation_id = explode('=', $session_id)[1];
-                $this->session_id = $session_id;
-            }
-            $this->cleanup_data[] = ['type' => 'conversation', 'id' => $this->conversation_id];
-        }
-    }
-
     protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
     {
         $return = ['response' => null, 'success' => false, 'content' => [], 'costs' => 0.0];
 
-        if (
-            __::nx($this->model) ||
-            __::nx($this->api_key) ||
-            __::nx($this->session_id) ||
-            __::nx($this->conversation_id)
-        ) {
+        if (__::nx($this->model) || __::nx($this->api_key) || __::nx($this->session_id)) {
             $return['response'] = 'data missing.';
             return $return;
         }
@@ -634,93 +654,67 @@ class ai_chatgpt extends aihelper
         // trim prompt
         $prompt = __trim_whitespace(__trim_every_line($prompt));
 
-        $args = [
-            'model' => $this->model,
-            'temperature' => $this->temperature,
-            'input' => [],
-            'conversation' => $this->conversation_id
-        ];
-        $args['input'][] = [
-            'role' => 'user',
-            'content' => $prompt
-        ];
+        if ($add_prompt_to_session === true) {
+            self::$sessions[$this->session_id][] = [
+                'role' => 'user',
+                'content' => $prompt
+            ];
+        }
 
         if (__::x(@$files)) {
             if (!is_array($files)) {
                 $files = [$files];
             }
-
-            $file_ids = [];
-
             foreach ($files as $files__value) {
                 if (!file_exists($files__value)) {
                     continue;
                 }
-                // uppercase pdf filenames don't get recognized properly
-                if (strpos($files__value, '.PDF') !== false) {
-                    rename($files__value, str_replace('.PDF', '.pdf', $files__value));
-                    $files__value = str_replace('.PDF', '.pdf', $files__value);
-                }
-                // convert to proper path
-                $files__value = realpath($files__value);
-                // sometimes filenames with spaces fail on windows
-                $files__value_new =
-                    sys_get_temp_dir() . '/' . md5(uniqid()) . '.' . __::last(explode('.', $files__value));
-                copy($files__value, $files__value_new);
-
-                $files__value = $files__value_new;
-
-                $file_args = [
-                    'file' => new \CURLFile($files__value),
-                    'purpose' =>
-                        stripos($files__value, '.jpg') !== false ||
-                        stripos($files__value, '.jpeg') !== false ||
-                        stripos($files__value, '.png') !== false
-                            ? 'vision'
-                            : 'assistants'
-                ];
-
-                $this->log($file_args, 'create file');
-                $response = __::curl(
-                    $this->url . '/files',
-                    $file_args,
-                    'POST',
-                    [
-                        'Authorization' => 'Bearer ' . $this->api_key
-                    ],
-                    false,
-                    false // send as json
-                );
-                $this->log(@$response->result, 'response');
-                $this->addCosts($response, $return);
-                if (__::nx(@$response->result) || __::nx(@$response->result->id)) {
-                    return $return;
-                }
-                $file_ids[] = ['id' => $response->result->id, 'path' => $files__value];
-                $this->cleanup_data[] = ['type' => 'file', 'id' => $response->result->id];
-            }
-
-            $args['input'][0]['content'] = [];
-            $args['input'][0]['content'][] = ['type' => 'input_text', 'text' => $prompt];
-
-            foreach ($file_ids as $file_ids__value) {
-                if (
-                    stripos($file_ids__value['path'], '.jpg') !== false ||
-                    stripos($file_ids__value['path'], '.jpeg') !== false ||
-                    stripos($file_ids__value['path'], '.png') !== false
-                ) {
-                    $args['input'][0]['content'][] = [
-                        'type' => 'input_image',
-                        'file_id' => $file_ids__value['id']
-                    ];
-                } else {
-                    $args['input'][0]['content'][] = [
-                        'type' => 'input_file',
-                        'file_id' => $file_ids__value['id']
-                    ];
+                if ($add_prompt_to_session === true) {
+                    if (
+                        !is_array(
+                            self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1]['content']
+                        )
+                    ) {
+                        self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1]['content'] = [
+                            [
+                                'type' => 'input_text',
+                                'text' =>
+                                    self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1][
+                                        'content'
+                                    ]
+                            ]
+                        ];
+                    }
+                    array_unshift(
+                        self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1]['content'],
+                        substr($files__value, -4) === '.pdf'
+                            ? [
+                                'type' => 'input_file',
+                                'filename' => basename($files__value),
+                                'file_data' =>
+                                    'data:' .
+                                    mime_content_type($files__value) .
+                                    ';base64,' .
+                                    base64_encode(file_get_contents($files__value))
+                            ]
+                            : [
+                                'type' => 'input_image',
+                                'image_url' =>
+                                    'data:' .
+                                    mime_content_type($files__value) .
+                                    ';base64,' .
+                                    base64_encode(file_get_contents($files__value))
+                            ]
+                    );
                 }
             }
         }
+
+        $args = [
+            'model' => $this->model,
+            'temperature' => $this->temperature,
+            'input' => self::$sessions[$this->session_id]
+        ];
 
         if (!empty($this->mcp_servers)) {
             $args['tools'] = [];
@@ -752,6 +746,7 @@ class ai_chatgpt extends aihelper
                 $args['tools'][] = $mcp__value;
             }
         }
+
         if ($this->stream === true) {
             $args['stream'] = true;
         }
@@ -779,7 +774,6 @@ class ai_chatgpt extends aihelper
             __::x(@$response->result->id) &&
             __::x(@$response->result->output)
         ) {
-            $this->cleanup_data[] = ['type' => 'response', 'id' => $response->result->id];
             foreach ($response->result->output as $output__value) {
                 if (__::x(@$output__value->type) && $output__value->type === 'message') {
                     if (__::x(@$output__value->content)) {
@@ -805,55 +799,21 @@ class ai_chatgpt extends aihelper
         $return['success'] = true;
         $return['content'] = @$response->result->output;
 
+        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->output)) {
+            foreach ($response->result->output as $output__value) {
+                if (__::x(@$output__value->content)) {
+                    self::$sessions[$this->session_id][] = [
+                        'role' => $output__value->role,
+                        'content' => $output__value->content
+                    ];
+                }
+            }
+        }
+
         // parse json
         $return['response'] = $this->parseJson($return['response']);
 
         return $return;
-    }
-
-    public function cleanup()
-    {
-        foreach ($this->cleanup_data as $cleanup_data__value) {
-            if ($cleanup_data__value['type'] === 'file') {
-                $response = __::curl($this->url . '/files/' . $cleanup_data__value['id'], null, 'DELETE', [
-                    'Authorization' => 'Bearer ' . $this->api_key
-                ]);
-            }
-            if ($cleanup_data__value['type'] === 'response') {
-                $response = __::curl($this->url . '/responses/' . $cleanup_data__value['id'], null, 'DELETE', [
-                    'Authorization' => 'Bearer ' . $this->api_key
-                ]);
-            }
-            if ($cleanup_data__value['type'] === 'conversation') {
-                $response = __::curl($this->url . '/conversations/' . $cleanup_data__value['id'], null, 'DELETE', [
-                    'Authorization' => 'Bearer ' . $this->api_key
-                ]);
-            }
-        }
-        $response = __::curl($this->url . '/conversations/' . $this->conversation_id, null, 'DELETE', [
-            'Authorization' => 'Bearer ' . $this->api_key
-        ]);
-    }
-
-    public function cleanup_all()
-    {
-        while (1 === 1) {
-            $response = __::curl($this->url . '/files', ['limit' => 10000], 'GET', [
-                'Authorization' => 'Bearer ' . $this->api_key
-            ]);
-            if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->data)) {
-                foreach ($response->result->data as $res__value) {
-                    if (__::x(@$res__value->id)) {
-                        $response2 = __::curl($this->url . '/files/' . $res__value->id, null, 'DELETE', [
-                            'Authorization' => 'Bearer ' . $this->api_key
-                        ]);
-                    }
-                }
-                $this->log('deleted ' . count($response->result->data) . ' files');
-            } else {
-                break;
-            }
-        }
     }
 }
 
@@ -916,48 +876,6 @@ class ai_claude extends aihelper
             'test' => false
         ]
     ];
-
-    public function __construct(
-        $model,
-        $temperature,
-        $api_key,
-        $session_id,
-        $log = null,
-        $max_tries = null,
-        $mcp_servers = null,
-        $stream = null
-    ) {
-        if ($model === null) {
-            $model = $this->getDefaultModel();
-        }
-        if ($temperature === null) {
-            $temperature = 1.0;
-        }
-        if ($log !== null) {
-            $this->log = $log;
-        }
-        $this->max_tries = $max_tries !== null ? $max_tries : 1;
-        if ($mcp_servers !== null) {
-            if (is_array(current($mcp_servers))) {
-                $this->mcp_servers = $mcp_servers;
-            } else {
-                $this->mcp_servers = [$mcp_servers];
-            }
-        }
-        $this->stream = $stream === true ? true : false;
-
-        $this->model = $model;
-        $this->temperature = $temperature;
-        $this->api_key = $api_key;
-        if (__::nx($session_id)) {
-            $this->session_id = md5(uniqid());
-        } else {
-            $this->session_id = $session_id;
-        }
-        if (!array_key_exists($session_id, self::$sessions)) {
-            self::$sessions[$session_id] = [];
-        }
-    }
 
     protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
     {
@@ -1028,6 +946,7 @@ class ai_claude extends aihelper
             'messages' => self::$sessions[$this->session_id],
             'temperature' => $this->temperature
         ];
+
         if (!empty($this->mcp_servers)) {
             $args['mcp_servers'] = [];
             foreach ($this->mcp_servers as $mcp__key => $mcp__value) {
@@ -1043,6 +962,7 @@ class ai_claude extends aihelper
                 $args['mcp_servers'][] = $mcp__value;
             }
         }
+
         if ($this->stream === true) {
             $args['stream'] = true;
         }
@@ -1122,16 +1042,6 @@ class ai_claude extends aihelper
 
         return $return;
     }
-
-    public function cleanup()
-    {
-        self::$sessions = [];
-    }
-
-    public function cleanup_all()
-    {
-        $this->cleanup();
-    }
 }
 
 class ai_gemini extends aihelper
@@ -1179,48 +1089,6 @@ class ai_gemini extends aihelper
             'test' => false
         ]
     ];
-
-    public function __construct(
-        $model,
-        $temperature,
-        $api_key,
-        $session_id,
-        $log = null,
-        $max_tries = null,
-        $mcp_servers = null,
-        $stream = null
-    ) {
-        if ($model === null) {
-            $model = $this->getDefaultModel();
-        }
-        if ($temperature === null) {
-            $temperature = 1.0;
-        }
-        if ($log !== null) {
-            $this->log = $log;
-        }
-        $this->max_tries = $max_tries !== null ? $max_tries : 1;
-        if ($mcp_servers !== null) {
-            if (is_array(current($mcp_servers))) {
-                $this->mcp_servers = $mcp_servers;
-            } else {
-                $this->mcp_servers = [$mcp_servers];
-            }
-        }
-        $this->stream = $stream === true ? true : false;
-
-        $this->model = $model;
-        $this->temperature = $temperature;
-        $this->api_key = $api_key;
-        if (__::nx($session_id)) {
-            $this->session_id = md5(uniqid());
-        } else {
-            $this->session_id = $session_id;
-        }
-        if (!array_key_exists($session_id, self::$sessions)) {
-            self::$sessions[$session_id] = [];
-        }
-    }
 
     protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
     {
@@ -1317,16 +1185,6 @@ class ai_gemini extends aihelper
         $return['response'] = $this->parseJson($return['response']);
 
         return $return;
-    }
-
-    public function cleanup()
-    {
-        self::$sessions = [];
-    }
-
-    public function cleanup_all()
-    {
-        $this->cleanup();
     }
 }
 

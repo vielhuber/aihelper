@@ -2,7 +2,7 @@
     "name": "vielhuber/aihelper",
     "description": "Consistent interface for multiple ai providers.",
     "require": {
-        "php": ">=7.1",
+        "php": ">=8.1",
         "vielhuber/stringhelper": "*"
     },
     "license": "MIT",
