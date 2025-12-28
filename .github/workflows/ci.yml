@@ -30,6 +30,8 @@ jobs:
                 operating-system: ['ubuntu-latest', 'macos-latest', 'windows-latest']
                 php-versions: ['8.1', '8.2', '8.3']
 
+        timeout-minutes: 15
+
         runs-on: ${{ matrix.operating-system }}
 
         name: ${{ matrix.operating-system }} (PHP ${{ matrix.php-versions }})
