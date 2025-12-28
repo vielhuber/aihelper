@@ -506,4 +506,24 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertTrue(true);
         return [$costs, $success_count, $fail_count];
     }
+
+    function test__ai_wrong_api_key()
+    {
+        $providers = aihelper::getProviders();
+        foreach ($providers as $providers__value) {
+            foreach ($providers__value['models'] as $models__value) {
+                if ($models__value['test'] === true) {
+                    $ai = aihelper::create(
+                        provider: $providers__value['name'],
+                        model: $models__value['name'],
+                        api_key: '123',
+                        log: 'tests/ai.log'
+                    );
+                    $return = $ai->ask('Test!');
+                    $this->assertSame($return['success'], false);
+                    $this->assertMatchesRegularExpression('/api/i', $return['response']);
+                }
+            }
+        }
+    }
 }

@@ -812,6 +812,15 @@ class ai_chatgpt extends aihelper
 
         if (__::nx(@$output_text)) {
             $this->log($response, 'failed');
+            if (
+                __::x(@$response) &&
+                __::x(@$response->result) &&
+                __::x(@$response->result->error) &&
+                __::x(@$response->result->error->message) &&
+                is_string($response->result->error->message)
+            ) {
+                $return['response'] = $response->result->error->message;
+            }
             return $return;
         }
 
@@ -1048,6 +1057,23 @@ class ai_claude extends aihelper
                 $this->log('overload detected. pausing...');
                 sleep(5);
             }
+            if (
+                __::x(@$response) &&
+                __::x(@$response->result) &&
+                __::x(@$response->result->error) &&
+                __::x(@$response->result->error->message) &&
+                is_string($response->result->error->message)
+            ) {
+                $return['response'] = $response->result->error->message;
+            }
+            if (
+                __::x(@$response) &&
+                __::x(@$response->result) &&
+                __::x(@$response->result->error) &&
+                is_string($response->result->error)
+            ) {
+                $return['response'] = $response->result->error;
+            }
             return $return;
         }
 
@@ -1191,6 +1217,15 @@ class ai_gemini extends aihelper
 
         if (__::nx($output_text)) {
             $this->log($response, 'failed');
+            if (
+                __::x(@$response) &&
+                __::x(@$response->result) &&
+                __::x(@$response->result->error) &&
+                __::x(@$response->result->error->message) &&
+                is_string($response->result->error->message)
+            ) {
+                $return['response'] = $response->result->error->message;
+            }
             return $return;
         }
         $return['response'] = $output_text;

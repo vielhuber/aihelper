@@ -30,7 +30,7 @@ $ai = aihelper::create(
         ]
     ],
     session_id: null, // submit session to continue a conversation (get with $ai->getSessionId())
-    history: null // submit messages (get with $ai->getSessionContent()),
+    history: null, // submit messages (get with $ai->getSessionContent()),
     stream: false
 );
 
@@ -65,11 +65,11 @@ $ai = aihelper::create(
     /* ... */
 );
 
-$ai->ask('Wer wurde 2018 Fußball-Weltmeister?');
+$result = $ai->ask('Wer wurde 2018 Fußball-Weltmeister?');
 /* ... */
-// echo stream
+// echoes stream
 /* ... */
-// ['response' => 'Frankreich.', 'success' => true, 'content' => [...], 'costs' => 0.001]
+// $result = ['response' => 'Frankreich.', 'success' => true, 'content' => [...], 'costs' => 0.001]
 ```
 
 if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled for the streaming route and also adjust your virtualhost so fastcgi forwards packets immediately (no buffering):

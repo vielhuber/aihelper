@@ -19,4 +19,4 @@ $ai = aihelper::create(
     stream: true
 );
 
-$response = $ai->ask($_GET['prompt']);
+$result = $ai->ask($_GET['prompt']);
