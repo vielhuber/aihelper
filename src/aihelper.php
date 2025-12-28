@@ -10,6 +10,8 @@ abstract class aihelper
     public $name = null;
     protected $url = null;
     public $models = [];
+    public $support_mcp = null;
+    public $support_stream = null;
 
     protected $model = null;
     protected $temperature = null;
@@ -155,14 +157,14 @@ abstract class aihelper
             $this->log = $log;
         }
         $this->max_tries = $max_tries !== null ? $max_tries : 1;
-        if ($mcp_servers !== null) {
+        if ($this->support_mcp && $mcp_servers !== null) {
             if (is_array(current($mcp_servers))) {
                 $this->mcp_servers = $mcp_servers;
             } else {
                 $this->mcp_servers = [$mcp_servers];
             }
         }
-        $this->stream = $stream === true ? true : false;
+        $this->stream = $this->support_stream && $stream === true ? true : false;
 
         $this->model = $model;
         $this->temperature = $temperature;
@@ -402,37 +404,72 @@ abstract class aihelper
                 $this->log($chunk, 'chunk');
                 $this->stream_buffer_in .= $chunk;
 
+                // check if chunk is full json
+                if (json_decode($chunk, true) !== null) {
+                    $parsed = json_decode($chunk, true);
+                    if (isset($parsed['error']) && isset($parsed['error']['message'])) {
+                        $this->stream_response->result->error = (object) ['message' => @$parsed['error']['message']];
+                    }
+                }
+
                 // parse line by line
-                while (($pos = strpos($this->stream_buffer_in, "\n")) !== false) {
-                    $line = rtrim(substr($this->stream_buffer_in, 0, $pos), "\r");
-                    $this->stream_buffer_in = substr($this->stream_buffer_in, $pos + 1);
+                if (strpos($this->stream_buffer_in, "\n") !== false) {
+                    while (($pos = strpos($this->stream_buffer_in, "\n")) !== false) {
+                        $line = rtrim(substr($this->stream_buffer_in, 0, $pos), "\r");
+                        $this->stream_buffer_in = substr($this->stream_buffer_in, $pos + 1);
 
-                    if (strpos($line, 'event: ') === 0) {
-                        $this->stream_event = substr($line, 7);
-                        continue;
-                    }
+                        if (strpos($line, 'event: ') === 0) {
+                            $this->stream_event = substr($line, 7);
+                            continue;
+                        }
 
-                    if (strpos($line, 'data: ') === 0) {
-                        $dataLine = substr($line, 6);
-                        $this->stream_buffer_data =
-                            $this->stream_buffer_data === '' ? $dataLine : $this->stream_buffer_data . "\n" . $dataLine;
-                        continue;
-                    }
+                        if (strpos($line, 'data: ') === 0) {
+                            $dataLine = substr($line, 6);
+                            $this->stream_buffer_data =
+                                $this->stream_buffer_data === ''
+                                    ? $dataLine
+                                    : $this->stream_buffer_data . "\n" . $dataLine;
+                            continue;
+                        }
 
-                    if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
-                        $parsed = json_decode($this->stream_buffer_data, true);
+                        if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
+                            $parsed = json_decode($this->stream_buffer_data, true);
 
-                        if (isset($parsed['type']) && $parsed['type'] === 'content_block_delta') {
-                            if (isset($parsed['delta']['text'])) {
-                                $text = $parsed['delta']['text'];
-                                $this->stream_response->result->content[0]->text .= $text;
+                            if (isset($parsed['type']) && $parsed['type'] === 'content_block_delta') {
+                                if (isset($parsed['delta']['text'])) {
+                                    $text = $parsed['delta']['text'];
+                                    $this->stream_response->result->content[0]->text .= $text;
 
-                                echo 'data: ' .
-                                    json_encode([
-                                        'id' => uniqid(),
-                                        'choices' => [['delta' => ['content' => $text]]]
-                                    ]) .
-                                    "\n\n";
+                                    echo 'data: ' .
+                                        json_encode([
+                                            'id' => uniqid(),
+                                            'choices' => [['delta' => ['content' => $text]]]
+                                        ]) .
+                                        "\n\n";
+                                    if (ob_get_level() > 0) {
+                                        @ob_flush();
+                                    }
+                                    @flush();
+                                }
+                            }
+
+                            if (isset($parsed['usage'])) {
+                                $this->stream_response->result->usage->input_tokens += @$parsed['usage'][
+                                    'input_tokens'
+                                ];
+                                $this->stream_response->result->usage->cache_creation_input_tokens += @$parsed['usage'][
+                                    'cache_creation_input_tokens'
+                                ];
+                                $this->stream_response->result->usage->cache_read_input_tokens += @$parsed['usage'][
+                                    'cache_read_input_tokens'
+                                ];
+                                $this->stream_response->result->usage->output_tokens += @$parsed['usage'][
+                                    'output_tokens'
+                                ];
+                            }
+
+                            if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
+                                echo "data: [DONE]\n\n";
                                 if (ob_get_level() > 0) {
                                     @ob_flush();
                                 }
@@ -440,32 +477,14 @@ abstract class aihelper
                             }
                         }
 
-                        if (isset($parsed['usage'])) {
-                            $this->stream_response->result->usage->input_tokens += @$parsed['usage']['input_tokens'];
-                            $this->stream_response->result->usage->cache_creation_input_tokens += @$parsed['usage'][
-                                'cache_creation_input_tokens'
-                            ];
-                            $this->stream_response->result->usage->cache_read_input_tokens += @$parsed['usage'][
-                                'cache_read_input_tokens'
-                            ];
-                            $this->stream_response->result->usage->output_tokens += @$parsed['usage']['output_tokens'];
+                        if ($line === '') {
+                            $this->stream_event = null;
+                            $this->stream_buffer_data = '';
+                            continue;
                         }
-
-                        if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
-                            echo "data: [DONE]\n\n";
-                            if (ob_get_level() > 0) {
-                                @ob_flush();
-                            }
-                            @flush();
-                        }
-                    }
-
-                    if ($line === '') {
-                        $this->stream_event = null;
-                        $this->stream_buffer_data = '';
-                        continue;
                     }
                 }
+
                 return strlen($chunk);
             };
         }
@@ -504,37 +523,71 @@ abstract class aihelper
                 $this->log($chunk, 'chunk');
                 $this->stream_buffer_in .= $chunk;
 
+                // check if chunk is full json
+                if (json_decode($chunk, true) !== null) {
+                    $parsed = json_decode($chunk, true);
+                    if (isset($parsed['error']) && isset($parsed['error']['message'])) {
+                        $this->stream_response->result->error = (object) ['message' => @$parsed['error']['message']];
+                    }
+                }
+
                 // parse line by line
-                while (($pos = strpos($this->stream_buffer_in, "\n")) !== false) {
-                    $line = rtrim(substr($this->stream_buffer_in, 0, $pos), "\r");
-                    $this->stream_buffer_in = substr($this->stream_buffer_in, $pos + 1);
+                if (strpos($this->stream_buffer_in, "\n") !== false) {
+                    while (($pos = strpos($this->stream_buffer_in, "\n")) !== false) {
+                        $line = rtrim(substr($this->stream_buffer_in, 0, $pos), "\r");
+                        $this->stream_buffer_in = substr($this->stream_buffer_in, $pos + 1);
 
-                    if (strpos($line, 'event: ') === 0) {
-                        $this->stream_event = substr($line, 7);
-                        continue;
-                    }
+                        if (strpos($line, 'event: ') === 0) {
+                            $this->stream_event = substr($line, 7);
+                            continue;
+                        }
 
-                    if (strpos($line, 'data: ') === 0) {
-                        $dataLine = substr($line, 6);
-                        $this->stream_buffer_data =
-                            $this->stream_buffer_data === '' ? $dataLine : $this->stream_buffer_data . "\n" . $dataLine;
-                        continue;
-                    }
+                        if (strpos($line, 'data: ') === 0) {
+                            $dataLine = substr($line, 6);
+                            $this->stream_buffer_data =
+                                $this->stream_buffer_data === ''
+                                    ? $dataLine
+                                    : $this->stream_buffer_data . "\n" . $dataLine;
+                            continue;
+                        }
 
-                    if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
-                        $parsed = json_decode($this->stream_buffer_data, true);
+                        if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
+                            $parsed = json_decode($this->stream_buffer_data, true);
 
-                        if (isset($parsed['type']) && $parsed['type'] === 'response.output_text.delta') {
-                            if (isset($parsed['delta'])) {
-                                $text = $parsed['delta'];
-                                $this->stream_response->result->output[0]->content[0]->text .= $text;
+                            if (isset($parsed['type']) && $parsed['type'] === 'response.output_text.delta') {
+                                if (isset($parsed['delta'])) {
+                                    $text = $parsed['delta'];
+                                    $this->stream_response->result->output[0]->content[0]->text .= $text;
 
-                                echo 'data: ' .
-                                    json_encode([
-                                        'id' => uniqid(),
-                                        'choices' => [['delta' => ['content' => $text]]]
-                                    ]) .
-                                    "\n\n";
+                                    echo 'data: ' .
+                                        json_encode([
+                                            'id' => uniqid(),
+                                            'choices' => [['delta' => ['content' => $text]]]
+                                        ]) .
+                                        "\n\n";
+                                    if (ob_get_level() > 0) {
+                                        @ob_flush();
+                                    }
+                                    @flush();
+                                }
+                            }
+
+                            if (isset($parsed['response']) && isset($parsed['response']['usage'])) {
+                                $this->stream_response->result->usage->input_tokens += @$parsed['response']['usage'][
+                                    'input_tokens'
+                                ];
+                                $this->stream_response->result->usage->cache_creation_input_tokens += @$parsed[
+                                    'response'
+                                ]['usage']['input_tokens_details']['cached_tokens'];
+                                $this->stream_response->result->usage->cache_read_input_tokens += 0;
+                                $this->stream_response->result->usage->output_tokens += @$parsed['response']['usage'][
+                                    'output_tokens'
+                                ];
+                            }
+
+                            if (isset($parsed['type']) && $parsed['type'] === 'response.completed') {
+                                $this->stream_response->result->id = @$parsed['response']['id'];
+                                echo "data: [DONE]\n\n";
                                 if (ob_get_level() > 0) {
                                     @ob_flush();
                                 }
@@ -542,35 +595,14 @@ abstract class aihelper
                             }
                         }
 
-                        if (isset($parsed['response']) && isset($parsed['response']['usage'])) {
-                            $this->stream_response->result->usage->input_tokens += @$parsed['response']['usage'][
-                                'input_tokens'
-                            ];
-                            $this->stream_response->result->usage->cache_creation_input_tokens += @$parsed['response'][
-                                'usage'
-                            ]['input_tokens_details']['cached_tokens'];
-                            $this->stream_response->result->usage->cache_read_input_tokens += 0;
-                            $this->stream_response->result->usage->output_tokens += @$parsed['response']['usage'][
-                                'output_tokens'
-                            ];
+                        if ($line === '') {
+                            $this->stream_event = null;
+                            $this->stream_buffer_data = '';
+                            continue;
                         }
-
-                        if (isset($parsed['type']) && $parsed['type'] === 'response.completed') {
-                            $this->stream_response->result->id = @$parsed['response']['id'];
-                            echo "data: [DONE]\n\n";
-                            if (ob_get_level() > 0) {
-                                @ob_flush();
-                            }
-                            @flush();
-                        }
-                    }
-
-                    if ($line === '') {
-                        $this->stream_event = null;
-                        $this->stream_buffer_data = '';
-                        continue;
                     }
                 }
+
                 return strlen($chunk);
             };
         }
@@ -611,6 +643,10 @@ class ai_chatgpt extends aihelper
     public $name = 'chatgpt';
 
     protected $url = 'https://api.openai.com/v1';
+
+    public $support_mcp = true;
+
+    public $support_stream = true;
 
     public $models = [
         [
@@ -855,6 +891,10 @@ class ai_claude extends aihelper
     public $name = 'claude';
 
     protected $url = 'https://api.anthropic.com/v1';
+
+    public $support_mcp = true;
+
+    public $support_stream = true;
 
     public $models = [
         [
@@ -1102,6 +1142,10 @@ class ai_gemini extends aihelper
 
     protected $url = 'https://generativelanguage.googleapis.com/v1beta';
 
+    public $support_mcp = false;
+
+    public $support_stream = false;
+
     public $models = [
         [
             'name' => 'gemini-2.5-pro',
@@ -1258,6 +1302,10 @@ class ai_grok extends ai_claude
 
     protected $url = 'https://api.x.ai/v1';
 
+    public $support_mcp = false;
+
+    public $support_stream = false;
+
     public $models = [
         [
             'name' => 'grok-4',
@@ -1314,6 +1362,10 @@ class ai_deepseek extends ai_claude
     public $name = 'deepseek';
 
     protected $url = 'https://api.deepseek.com/anthropic';
+
+    public $support_mcp = false;
+
+    public $support_stream = false;
 
     public $models = [
         [

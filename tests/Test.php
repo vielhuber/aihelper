@@ -380,7 +380,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude']);
+        $supported = in_array($provider, ['claude', 'chatgpt']);
         if ($supported === true) {
             $ai_stream = aihelper::create(
                 provider: $provider,
@@ -510,18 +510,28 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_wrong_api_key()
     {
         $providers = aihelper::getProviders();
-        foreach ($providers as $providers__value) {
-            foreach ($providers__value['models'] as $models__value) {
-                if ($models__value['test'] === true) {
-                    $ai = aihelper::create(
-                        provider: $providers__value['name'],
-                        model: $models__value['name'],
-                        api_key: '123',
-                        log: 'tests/ai.log'
-                    );
-                    $return = $ai->ask('Test!');
-                    $this->assertSame($return['success'], false);
-                    $this->assertMatchesRegularExpression('/api/i', $return['response']);
+        foreach ([false, true] as $streams__value) {
+            foreach ($providers as $providers__value) {
+                foreach ($providers__value['models'] as $models__value) {
+                    if ($models__value['test'] === true) {
+                        $this->log(
+                            'Testing wrong API key for ' .
+                                $providers__value['name'] .
+                                ' (' .
+                                $models__value['name'] .
+                                ')...'
+                        );
+                        $ai = aihelper::create(
+                            provider: $providers__value['name'],
+                            model: $models__value['name'],
+                            api_key: '123',
+                            log: 'tests/ai.log',
+                            stream: $streams__value
+                        );
+                        $return = $ai->ask('Test!');
+                        $this->assertSame($return['success'], false);
+                        $this->assertMatchesRegularExpression('/api/i', $return['response'] ?? '');
+                    }
                 }
             }
         }
