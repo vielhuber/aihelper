@@ -86,12 +86,12 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__ai_gemini(&$stats = [])
     {
-        $this->ai_test_prepare('gemini', @$_SERVER['GOOGLE_GEMINI_API_KEY'], $stats);
+        $this->ai_test_prepare('gemini', @$_SERVER['GEMINI_API_KEY'], $stats);
     }
 
     function test__ai_chatgpt(&$stats = [])
     {
-        $this->ai_test_prepare('chatgpt', @$_SERVER['OPENAI_API_KEY'], $stats);
+        $this->ai_test_prepare('chatgpt', @$_SERVER['CHATGPT_API_KEY'], $stats);
     }
 
     function test__ai_grok(&$stats = [])

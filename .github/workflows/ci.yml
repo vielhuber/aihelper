@@ -2,9 +2,9 @@ name: CI
 
 env:
     CI: true
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    CHATGPT_API_KEY: ${{ secrets.CHATGPT_API_KEY }}
     CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
-    GOOGLE_GEMINI_API_KEY: ${{ secrets.GOOGLE_GEMINI_API_KEY }}
+    GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
     DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
     MCP_SERVER_TEST: ${{ secrets.MCP_SERVER_TEST }}
