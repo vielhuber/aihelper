@@ -21,7 +21,7 @@ $ai = aihelper::create(
     temperature: 1.0, // controls the randomness of the text generated
     api_key: '**API Key**',
     log: 'output.log',
-    max_tries: 3,
+    max_tries: 1,
     mcp_servers: [
         [
             'name' => 'example-mcp',
@@ -35,19 +35,19 @@ $ai = aihelper::create(
 );
 
 $ai->ask(prompt: 'Wer wurde 2018 Fußball-Weltmeister?');
-// ['response' => 'Frankreich.', 'success' => true, 'content' => [...], 'costs' => 0.001]
+// ['response' => 'Frankreich.', 'success' => true, 'costs' => 0.001]
 
 $ai->ask(prompt: 'Was ist auf dem Bild zu sehen?', files: 'lorem.jpg');
-// ['response' => 'Auf dem Bild ist eine Katze zu sehen.', 'success' => true, 'content' => [...], 'costs' => 0.001]
+// ['response' => 'Auf dem Bild ist eine Katze zu sehen.', 'success' => true, 'costs' => 0.001]
 
 $ai->ask(prompt: 'Wie lautet das erste Wort in der PDF?', files: 'lorem.pdf');
-// ['response' => 'Das erste Wort lautet "Lorem".', 'success' => true, 'content' => [...], 'costs' => 0.001]
+// ['response' => 'Das erste Wort lautet "Lorem".', 'success' => true, 'costs' => 0.001]
 
 $ai->ask(prompt: 'Fasse die folgenden Dokumente zusammen.', files: ['1.pdf', '2.jpg']);
-// ['response' => '...', 'success' => true, 'content' => [...], 'costs' => 0.001]
+// ['response' => '...', 'success' => true, 'costs' => 0.001]
 
 $ai->ask(prompt: 'Was habe ich vorher gefragt?');
-// ['response' => 'Du hast gefragt: "Wie lautet das erste Wort in der PDF?"', 'success' => true, 'content' => [...], 'costs' => 0.001]
+// ['response' => 'Du hast gefragt: "Wie lautet das erste Wort in der PDF?"', 'success' => true, 'costs' => 0.001]
 
 aihelper::getProviders() // gets overview of providers and models
 $ai->getSessionId() // get current session id
@@ -69,7 +69,7 @@ $result = $ai->ask('Wer wurde 2018 Fußball-Weltmeister?');
 /* ... */
 // echoes stream
 /* ... */
-// $result = ['response' => 'Frankreich.', 'success' => true, 'content' => [...], 'costs' => 0.001]
+// $result = ['response' => 'Frankreich.', 'success' => true, 'costs' => 0.001]
 ```
 
 if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled for the streaming route and also adjust your virtualhost so fastcgi forwards packets immediately (no buffering):

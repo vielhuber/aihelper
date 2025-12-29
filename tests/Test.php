@@ -149,7 +149,7 @@ class Test extends \PHPUnit\Framework\TestCase
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($return['content']) > 0 &&
+                count($ai->getSessionContent()) === 2 &&
                 (stripos($return['response'], 'Frankreich') !== false ||
                     stripos($return['response'], 'französisch') !== false);
             if ($success_this) {
@@ -170,7 +170,7 @@ class Test extends \PHPUnit\Framework\TestCase
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($return['content']) > 0 &&
+                count($ai->getSessionContent()) === 4 &&
                 (stripos($return['response'], 'Wer wurde 2018 Fußball-Weltmeister?') !== false ||
                     stripos($return['response'], 'Frankreich') !== false ||
                     stripos($return['response'], 'französisch') !== false ||
@@ -193,7 +193,7 @@ class Test extends \PHPUnit\Framework\TestCase
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($return['content']) > 0 &&
+                count($ai->getSessionContent()) === 6 &&
                 (stripos($return['response'], 'Wer wurde 2018 Fußball-Weltmeister?') !== false ||
                     stripos($return['response'], 'Frankreich') !== false ||
                     stripos($return['response'], 'französisch') !== false ||
@@ -225,7 +225,9 @@ class Test extends \PHPUnit\Framework\TestCase
             $return = $ai->ask('Wie heiße ich mit Vornamen?');
             //$this->log($return);
             $success_this =
-                $return['success'] && count($return['content']) > 0 && stripos($return['response'], 'David') !== false;
+                $return['success'] &&
+                count($ai->getSessionContent()) === 10 &&
+                stripos($return['response'], 'David') !== false;
             if ($success_this) {
                 $success_count++;
             } else {
@@ -251,7 +253,9 @@ class Test extends \PHPUnit\Framework\TestCase
             $return = $ai->ask('Wie heiße ich mit Vornamen?');
             //$this->log($return);
             $success_this =
-                $return['success'] && count($return['content']) > 0 && stripos($return['response'], 'David') !== false;
+                $return['success'] &&
+                count($ai->getSessionContent()) === 12 &&
+                stripos($return['response'], 'David') !== false;
             if ($success_this) {
                 $success_count++;
             } else {
@@ -270,7 +274,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
             $success_this =
                 $return['success'] &&
-                count($return['content']) > 0 &&
+                count($ai->getSessionContent()) === 15 &&
                 (stripos($return['response'], 'Tulpe') !== false ||
                     stripos($return['response'], 'Tulpen') !== false ||
                     stripos($return['response'], 'Tulip') !== false ||
@@ -294,7 +298,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
             $success_this =
                 $return['success'] &&
-                count($return['content']) > 0 &&
+                count($ai->getSessionContent()) === 17 &&
                 (stripos($return['response'], 'Tulpe') !== false ||
                     stripos($return['response'], 'Tulpen') !== false ||
                     stripos($return['response'], 'Tulip') !== false ||
@@ -321,7 +325,7 @@ class Test extends \PHPUnit\Framework\TestCase
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($return['content']) > 0 &&
+                count($ai->getSessionContent()) === 20 &&
                 in_array($return['response']->customer_nr ?? '', ['F123465789']) &&
                 in_array($return['response']->date ?? '', ['31. Oktober 2018', 'Oktober 2018', '2018-10-31']) &&
                 in_array($return['response']->author ?? '', ['David Vielhuber']);
@@ -351,7 +355,7 @@ class Test extends \PHPUnit\Framework\TestCase
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($return['content']) > 0 &&
+                count($ai->getSessionContent()) === 25 &&
                 in_array($return['response']->customer_nr ?? '', ['F123465789']) &&
                 in_array($return['response']->meter_number ?? '', ['123456789']) &&
                 in_array($return['response']->flower ?? '', [
@@ -389,7 +393,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 api_key: $api_key,
                 session_id: null,
                 log: 'tests/ai.log',
-                max_tries: null,
+                max_tries: 1,
                 mcp_servers: null,
                 stream: true
             );
@@ -397,7 +401,7 @@ class Test extends \PHPUnit\Framework\TestCase
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($return['content']) > 0 &&
+                count($ai_stream->getSessionContent()) === 2 &&
                 (stripos($return['response'], 'Frankreich') !== false ||
                     stripos($return['response'], 'französisch') !== false);
             if ($success_this) {
@@ -450,7 +454,7 @@ class Test extends \PHPUnit\Framework\TestCase
             ');
                 $success_this =
                     $return['success'] &&
-                    count($return['content']) > 0 &&
+                    count($ai_mcp->getSessionContent()) === 4 &&
                     stripos($return['response'], 'dunkel') !== false;
                 if ($success_this) {
                     $success_count++;
@@ -470,7 +474,7 @@ class Test extends \PHPUnit\Framework\TestCase
             ');
                 $success_this =
                     $return['success'] &&
-                    count($return['content']) > 0 &&
+                    count($ai_mcp->getSessionContent()) === 6 &&
                     stripos($return['response'], '.env.example') !== false;
                 if ($success_this) {
                     $success_count++;
@@ -489,7 +493,9 @@ class Test extends \PHPUnit\Framework\TestCase
                 Nutze Tools!
             ');
                 $success_this =
-                    $return['success'] && count($return['content']) > 0 && stripos($return['response'], 'ja') !== false;
+                    $return['success'] &&
+                    count($ai_mcp->getSessionContent()) === 8 &&
+                    stripos($return['response'], 'ja') !== false;
                 if ($success_this) {
                     $success_count++;
                 } else {

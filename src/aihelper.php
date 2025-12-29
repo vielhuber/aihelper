@@ -184,7 +184,7 @@ abstract class aihelper
 
     public function ask($prompt = null, $files = null)
     {
-        $return = ['response' => null, 'success' => false, 'content' => [], 'costs' => 0.0];
+        $return = ['response' => null, 'success' => false, 'costs' => 0.0];
         $max_tries = $this->max_tries;
         while ($return['success'] === false && $max_tries > 0) {
             if ($max_tries < $this->max_tries) {
@@ -197,7 +197,40 @@ abstract class aihelper
         return $return;
     }
 
+    abstract protected function transformFormatForward($data = null);
+
+    abstract protected function transformFormatBackward($data = null);
+
     abstract protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true);
+
+    protected function addPromptToSession($prompt, $files = null)
+    {
+        self::$sessions[$this->session_id][] = [
+            'role' => 'user',
+            'type' => 'text',
+            'content' => $prompt
+        ];
+
+        if (__::x(@$files)) {
+            if (!is_array($files)) {
+                $files = [$files];
+            }
+            foreach ($files as $files__value) {
+                if (!file_exists($files__value)) {
+                    continue;
+                }
+                self::$sessions[$this->session_id][] = [
+                    'role' => 'user',
+                    'type' => 'file',
+                    'content' =>
+                        'data:' .
+                        mime_content_type($files__value) .
+                        ';base64,' .
+                        base64_encode(file_get_contents($files__value))
+                ];
+            }
+        }
+    }
 
     protected function parseJson($msg)
     {
@@ -693,83 +726,126 @@ class ai_chatgpt extends aihelper
         ]
     ];
 
+    protected function transformFormatForward($data = null)
+    {
+        if (!is_array($data)) {
+            return $data;
+        }
+        $messages = [];
+        $current_role = null;
+        $current_content = [];
+        $push_message = function () use (&$messages, &$current_role, &$current_content) {
+            if ($current_role !== null && !empty($current_content)) {
+                $messages[] = [
+                    'role' => $current_role,
+                    'content' => $current_content
+                ];
+            }
+            $current_role = null;
+            $current_content = [];
+        };
+        foreach ($data as $item) {
+            if (!is_array($item) || !isset($item['role']) || !isset($item['type'])) {
+                continue;
+            }
+            $role = $item['role'] === 'assistant' ? 'assistant' : 'user';
+            if ($current_role !== $role && !empty($current_content)) {
+                $push_message();
+            }
+            if ($current_role === null) {
+                $current_role = $role;
+            }
+            if ($item['type'] === 'text') {
+                $current_content[] = [
+                    'type' => $role === 'assistant' ? 'output_text' : 'input_text',
+                    'text' => (string) ($item['content'] ?? '')
+                ];
+                continue;
+            }
+            if ($item['type'] === 'file' && isset($item['content']) && is_string($item['content'])) {
+                if ($role !== 'user') {
+                    continue;
+                }
+                if (preg_match('/^data:([^;]+);base64,(.*)$/s', $item['content'], $m)) {
+                    $mime = $m[1];
+                    $b64 = $m[2];
+                    if (stripos($mime, 'pdf') !== false || $mime === 'application/pdf') {
+                        $current_content[] = [
+                            'type' => 'input_file',
+                            'filename' => 'attachment.pdf',
+                            'file_data' => 'data:' . $mime . ';base64,' . $b64
+                        ];
+                    } elseif (strpos($mime, 'image/') === 0) {
+                        $current_content[] = [
+                            'type' => 'input_image',
+                            'image_url' => $item['content']
+                        ];
+                    } else {
+                        $current_content[] = [
+                            'type' => 'input_file',
+                            'filename' => 'attachment.bin',
+                            'file_data' => 'data:' . $mime . ';base64,' . $b64
+                        ];
+                    }
+                }
+            }
+        }
+        if (!empty($current_content)) {
+            $messages[] = [
+                'role' => $current_role ?? 'user',
+                'content' => $current_content
+            ];
+        }
+        return $messages;
+    }
+
+    protected function transformFormatBackward($data = null)
+    {
+        $out = [];
+        if (!is_object($data)) {
+            return $out;
+        }
+        $text = '';
+        if (isset($data->output) && is_array($data->output)) {
+            foreach ($data->output as $outItem) {
+                if (isset($outItem->type) && $outItem->type === 'message' && isset($outItem->content)) {
+                    foreach ($outItem->content as $c) {
+                        if (isset($c->type) && $c->type === 'output_text' && isset($c->text)) {
+                            $text .= (string) $c->text;
+                        }
+                    }
+                }
+            }
+        }
+        if ($text !== '') {
+            $out[] = [
+                'role' => 'assistant',
+                'type' => 'text',
+                'content' => $text
+            ];
+        }
+        return $out;
+    }
+
     protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
     {
-        $return = ['response' => null, 'success' => false, 'content' => [], 'costs' => 0.0];
+        $return = ['response' => null, 'success' => false, 'costs' => 0.0];
 
-        if (__::nx($this->model) || __::nx($this->api_key) || __::nx($this->session_id)) {
+        if (__::nx($this->model) || __::nx($this->api_key) || __::nx($this->session_id) || __::nx($prompt)) {
             $return['response'] = 'data missing.';
             return $return;
         }
 
-        if (__::nx($prompt)) {
-            $return['response'] = 'prompt missing.';
-            return $return;
-        }
-
-        // trim prompt
         $prompt = __trim_whitespace(__trim_every_line($prompt));
 
         if ($add_prompt_to_session === true) {
-            self::$sessions[$this->session_id][] = [
-                'role' => 'user',
-                'content' => $prompt
-            ];
-        }
-
-        if (__::x(@$files)) {
-            if (!is_array($files)) {
-                $files = [$files];
-            }
-            foreach ($files as $files__value) {
-                if (!file_exists($files__value)) {
-                    continue;
-                }
-                if ($add_prompt_to_session === true) {
-                    if (
-                        !is_array(
-                            self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1]['content']
-                        )
-                    ) {
-                        self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1]['content'] = [
-                            [
-                                'type' => 'input_text',
-                                'text' =>
-                                    self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1][
-                                        'content'
-                                    ]
-                            ]
-                        ];
-                    }
-                    array_unshift(
-                        self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1]['content'],
-                        substr($files__value, -4) === '.pdf'
-                            ? [
-                                'type' => 'input_file',
-                                'filename' => basename($files__value),
-                                'file_data' =>
-                                    'data:' .
-                                    mime_content_type($files__value) .
-                                    ';base64,' .
-                                    base64_encode(file_get_contents($files__value))
-                            ]
-                            : [
-                                'type' => 'input_image',
-                                'image_url' =>
-                                    'data:' .
-                                    mime_content_type($files__value) .
-                                    ';base64,' .
-                                    base64_encode(file_get_contents($files__value))
-                            ]
-                    );
-                }
-            }
+            $this->addPromptToSession($prompt, $files);
         }
 
         $args = [
             'model' => $this->model,
             'temperature' => $this->temperature,
-            'input' => self::$sessions[$this->session_id]
+            'input' => $this->transformFormatForward(self::$sessions[$this->session_id])
         ];
 
         if (!empty($this->mcp_servers)) {
@@ -862,17 +938,12 @@ class ai_chatgpt extends aihelper
 
         $return['response'] = $output_text;
         $return['success'] = true;
-        $return['content'] = @$response->result->output;
 
-        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->output)) {
-            foreach ($response->result->output as $output__value) {
-                if (__::x(@$output__value->content)) {
-                    self::$sessions[$this->session_id][] = [
-                        'role' => $output__value->role,
-                        'content' => $output__value->content
-                    ];
-                }
-            }
+        if (__::x(@$response) && __::x(@$response->result)) {
+            self::$sessions[$this->session_id] = array_merge(
+                self::$sessions[$this->session_id],
+                $this->transformFormatBackward($response->result)
+            );
         }
 
         // parse json
@@ -948,73 +1019,110 @@ class ai_claude extends aihelper
         ]
     ];
 
+    protected function transformFormatForward($data = null)
+    {
+        if (!is_array($data)) {
+            return $data;
+        }
+        $messages = [];
+        $current_role = null;
+        $current_content = [];
+        $push_message = function () use (&$messages, &$current_role, &$current_content) {
+            if ($current_role !== null && !empty($current_content)) {
+                $messages[] = [
+                    'role' => $current_role,
+                    'content' => $current_content
+                ];
+            }
+            $current_role = null;
+            $current_content = [];
+        };
+        foreach ($data as $item) {
+            if (!is_array($item) || !isset($item['role']) || !isset($item['type'])) {
+                continue;
+            }
+            $role = $item['role'] === 'assistant' ? 'assistant' : 'user';
+            if ($current_role !== $role && !empty($current_content)) {
+                $push_message();
+            }
+            if ($current_role === null) {
+                $current_role = $role;
+            }
+            if ($item['type'] === 'text') {
+                $current_content[] = [
+                    'type' => 'text',
+                    'text' => (string) ($item['content'] ?? '')
+                ];
+                continue;
+            }
+            if ($item['type'] === 'file' && isset($item['content']) && is_string($item['content'])) {
+                if (preg_match('/^data:([^;]+);base64,(.*)$/s', $item['content'], $m)) {
+                    $mime = $m[1];
+                    $b64 = $m[2];
+                    $type = stripos($mime, 'pdf') !== false || $mime === 'application/pdf' ? 'document' : 'image';
+                    $current_content[] = [
+                        'type' => $type,
+                        'source' => [
+                            'type' => 'base64',
+                            'media_type' => $mime,
+                            'data' => $b64
+                        ]
+                    ];
+                }
+            }
+        }
+        if (!empty($current_content)) {
+            $messages[] = [
+                'role' => $current_role ?? 'user',
+                'content' => $current_content
+            ];
+        }
+        return $messages;
+    }
+
+    protected function transformFormatBackward($data = null)
+    {
+        $out = [];
+        if (!is_object($data)) {
+            return $out;
+        }
+        $text = '';
+        if (isset($data->content) && is_array($data->content)) {
+            foreach ($data->content as $c) {
+                if (isset($c->type) && $c->type === 'text' && isset($c->text)) {
+                    $text .= (string) $c->text;
+                }
+            }
+        }
+        if ($text !== '') {
+            $out[] = [
+                'role' => 'assistant',
+                'type' => 'text',
+                'content' => $text
+            ];
+        }
+        return $out;
+    }
+
     protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
     {
-        $return = ['response' => null, 'success' => false, 'content' => [], 'costs' => 0.0];
+        $return = ['response' => null, 'success' => false, 'costs' => 0.0];
 
-        if (__::nx($this->model) || __::nx($this->api_key) || __::nx($this->session_id)) {
+        if (__::nx($this->model) || __::nx($this->api_key) || __::nx($this->session_id) || __::nx($prompt)) {
             $return['response'] = 'data missing.';
             return $return;
         }
 
-        if (__::nx($prompt)) {
-            $return['response'] = 'prompt missing.';
-            return $return;
-        }
-
-        // trim prompt
         $prompt = __trim_whitespace(__trim_every_line($prompt));
 
         if ($add_prompt_to_session === true) {
-            self::$sessions[$this->session_id][] = [
-                'role' => 'user',
-                'content' => $prompt
-            ];
-        }
-
-        if (__::x(@$files)) {
-            if (!is_array($files)) {
-                $files = [$files];
-            }
-            foreach ($files as $files__value) {
-                if (!file_exists($files__value)) {
-                    continue;
-                }
-                if ($add_prompt_to_session === true) {
-                    if (
-                        !is_array(
-                            self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1]['content']
-                        )
-                    ) {
-                        self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1]['content'] = [
-                            [
-                                'type' => 'text',
-                                'text' =>
-                                    self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1][
-                                        'content'
-                                    ]
-                            ]
-                        ];
-                    }
-                    array_unshift(
-                        self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1]['content'],
-                        [
-                            'type' => substr($files__value, -4) === '.pdf' ? 'document' : 'image',
-                            'source' => [
-                                'type' => 'base64',
-                                'media_type' => mime_content_type($files__value),
-                                'data' => base64_encode(file_get_contents($files__value))
-                            ]
-                        ]
-                    );
-                }
-            }
+            $this->addPromptToSession($prompt, $files);
         }
 
         $args = [
             'model' => $this->model,
             'max_tokens' => $this->getMaxTokensForModel(),
-            'messages' => self::$sessions[$this->session_id],
+            'messages' => $this->transformFormatForward(self::$sessions[$this->session_id]),
             'temperature' => $this->temperature
         ];
 
@@ -1076,10 +1184,10 @@ class ai_claude extends aihelper
             $response->result->stop_reason === 'pause_turn'
         ) {
             $this->log('pause_turn detected');
-            self::$sessions[$this->session_id][] = [
-                'role' => 'assistant',
-                'content' => $response->result->content
-            ];
+            self::$sessions[$this->session_id] = array_merge(
+                self::$sessions[$this->session_id],
+                $this->transformFormatBackward($response->result)
+            );
             return $this->askThis($prompt, $files, false);
         }
 
@@ -1119,11 +1227,13 @@ class ai_claude extends aihelper
 
         $return['response'] = $output_text;
         $return['success'] = true;
-        $return['content'] = @$response->result->content;
-        self::$sessions[$this->session_id][] = [
-            'role' => 'assistant',
-            'content' => $response->result->content
-        ];
+
+        if (__::x(@$response) && __::x(@$response->result)) {
+            self::$sessions[$this->session_id] = array_merge(
+                self::$sessions[$this->session_id],
+                $this->transformFormatBackward($response->result)
+            );
+        }
 
         // parse json
         $return['response'] = $this->parseJson($return['response']);
@@ -1184,51 +1294,109 @@ class ai_gemini extends aihelper
         ]
     ];
 
-    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
+    protected function transformFormatForward($data = null)
     {
-        $return = ['response' => null, 'success' => false, 'content' => [], 'costs' => 0.0];
-
-        if (__::nx($this->model) || __::nx($this->api_key) || __::nx($this->session_id)) {
-            $return['response'] = 'data missing.';
-            return $return;
+        if (!is_array($data)) {
+            return $data;
         }
-
-        if (__::nx($prompt)) {
-            $return['response'] = 'prompt missing.';
-            return $return;
-        }
-
-        // trim prompt
-        $prompt = __trim_whitespace(__trim_every_line($prompt));
-
-        if ($add_prompt_to_session === true) {
-            self::$sessions[$this->session_id][] = [
-                'role' => 'user',
-                'parts' => [['text' => $prompt]]
-            ];
-        }
-
-        if (__::x(@$files)) {
-            if (!is_array($files)) {
-                $files = [$files];
+        $contents = [];
+        $current_role = null;
+        $current_parts = [];
+        $push_content = function () use (&$contents, &$current_role, &$current_parts) {
+            if ($current_role !== null && !empty($current_parts)) {
+                $contents[] = [
+                    'role' => $current_role,
+                    'parts' => $current_parts
+                ];
             }
-            foreach ($files as $files__value) {
-                if (!file_exists($files__value)) {
-                    continue;
-                }
-                if ($add_prompt_to_session === true) {
-                    self::$sessions[$this->session_id][count(self::$sessions[$this->session_id]) - 1]['parts'][] = [
+            $current_role = null;
+            $current_parts = [];
+        };
+        foreach ($data as $item) {
+            if (!is_array($item) || !isset($item['role']) || !isset($item['type'])) {
+                continue;
+            }
+            $role = $item['role'] === 'assistant' ? 'model' : 'user';
+            if ($current_role !== $role && !empty($current_parts)) {
+                $push_content();
+            }
+            if ($current_role === null) {
+                $current_role = $role;
+            }
+
+            if ($item['type'] === 'text') {
+                $current_parts[] = [
+                    'text' => (string) ($item['content'] ?? '')
+                ];
+                continue;
+            }
+            if ($item['type'] === 'file' && isset($item['content']) && is_string($item['content'])) {
+                if (preg_match('/^data:([^;]+);base64,(.*)$/s', $item['content'], $m)) {
+                    $mime = $m[1];
+                    $b64 = $m[2];
+                    $current_parts[] = [
                         'inline_data' => [
-                            'mime_type' => mime_content_type($files__value),
-                            'data' => base64_encode(file_get_contents($files__value))
+                            'mime_type' => $mime,
+                            'data' => $b64
                         ]
                     ];
                 }
             }
         }
+        if (!empty($current_parts)) {
+            $contents[] = [
+                'role' => $current_role ?? 'user',
+                'parts' => $current_parts
+            ];
+        }
+        return $contents;
+    }
+
+    protected function transformFormatBackward($data = null)
+    {
+        $out = [];
+        if (!is_object($data)) {
+            return $out;
+        }
+        $text = '';
+        if (isset($data->candidates) && is_array($data->candidates)) {
+            foreach ($data->candidates as $cand) {
+                if (isset($cand->content) && isset($cand->content->parts) && is_array($cand->content->parts)) {
+                    foreach ($cand->content->parts as $p) {
+                        if (isset($p->text)) {
+                            $text .= (string) $p->text;
+                        }
+                    }
+                }
+            }
+        }
+        if ($text !== '') {
+            $out[] = [
+                'role' => 'assistant',
+                'type' => 'text',
+                'content' => $text
+            ];
+        }
+        return $out;
+    }
+
+    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
+    {
+        $return = ['response' => null, 'success' => false, 'costs' => 0.0];
+
+        if (__::nx($this->model) || __::nx($this->api_key) || __::nx($this->session_id) || __::nx($prompt)) {
+            $return['response'] = 'data missing.';
+            return $return;
+        }
+
+        $prompt = __trim_whitespace(__trim_every_line($prompt));
+
+        if ($add_prompt_to_session === true) {
+            $this->addPromptToSession($prompt, $files);
+        }
 
         $args = [
-            'contents' => self::$sessions[$this->session_id],
+            'contents' => $this->transformFormatForward(self::$sessions[$this->session_id]),
             'generationConfig' => [
                 'temperature' => $this->temperature
             ]
@@ -1272,16 +1440,15 @@ class ai_gemini extends aihelper
             }
             return $return;
         }
+
         $return['response'] = $output_text;
         $return['success'] = true;
-        $return['content'] = @$response->result->candidates;
 
-        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->candidates)) {
-            foreach ($response->result->candidates as $candidates__value) {
-                if (__::x(@$candidates__value->content)) {
-                    self::$sessions[$this->session_id][] = $candidates__value->content;
-                }
-            }
+        if (__::x(@$response) && __::x(@$response->result)) {
+            self::$sessions[$this->session_id] = array_merge(
+                self::$sessions[$this->session_id],
+                $this->transformFormatBackward($response->result)
+            );
         }
 
         // parse json
