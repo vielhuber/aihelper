@@ -429,13 +429,16 @@ class Test extends \PHPUnit\Framework\TestCase
                     ],
                     'POST'
                 );
-                //$this->log('access token: ' . $return->result->access_token);
+                //$this->log('token: ' . $return->result->access_token);
+                $i_url = 1;
+                $i_prompt = 1;
                 $mcp_servers = [];
-                foreach (explode(',', @$_SERVER['MCP_SERVER_TEST_URLS']) as $urls__value) {
+                while (@$_SERVER['MCP_SERVER_TEST_URL_' . $i_url] != '') {
                     $mcp_servers[] = [
-                        'url' => $urls__value,
+                        'url' => $_SERVER['MCP_SERVER_TEST_URL_' . $i_url],
                         'authorization_token' => $return->result->access_token
                     ];
+                    $i_url++;
                 }
                 $ai_mcp = aihelper::create(
                     provider: $provider,
@@ -447,64 +450,26 @@ class Test extends \PHPUnit\Framework\TestCase
                     max_tries: 1,
                     mcp_servers: $mcp_servers
                 );
-
-                $return = $ai_mcp->ask('
-                Was ist das Gegenteil von "hell"?
-                Antworte bitte kurz.
-            ');
-                $success_this =
-                    $return['success'] &&
-                    count($ai_mcp->getSessionContent()) === 4 &&
-                    stripos($return['response'], 'dunkel') !== false;
-                if ($success_this) {
-                    $success_count++;
-                } else {
-                    $fail_count++;
-                }
-                $costs += $return['costs'];
-                $this->log(($success_this ? '✅' : '⛔') . ' #11 (mcp1)');
-                if ($success_this === false) {
-                    $this->log($return);
-                }
-
-                $return = $ai_mcp->ask('
-                Welche Dateien befinden sich auf meinem PC im Ordner:
-                /var/www/aihelper?
-                Nutze Tools!
-            ');
-                $success_this =
-                    $return['success'] &&
-                    count($ai_mcp->getSessionContent()) === 6 &&
-                    stripos($return['response'], '.env.example') !== false;
-                if ($success_this) {
-                    $success_count++;
-                } else {
-                    $fail_count++;
-                }
-                $costs += $return['costs'];
-                $this->log(($success_this ? '✅' : '⛔') . ' #12 (mcp2)');
-                if ($success_this === false) {
-                    $this->log($return);
-                }
-
-                $return = $ai_mcp->ask('
-                Gibt es mehr als 1000 Kunden in der Datenbank?
-                Schau in die Datenbanktabelle "customer".
-                Nutze Tools!
-            ');
-                $success_this =
-                    $return['success'] &&
-                    count($ai_mcp->getSessionContent()) === 8 &&
-                    stripos($return['response'], 'ja') !== false;
-                if ($success_this) {
-                    $success_count++;
-                } else {
-                    $fail_count++;
-                }
-                $costs += $return['costs'];
-                $this->log(($success_this ? '✅' : '⛔') . ' #13 (mcp3)');
-                if ($success_this === false) {
-                    $this->log($return);
+                while (
+                    @$_SERVER['MCP_SERVER_TEST_PROMPT_' . $i_prompt] != '' &&
+                    @$_SERVER['MCP_SERVER_TEST_ANSWER_' . $i_prompt] != ''
+                ) {
+                    $return = $ai_mcp->ask($_SERVER['MCP_SERVER_TEST_PROMPT_' . $i_prompt]);
+                    $success_this =
+                        $return['success'] &&
+                        count($ai_mcp->getSessionContent()) === $i_prompt * 2 &&
+                        stripos($return['response'], $_SERVER['MCP_SERVER_TEST_ANSWER_' . $i_prompt]) !== false;
+                    if ($success_this) {
+                        $success_count++;
+                    } else {
+                        $fail_count++;
+                    }
+                    $costs += $return['costs'];
+                    $this->log(($success_this ? '✅' : '⛔') . ' #11 (mcp nr ' . $i_prompt . ')');
+                    if ($success_this === false) {
+                        $this->log($return);
+                    }
+                    $i_prompt++;
                 }
             }
         }
