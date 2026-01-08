@@ -420,11 +420,11 @@ class Test extends \PHPUnit\Framework\TestCase
             $supported = in_array($provider, ['claude', 'chatgpt']);
             if ($supported === true) {
                 $return = __::curl(
-                    @$_SERVER['MCP_SERVER_TEST_AUTH_TOKEN_URL'],
+                    @$_SERVER['MCP_SERVER_TEST_AUTH_URL'],
                     [
-                        'client_id' => @$_SERVER['MCP_SERVER_TEST_AUTH_TOKEN_CLIENT_ID'],
-                        'client_secret' => @$_SERVER['MCP_SERVER_TEST_AUTH_TOKEN_CLIENT_SECRET'],
-                        'audience' => @$_SERVER['MCP_SERVER_TEST_AUTH_TOKEN_AUDIENCE'],
+                        'client_id' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'],
+                        'client_secret' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'],
+                        'audience' => @$_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'],
                         'grant_type' => 'client_credentials'
                     ],
                     'POST'
