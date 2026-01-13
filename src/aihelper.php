@@ -157,7 +157,7 @@ abstract class aihelper
             $this->log = $log;
         }
         $this->max_tries = $max_tries !== null ? $max_tries : 1;
-        if ($this->support_mcp && $mcp_servers !== null) {
+        if ($this->support_mcp && $mcp_servers !== null && !empty($mcp_servers)) {
             if (is_array(current($mcp_servers))) {
                 $this->mcp_servers = $mcp_servers;
             } else {
