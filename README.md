@@ -22,6 +22,7 @@ $ai = aihelper::create(
     api_key: '**API Key**',
     log: 'output.log',
     max_tries: 1,
+    timeout: 300, // maximum timeout (increase for long tasks)
     mcp_servers: [
         [
             'name' => 'example-mcp',

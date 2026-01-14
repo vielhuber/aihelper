@@ -15,6 +15,7 @@ abstract class aihelper
 
     protected $model = null;
     protected $temperature = null;
+    protected $timeout = null;
     protected $api_key = null;
     protected $log = null;
     protected $max_tries = null;
@@ -33,6 +34,7 @@ abstract class aihelper
         $provider,
         $model = null,
         $temperature = null,
+        $timeout = null,
         $api_key = null,
         $log = null,
         $max_tries = null,
@@ -43,67 +45,72 @@ abstract class aihelper
     ) {
         if ($provider === 'chatgpt') {
             return new ai_chatgpt(
-                $model,
-                $temperature,
-                $api_key,
-                $log,
-                $max_tries,
-                $mcp_servers,
-                $session_id,
-                $history,
-                $stream
+                model: $model,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream
             );
         }
         if ($provider === 'claude') {
             return new ai_claude(
-                $model,
-                $temperature,
-                $api_key,
-                $log,
-                $max_tries,
-                $mcp_servers,
-                $session_id,
-                $history,
-                $stream
+                model: $model,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream
             );
         }
         if ($provider === 'gemini') {
             return new ai_gemini(
-                $model,
-                $temperature,
-                $api_key,
-                $log,
-                $max_tries,
-                $mcp_servers,
-                $session_id,
-                $history,
-                $stream
+                model: $model,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream
             );
         }
         if ($provider === 'grok') {
             return new ai_grok(
-                $model,
-                $temperature,
-                $api_key,
-                $log,
-                $max_tries,
-                $mcp_servers,
-                $session_id,
-                $history,
-                $stream
+                model: $model,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream
             );
         }
         if ($provider === 'deepseek') {
             return new ai_deepseek(
-                $model,
-                $temperature,
-                $api_key,
-                $log,
-                $max_tries,
-                $mcp_servers,
-                $session_id,
-                $history,
-                $stream
+                model: $model,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream
             );
         }
         return null;
@@ -259,6 +266,7 @@ abstract class aihelper
     public function __construct(
         $model = null,
         $temperature = null,
+        $timeout = null,
         $api_key = null,
         $log = null,
         $max_tries = null,
@@ -272,6 +280,9 @@ abstract class aihelper
         }
         if ($temperature === null) {
             $temperature = 1.0;
+        }
+        if ($timeout === null) {
+            $timeout = 300;
         }
         if ($log !== null) {
             $this->log = $log;
@@ -288,6 +299,7 @@ abstract class aihelper
 
         $this->model = $model;
         $this->temperature = $temperature;
+        $this->timeout = $timeout;
         $this->api_key = $api_key;
         if (__::nx($session_id)) {
             $this->session_id = md5(uniqid());
@@ -403,7 +415,9 @@ abstract class aihelper
                 ' - ' .
                 $this->model .
                 ' - ' .
-                \DateTime::createFromFormat('U.u', sprintf('%.6F', microtime(true)))->format('Y-m-d H:i:s.u') .
+                \DateTime::createFromFormat('U.u', sprintf('%.6F', microtime(true)))
+                    ->setTimezone(new \DateTimeZone(date_default_timezone_get()))
+                    ->format('Y-m-d H:i:s.u') .
                 ($prefix !== null ? ' - ' . $prefix : '') .
                 ' ' .
                 'ℹ️' .
@@ -1011,6 +1025,7 @@ class ai_chatgpt extends aihelper
             headers: [
                 'Authorization' => 'Bearer ' . $this->api_key
             ],
+            timeout: $this->timeout,
             stream_callback: $this->getStreamCallback()
         );
         if ($this->stream === true) {
@@ -1276,6 +1291,7 @@ class ai_claude extends aihelper
                 'anthropic-version' => '2023-06-01',
                 'anthropic-beta' => 'mcp-client-2025-04-04'
             ],
+            timeout: $this->timeout,
             stream_callback: $this->getStreamCallback()
         );
         if ($this->stream === true) {
@@ -1523,10 +1539,11 @@ class ai_gemini extends aihelper
         ];
         $this->log($args, 'ask');
         $response = __::curl(
-            $this->url . '/models/' . $this->model . ':generateContent?key=' . $this->api_key,
-            $args,
-            'POST',
-            null
+            url: $this->url . '/models/' . $this->model . ':generateContent?key=' . $this->api_key,
+            data: $args,
+            method: 'POST',
+            headers: null,
+            timeout: $this->timeout
         );
         $this->log(@$response->result, 'response');
         $this->addCosts($response, $return);
