@@ -138,8 +138,8 @@ abstract class aihelper
         try {
             $ch = curl_init($url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
             curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
@@ -170,10 +170,10 @@ abstract class aihelper
                     'id' => 0,
                     'method' => 'initialize',
                     'params' => [
-                        'protocolVersion' => '2025-11-25',
+                        'protocolVersion' => date('Y-m-d'),
                         'capabilities' => new \stdClass(),
                         'clientInfo' => [
-                            'name' => 'charly',
+                            'name' => 'ping',
                             'version' => '1.0.0'
                         ]
                     ]
@@ -184,7 +184,7 @@ abstract class aihelper
                 $headers[] = 'Authorization: Bearer ' . $authorization_token;
             }
             curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             $initResponse = curl_exec($ch);
             if ($initResponse) {
@@ -223,7 +223,7 @@ abstract class aihelper
                 $headers[] = 'Authorization: Bearer ' . $authorization_token;
             }
             curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             $toolsResponse = curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
