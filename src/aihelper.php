@@ -126,6 +126,126 @@ abstract class aihelper
         return $data;
     }
 
+    public static function getMcpMetaInfo($url = null, $authorization_token = null)
+    {
+        $data = [
+            'name' => null,
+            'online' => false,
+            'instructions' => null,
+            'tools' => []
+        ];
+
+        try {
+            $ch = curl_init($url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_NOBODY, true); // HEAD Request
+            curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if (($httpCode >= 200 && $httpCode < 500) || $httpCode === 401 || $httpCode === 403) {
+                $data['online'] = true;
+            } else {
+                $data['online'] = false;
+                return $data;
+            }
+        } catch (\Exception) {
+            $data['online'] = false;
+            return $data;
+        }
+
+        try {
+            // name / instructions
+            $ch = curl_init($url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt(
+                $ch,
+                CURLOPT_POSTFIELDS,
+                json_encode([
+                    'jsonrpc' => '2.0',
+                    'id' => 0,
+                    'method' => 'initialize',
+                    'params' => [
+                        'protocolVersion' => '2025-11-25',
+                        'capabilities' => new \stdClass(),
+                        'clientInfo' => [
+                            'name' => 'charly',
+                            'version' => '1.0.0'
+                        ]
+                    ]
+                ])
+            );
+            $headers = ['Content-Type: application/json', 'Accept: application/json, text/event-stream'];
+            if ($authorization_token) {
+                $headers[] = 'Authorization: Bearer ' . $authorization_token;
+            }
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            $initResponse = curl_exec($ch);
+            if ($initResponse) {
+                // parse sse response if needed
+                if (strpos($initResponse, 'event: message') !== false) {
+                    preg_match('/data: (.+)/s', $initResponse, $matches);
+                    if (isset($matches[1])) {
+                        $initResponse = trim($matches[1]);
+                    }
+                }
+
+                $initData = json_decode($initResponse, true);
+                if (isset($initData['result']['serverInfo']['name'])) {
+                    $data['name'] = $initData['result']['serverInfo']['name'];
+                }
+                if (isset($initData['result']['instructions'])) {
+                    $data['instructions'] = $initData['result']['instructions'];
+                }
+            }
+
+            // tools
+            $ch = curl_init($url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt(
+                $ch,
+                CURLOPT_POSTFIELDS,
+                json_encode([
+                    'jsonrpc' => '2.0',
+                    'id' => 1,
+                    'method' => 'tools/list'
+                ])
+            );
+            $headers = ['Content-Type: application/json', 'Accept: application/json, text/event-stream'];
+            if ($authorization_token) {
+                $headers[] = 'Authorization: Bearer ' . $authorization_token;
+            }
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            $toolsResponse = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if ($httpCode >= 200 && $httpCode < 300 && $toolsResponse) {
+                // parse sse response if needed
+                if (strpos($toolsResponse, 'event: message') !== false) {
+                    preg_match('/data: (.+)/s', $toolsResponse, $matches);
+                    if (isset($matches[1])) {
+                        $toolsResponse = trim($matches[1]);
+                    }
+                }
+                $toolsData = json_decode($toolsResponse, true);
+                if (isset($toolsData['result']['tools']) && is_array($toolsData['result']['tools'])) {
+                    $data['tools'] = $toolsData['result']['tools'];
+                }
+            }
+            return $data;
+        } catch (\Exception) {
+            return $data;
+        }
+    }
+
     protected function getDefaultModel()
     {
         foreach ($this->models as $models__value) {
