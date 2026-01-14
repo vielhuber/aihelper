@@ -507,4 +507,55 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
     }
+
+    function test__ai_get_mcp_meta_info()
+    {
+        if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
+            $return = __::curl(
+                @$_SERVER['MCP_SERVER_TEST_AUTH_URL'],
+                [
+                    'client_id' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'],
+                    'client_secret' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'],
+                    'audience' => @$_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'],
+                    'grant_type' => 'client_credentials'
+                ],
+                'POST'
+            );
+            //$this->log('token: ' . $return->result->access_token);
+            $i_url = 1;
+            while (@$_SERVER['MCP_SERVER_TEST_URL_' . $i_url] != '') {
+                $meta = aihelper::getMcpMetaInfo(
+                    $_SERVER['MCP_SERVER_TEST_URL_' . $i_url],
+                    $return->result->access_token
+                );
+                $this->assertTrue(array_key_exists('name', $meta));
+                $this->assertTrue(array_key_exists('online', $meta));
+                $this->assertTrue(array_key_exists('instructions', $meta));
+                $this->assertTrue(array_key_exists('tools', $meta));
+                $this->assertTrue(is_string($meta['name']));
+                $this->assertTrue(is_bool($meta['online']));
+                $this->assertTrue(is_string($meta['instructions']));
+                $this->assertTrue(is_array($meta['tools']));
+                $this->assertTrue($meta['name'] !== '');
+                $this->assertTrue($meta['online']);
+                $this->assertTrue($meta['instructions'] !== '');
+                $this->assertTrue(!empty($meta['tools']) && count($meta['tools']) > 0);
+                $i_url++;
+            }
+
+            $meta = aihelper::getMcpMetaInfo('https://tld.test/mcp_invalid_endpoint', 'xxx');
+            $this->assertTrue(array_key_exists('name', $meta));
+            $this->assertTrue(array_key_exists('online', $meta));
+            $this->assertTrue(array_key_exists('instructions', $meta));
+            $this->assertTrue(array_key_exists('tools', $meta));
+            $this->assertTrue(is_null($meta['name']));
+            $this->assertTrue(is_bool($meta['online']));
+            $this->assertTrue(is_null($meta['instructions']));
+            $this->assertTrue(is_array($meta['tools']));
+            $this->assertNull($meta['name']);
+            $this->assertFalse($meta['online']);
+            $this->assertNull($meta['instructions']);
+            $this->assertTrue(empty($meta['tools']));
+        }
+    }
 }
