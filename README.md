@@ -50,9 +50,13 @@ $ai->ask(prompt: 'Was habe ich vorher gefragt?');
 // ['response' => 'Du hast gefragt: "Wie lautet das erste Wort in der PDF?"', 'success' => true, 'costs' => 0.001]
 
 aihelper::getProviders() // gets overview of providers and models
+
 $ai->getSessionId() // get current session id
+
 $ai->getSessionContent() // gets messages in chat history
-aihelper::getMcpMetaInfo(url: 'https://modelcontextprotocol.io/mcp', authorization_token: '...'); // ['name' => '...', 'online' => true, 'instructions' => '...', 'tools' => ['...']]
+
+aihelper::getMcpMetaInfo(url: 'https://modelcontextprotocol.io/mcp', authorization_token: '...');
+// ['name' => '...', 'online' => true, 'instructions' => '...', 'tools' => ['...']]
 ```
 
 ### streaming
