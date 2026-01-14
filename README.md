@@ -52,6 +52,7 @@ $ai->ask(prompt: 'Was habe ich vorher gefragt?');
 aihelper::getProviders() // gets overview of providers and models
 $ai->getSessionId() // get current session id
 $ai->getSessionContent() // gets messages in chat history
+aihelper::getMcpMetaInfo(url: 'https://modelcontextprotocol.io/mcp', authorization_token: '...'); // ['name' => '...', 'online' => true, 'instructions' => '...', 'tools' => '...']
 ```
 
 ### streaming
