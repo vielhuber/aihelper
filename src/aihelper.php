@@ -154,7 +154,7 @@ abstract class aihelper
             curl_setopt($ch, CURLOPT_NOBODY, true); // HEAD Request
             curl_exec($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            if (($httpCode >= 200 && $httpCode < 500) || $httpCode === 401 || $httpCode === 403) {
+            if (($httpCode >= 200 && $httpCode < 400) || $httpCode === 401 || $httpCode === 403) {
                 $data['online'] = true;
             } else {
                 $data['online'] = false;
@@ -162,6 +162,10 @@ abstract class aihelper
             }
         } catch (\Exception) {
             $data['online'] = false;
+            return $data;
+        }
+
+        if ($data['online'] === false) {
             return $data;
         }
 
