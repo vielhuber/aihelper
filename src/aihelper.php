@@ -26,6 +26,7 @@ abstract class aihelper
     protected $stream_event = null;
     protected $stream_buffer_in = null;
     protected $stream_buffer_data = null;
+    protected $stream_current_block_type = null;
 
     protected $session_id = null;
     protected static $sessions = [];
@@ -542,6 +543,7 @@ abstract class aihelper
         $this->stream_event = null;
         $this->stream_buffer_in = '';
         $this->stream_buffer_data = '';
+        $this->stream_current_block_type = null;
 
         if ($this->name === 'claude') {
             // mimic non stream result
@@ -602,6 +604,11 @@ abstract class aihelper
                         if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
                             $parsed = json_decode($this->stream_buffer_data, true);
 
+                            // track block type
+                            if (isset($parsed['type']) && $parsed['type'] === 'content_block_start') {
+                                $this->stream_current_block_type = @$parsed['content_block']['type'];
+                            }
+
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_delta') {
                                 if (isset($parsed['delta']['text'])) {
                                     $text = $parsed['delta']['text'];
@@ -618,6 +625,27 @@ abstract class aihelper
                                     }
                                     @flush();
                                 }
+                            }
+
+                            // content_block_stop: only add newline after text blocks
+                            if (
+                                isset($parsed['type']) &&
+                                $parsed['type'] === 'content_block_stop' &&
+                                $this->stream_current_block_type === 'text'
+                            ) {
+                                $text = "\n\n";
+                                $this->stream_response->result->content[0]->text .= $text;
+
+                                echo 'data: ' .
+                                    json_encode([
+                                        'id' => uniqid(),
+                                        'choices' => [['delta' => ['content' => $text]]]
+                                    ]) .
+                                    "\n\n";
+                                if (ob_get_level() > 0) {
+                                    @ob_flush();
+                                }
+                                @flush();
                             }
 
                             if (isset($parsed['usage'])) {
