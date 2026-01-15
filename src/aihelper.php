@@ -134,6 +134,49 @@ abstract class aihelper
         return $data;
     }
 
+    public static function getMcpOnlineStatus($url = null, $authorization_token = null)
+    {
+        try {
+            // add trailing slash to avoid 307 redirect
+            if (substr($url, -1) !== '/') {
+                $url .= '/';
+            }
+
+            // use mcp ping endpoint
+            $ch = curl_init($url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt(
+                $ch,
+                CURLOPT_POSTFIELDS,
+                json_encode([
+                    'jsonrpc' => '2.0',
+                    'id' => 1,
+                    'method' => 'ping'
+                ])
+            );
+            $headers = ['Content-Type: application/json', 'Accept: application/json, text/event-stream'];
+            if ($authorization_token) {
+                $headers[] = 'Authorization: Bearer ' . $authorization_token;
+            }
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+            curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if (($httpCode >= 200 && $httpCode < 400) || $httpCode === 401 || $httpCode === 403) {
+                return true;
+            } else {
+                return false;
+            }
+        } catch (\Exception) {
+            return false;
+        }
+    }
+
     public static function getMcpMetaInfo($url = null, $authorization_token = null)
     {
         $data = [
@@ -143,27 +186,7 @@ abstract class aihelper
             'tools' => []
         ];
 
-        try {
-            $ch = curl_init($url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_NOBODY, true); // HEAD Request
-            curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            if (($httpCode >= 200 && $httpCode < 400) || $httpCode === 401 || $httpCode === 403) {
-                $data['online'] = true;
-            } else {
-                $data['online'] = false;
-                return $data;
-            }
-        } catch (\Exception) {
-            $data['online'] = false;
-            return $data;
-        }
+        $data['online'] = self::getMcpOnlineStatus($url, $authorization_token);
 
         if ($data['online'] === false) {
             return $data;

@@ -524,6 +524,13 @@ class Test extends \PHPUnit\Framework\TestCase
             //$this->log('token: ' . $return->result->access_token);
             $i_url = 1;
             while (@$_SERVER['MCP_SERVER_TEST_URL_' . $i_url] != '') {
+                $status = aihelper::getMcpOnlineStatus(
+                    $_SERVER['MCP_SERVER_TEST_URL_' . $i_url],
+                    $return->result->access_token
+                );
+                $this->assertTrue(is_bool($status));
+                $this->assertTrue($status);
+
                 $meta = aihelper::getMcpMetaInfo(
                     $_SERVER['MCP_SERVER_TEST_URL_' . $i_url],
                     $return->result->access_token
@@ -542,6 +549,10 @@ class Test extends \PHPUnit\Framework\TestCase
                 $this->assertTrue(!empty($meta['tools']) && count($meta['tools']) > 0);
                 $i_url++;
             }
+
+            $status = aihelper::getMcpOnlineStatus('https://tld.test/mcp_invalid_endpoint', 'xxx');
+            $this->assertTrue(is_bool($status));
+            $this->assertFalse($status);
 
             $meta = aihelper::getMcpMetaInfo('https://tld.test/mcp_invalid_endpoint', 'xxx');
             $this->assertTrue(array_key_exists('name', $meta));
