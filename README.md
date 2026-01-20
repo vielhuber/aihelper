@@ -56,10 +56,24 @@ $ai->getSessionId() // get current session id
 
 $ai->getSessionContent() // gets messages in chat history
 
-aihelper::getMcpOnlineStatus(url: 'https://modelcontextprotocol.io/mcp', authorization_token: '...');
+aihelper::getMcpOnlineStatus(
+    url: 'https://modelcontextprotocol.io/mcp',
+    authorization_token: '...'
+);
 // true|false
 
-aihelper::getMcpMetaInfo(url: 'https://modelcontextprotocol.io/mcp', authorization_token: '...');
+aihelper::getMcpMetaInfo(
+    url: 'https://modelcontextprotocol.io/mcp',
+    authorization_token: '...'
+);
+// ['name' => '...', 'online' => true, 'instructions' => '...', 'tools' => ['...']]
+
+aihelper::callMcpTool(
+    name: 'foo-123',
+    args: ['foo' => 'bar'],
+    url: 'https://modelcontextprotocol.io/mcp',
+    authorization_token: '...'
+);
 // ['name' => '...', 'online' => true, 'instructions' => '...', 'tools' => ['...']]
 ```
 

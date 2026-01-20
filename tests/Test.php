@@ -471,9 +471,9 @@ class Test extends \PHPUnit\Framework\TestCase
                 $i_url = 1;
                 $i_prompt = 1;
                 $mcp_servers = [];
-                while (@$_SERVER['MCP_SERVER_TEST_URL_' . $i_url] != '') {
+                while (@$_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] != '') {
                     $mcp_servers[] = [
-                        'url' => $_SERVER['MCP_SERVER_TEST_URL_' . $i_url],
+                        'url' => $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
                         'authorization_token' => $return->result->access_token
                     ];
                     $i_url++;
@@ -546,7 +546,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function test__ai_get_mcp_meta_info()
+    function test__ai_mcp()
     {
         if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
             $return = __::curl(
@@ -561,16 +561,16 @@ class Test extends \PHPUnit\Framework\TestCase
             );
             //$this->log('token: ' . $return->result->access_token);
             $i_url = 1;
-            while (@$_SERVER['MCP_SERVER_TEST_URL_' . $i_url] != '') {
+            while (@$_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] != '') {
                 $status = aihelper::getMcpOnlineStatus(
-                    $_SERVER['MCP_SERVER_TEST_URL_' . $i_url],
+                    $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
                     $return->result->access_token
                 );
                 $this->assertTrue(is_bool($status));
                 $this->assertTrue($status);
 
                 $meta = aihelper::getMcpMetaInfo(
-                    $_SERVER['MCP_SERVER_TEST_URL_' . $i_url],
+                    $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
                     $return->result->access_token
                 );
                 $this->assertTrue(array_key_exists('name', $meta));
@@ -585,6 +585,19 @@ class Test extends \PHPUnit\Framework\TestCase
                 $this->assertTrue($meta['online']);
                 $this->assertTrue($meta['instructions'] !== '');
                 $this->assertTrue(!empty($meta['tools']) && count($meta['tools']) > 0);
+
+                if (@$_SERVER['MCP_SERVER_TEST_' . $i_url . '_TOOL'] != '') {
+                    $tool_response = aihelper::callMcpTool(
+                        $_SERVER['MCP_SERVER_TEST_' . $i_url . '_TOOL'],
+                        null,
+                        $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
+                        $return->result->access_token
+                    );
+                    $this->assertTrue(is_array($tool_response));
+                    $this->assertTrue(isset($tool_response['result']));
+                    $this->assertTrue(mb_strpos(serialize($tool_response), '"jsonrpc"') !== false);
+                }
+
                 $i_url++;
             }
 
@@ -605,6 +618,14 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->assertFalse($meta['online']);
             $this->assertNull($meta['instructions']);
             $this->assertTrue(empty($meta['tools']));
+
+            $tool_response = aihelper::callMcpTool(
+                'unknown_tool',
+                null,
+                'https://tld.test/mcp_invalid_endpoint',
+                'xxx'
+            );
+            $this->assertNull($tool_response);
         }
     }
 }

@@ -295,6 +295,61 @@ abstract class aihelper
         }
     }
 
+    public static function callMcpTool($name = null, $args = [], $url = null, $authorization_token = null)
+    {
+        try {
+            // add trailing slash to avoid 307 redirect
+            if (substr($url, -1) !== '/') {
+                $url .= '/';
+            }
+
+            $ch = curl_init($url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt(
+                $ch,
+                CURLOPT_POSTFIELDS,
+                json_encode([
+                    'jsonrpc' => '2.0',
+                    'id' => rand(100, 999),
+                    'method' => 'tools/call',
+                    'params' => [
+                        'name' => $name,
+                        'input' => (object) $args
+                    ]
+                ])
+            );
+            $headers = ['Content-Type: application/json', 'Accept: application/json, text/event-stream'];
+            if ($authorization_token) {
+                $headers[] = 'Authorization: Bearer ' . $authorization_token;
+            }
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            if ($httpCode >= 200 && $httpCode < 300 && $response) {
+                // parse sse response if needed
+                if (strpos($response, 'event: message') !== false) {
+                    preg_match('/data: (.+)/s', $response, $matches);
+                    if (isset($matches[1])) {
+                        $response = trim($matches[1]);
+                    }
+                }
+                $decoded_response = json_decode($response, true);
+                return $decoded_response;
+            }
+            return null;
+        } catch (\Exception $e) {
+            print_r($e->getMessage());
+            die();
+            return null;
+        }
+    }
+
     protected function getDefaultModel()
     {
         foreach ($this->models as $models__value) {
