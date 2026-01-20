@@ -659,10 +659,10 @@ abstract class aihelper
 
                             // track block type and add separator before new block
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_start') {
-                                // if this is not the first block, add separator, aber nur wenn der letzte Text nicht schon mit \n endet
+                                // if this is not the first block, add separator, but only if the last text does not already end with \n
                                 if ($this->stream_current_block_type !== null) {
                                     $lastText = $this->stream_response->result->content[0]->text;
-                                    // nur Separator senden, wenn nicht schon mindestens ein Zeilenumbruch am Ende steht
+                                    // only send separator if there is not already at least one line break at the end
                                     if (!preg_match('/\n$/', $lastText)) {
                                         $text = "\n\n";
                                         $this->stream_response->result->content[0]->text .= $text;
