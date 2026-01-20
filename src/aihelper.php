@@ -135,7 +135,7 @@ abstract class aihelper
     {
         $data = [];
         foreach (
-            [new ai_claude(), new ai_gemini(), new ai_chatgpt(), new ai_grok(), new ai_deepseek(), new ai_test()]
+            [new ai_claude(), new ai_gemini(), new ai_chatgpt(), new ai_grok(), new ai_deepseek()]
             as $providers__value
         ) {
             $data[] = [
