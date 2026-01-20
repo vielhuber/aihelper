@@ -659,21 +659,24 @@ abstract class aihelper
 
                             // track block type and add separator before new block
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_start') {
-                                // if this is not the first block, add separator
+                                // if this is not the first block, add separator, aber nur wenn der letzte Text nicht schon mit \n endet
                                 if ($this->stream_current_block_type !== null) {
-                                    $text = "\n\n";
-                                    $this->stream_response->result->content[0]->text .= $text;
-
-                                    echo 'data: ' .
-                                        json_encode([
-                                            'id' => uniqid(),
-                                            'choices' => [['delta' => ['content' => $text]]]
-                                        ]) .
-                                        "\n\n";
-                                    if (ob_get_level() > 0) {
-                                        @ob_flush();
+                                    $lastText = $this->stream_response->result->content[0]->text;
+                                    // nur Separator senden, wenn nicht schon mindestens ein Zeilenumbruch am Ende steht
+                                    if (!preg_match('/\n$/', $lastText)) {
+                                        $text = "\n\n";
+                                        $this->stream_response->result->content[0]->text .= $text;
+                                        echo 'data: ' .
+                                            json_encode([
+                                                'id' => uniqid(),
+                                                'choices' => [['delta' => ['content' => $text]]]
+                                            ]) .
+                                            "\n\n";
+                                        if (ob_get_level() > 0) {
+                                            @ob_flush();
+                                        }
+                                        @flush();
                                     }
-                                    @flush();
                                 }
                                 $this->stream_current_block_type = @$parsed['content_block']['type'];
                             }
