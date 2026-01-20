@@ -46,6 +46,10 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->log('run ' . $i . '/' . $this->run_count . '...');
             $this->test__ai_deepseek($stats);
         }
+        for ($i = 1; $i <= $this->run_count; $i++) {
+            $this->log('run ' . $i . '/' . $this->run_count . '...');
+            $this->test__ai_test($stats);
+        }
         $this->log('stats (' . $this->run_count . ' runs):');
         foreach ($stats as $stats__key => $stats__value) {
             foreach ($stats__value as $stats__value__key => $stats__value__value) {
@@ -104,6 +108,11 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('deepseek', @$_SERVER['DEEPSEEK_API_KEY'], $stats);
     }
 
+    function test__ai_test(&$stats = [])
+    {
+        $this->ai_test_prepare('test', null, $stats);
+    }
+
     function ai_test_prepare($provider, $api_key, &$stats = [])
     {
         $models = aihelper::create(provider: $provider)->getTestModels();
@@ -143,7 +152,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $fail_count = 0;
         $success_count = 0;
 
-        $supported = true;
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek']);
         if ($supported === true) {
             $return = $ai->ask('Wer wurde 2018 Fußball-Weltmeister? Antworte bitte kurz.');
             //$this->log($return);
@@ -164,7 +173,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = true;
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek']);
         if ($supported === true) {
             $return = $ai->ask('Was habe ich vorher gefragt?');
             //$this->log($return);
@@ -187,7 +196,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = true;
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek']);
         if ($supported === true) {
             $return = $ai->ask('Welchen Satz hast Du exakt zuvor geschrieben?');
             //$this->log($return);
@@ -210,7 +219,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = true;
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek']);
         if ($supported === true) {
             $return = $ai->ask('Ich heiße David mit Vornamen. Bitte merk Dir das!');
             //$this->log($return);
@@ -240,7 +249,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = true;
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek']);
         if ($supported === true) {
             $ai = aihelper::create(
                 provider: $provider,
@@ -379,6 +388,35 @@ class Test extends \PHPUnit\Framework\TestCase
             }
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #9 (image+pdf)');
+            if ($success_this === false) {
+                $this->log($return);
+            }
+        }
+
+        $supported = in_array($provider, ['claude', 'chatgpt', 'test']);
+        if ($supported === true) {
+            $ai_stream = aihelper::create(
+                provider: $provider,
+                model: $model,
+                temperature: 1.0,
+                api_key: $api_key,
+                session_id: null,
+                log: 'tests/ai.log',
+                max_tries: 1,
+                mcp_servers: null,
+                stream: true
+            );
+            $return = $ai_stream->ask('Wer wurde 2018 Fußball-Weltmeister? Antworte bitte kurz.');
+            //$this->log($return);
+            $success_this =
+                $return['success'] && count($ai_stream->getSessionContent()) >= 2 && mb_strlen($return['response']) > 3;
+            if ($success_this) {
+                $success_count++;
+            } else {
+                $fail_count++;
+            }
+            $costs += $return['costs'];
+            $this->log(($success_this ? '✅' : '⛔') . ' #10 (stream)');
             if ($success_this === false) {
                 $this->log($return);
             }

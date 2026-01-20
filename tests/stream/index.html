@@ -3,6 +3,11 @@
     <head>
         <meta charset="utf-8" />
         <title>stream test</title>
+        <style>
+            .container {
+                white-space: pre-wrap;
+            }
+        </style>
         <script>
             window.addEventListener('load', e => {
                 if (document.querySelector('.container') !== null) {
@@ -22,7 +27,9 @@
                             source = new EventSource(url),
                             content = '',
                             curIndex = 0,
-                            started = false,
+                            isStarted = false,
+                            isLoaded = false,
+                            isRendered = false,
                             typing = () => {
                                 let speed = 100;
                                 if (content === '') {
@@ -31,20 +38,29 @@
                                     }
                                     $container.textContent += '.';
                                 } else {
-                                    if (started === false) {
-                                        started = true;
+                                    if (isStarted === false) {
+                                        isStarted = true;
                                         $container.textContent = '';
                                     }
+
                                     if (curIndex < content.length) {
-                                        speed = Math.max(1, Math.round(1000 / (content.length - curIndex)));
-                                        $container.textContent += content.charAt(curIndex);
+                                        speed = Math.max(1, Math.round(500 / (content.length - curIndex)));
+                                        $container.textContent = content.substring(0, curIndex + 1) + '⏳';
                                         curIndex++;
+                                    } else {
+                                        $container.textContent = content + (!isLoaded ? '⏳' : '');
+                                        if (isLoaded) {
+                                            isRendered = true;
+                                        }
                                     }
                                 }
-                                setTimeout(typing, speed);
+                                if (isRendered === false) {
+                                    setTimeout(typing, speed);
+                                }
                             };
                         source.onmessage = event => {
                             if (event.data === '[DONE]') {
+                                isLoaded = true;
                                 source.close();
                                 return;
                             }
@@ -55,6 +71,7 @@
                         };
                         source.onerror = error => {
                             console.error('Error:', error);
+                            isLoaded = true;
                             source.close();
                         };
                         typing();
@@ -79,6 +96,14 @@
             data-model="gpt-5-mini"
             data-api-key="CHATGPT_API_KEY"
             data-log="stream-chatgpt.log"
+        ></div>
+        <h2>test</h2>
+        <div
+            class="container"
+            data-provider="test"
+            data-model="test-model-1"
+            data-api-key=""
+            data-log="stream-test.log"
         ></div>
     </body>
 </html>

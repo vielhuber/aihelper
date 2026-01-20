@@ -114,6 +114,20 @@ abstract class aihelper
                 stream: $stream
             );
         }
+        if ($provider === 'test') {
+            return new ai_test(
+                model: $model,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream
+            );
+        }
         return null;
     }
 
@@ -121,7 +135,7 @@ abstract class aihelper
     {
         $data = [];
         foreach (
-            [new ai_claude(), new ai_gemini(), new ai_chatgpt(), new ai_grok(), new ai_deepseek()]
+            [new ai_claude(), new ai_gemini(), new ai_chatgpt(), new ai_grok(), new ai_deepseek(), new ai_test()]
             as $providers__value
         ) {
             $data[] = [
@@ -363,6 +377,8 @@ abstract class aihelper
 
     abstract protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true);
 
+    abstract protected function makeApiCall($args = null);
+
     protected function addPromptToSession($prompt, $files = null)
     {
         self::$sessions[$this->session_id][] = [
@@ -572,7 +588,7 @@ abstract class aihelper
         $this->stream_buffer_data = '';
         $this->stream_current_block_type = null;
 
-        if ($this->name === 'claude') {
+        if ($this->name === 'claude' || $this->name === 'test') {
             // mimic non stream result
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -582,6 +598,7 @@ abstract class aihelper
                             'text' => ''
                         ]
                     ],
+                    'stop_reason' => null,
                     'usage' => (object) [
                         'input_tokens' => 0,
                         'cache_creation_input_tokens' => 0,
@@ -631,11 +648,37 @@ abstract class aihelper
                         if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
                             $parsed = json_decode($this->stream_buffer_data, true);
 
-                            // track block type
+                            // extract stop_reason from message_delta event
+                            if (
+                                isset($parsed['type']) &&
+                                $parsed['type'] === 'message_delta' &&
+                                isset($parsed['delta']['stop_reason'])
+                            ) {
+                                $this->stream_response->result->stop_reason = $parsed['delta']['stop_reason'];
+                            }
+
+                            // track block type and add separator before new block
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_start') {
+                                // if this is not the first block, add separator
+                                if ($this->stream_current_block_type !== null) {
+                                    $text = "\n\n";
+                                    $this->stream_response->result->content[0]->text .= $text;
+
+                                    echo 'data: ' .
+                                        json_encode([
+                                            'id' => uniqid(),
+                                            'choices' => [['delta' => ['content' => $text]]]
+                                        ]) .
+                                        "\n\n";
+                                    if (ob_get_level() > 0) {
+                                        @ob_flush();
+                                    }
+                                    @flush();
+                                }
                                 $this->stream_current_block_type = @$parsed['content_block']['type'];
                             }
 
+                            // stream delta content
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_delta') {
                                 if (isset($parsed['delta']['text'])) {
                                     $text = $parsed['delta']['text'];
@@ -654,11 +697,12 @@ abstract class aihelper
                                 }
                             }
 
-                            // content_block_stop: only add newline after text blocks
+                            // content_block_stop: add newline for pause_turn (next sentence coming in new request)
                             if (
                                 isset($parsed['type']) &&
                                 $parsed['type'] === 'content_block_stop' &&
-                                $this->stream_current_block_type === 'text'
+                                $this->stream_current_block_type === 'text' &&
+                                $this->stream_response->result->stop_reason === 'pause_turn'
                             ) {
                                 $text = "\n\n";
                                 $this->stream_response->result->content[0]->text .= $text;
@@ -691,11 +735,14 @@ abstract class aihelper
                             }
 
                             if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
-                                echo "data: [DONE]\n\n";
-                                if (ob_get_level() > 0) {
-                                    @ob_flush();
+                                // only send [DONE] if not pause_turn (because stream continues)
+                                if ($this->stream_response->result->stop_reason !== 'pause_turn') {
+                                    echo "data: [DONE]\n\n";
+                                    if (ob_get_level() > 0) {
+                                        @ob_flush();
+                                    }
+                                    @flush();
                                 }
-                                @flush();
                             }
                         }
 
@@ -1020,7 +1067,7 @@ class ai_chatgpt extends aihelper
     {
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
 
-        if (__::nx($this->model) || __::nx($this->api_key) || __::nx($this->session_id) || __::nx($prompt)) {
+        if (__::nx($this->model) || __::nx($this->session_id) || __::nx($prompt)) {
             $return['response'] = 'data missing.';
             return $return;
         }
@@ -1073,16 +1120,7 @@ class ai_chatgpt extends aihelper
         }
 
         $this->log($args, 'ask');
-        $response = __::curl(
-            url: $this->url . '/responses',
-            data: $args,
-            method: 'POST',
-            headers: [
-                'Authorization' => 'Bearer ' . $this->api_key
-            ],
-            timeout: $this->timeout,
-            stream_callback: $this->getStreamCallback()
-        );
+        $response = $this->makeApiCall($args);
         if ($this->stream === true) {
             $response = $this->stream_response;
         }
@@ -1140,6 +1178,20 @@ class ai_chatgpt extends aihelper
         $return['response'] = $this->parseJson($return['response']);
 
         return $return;
+    }
+
+    protected function makeApiCall($args = null)
+    {
+        return __::curl(
+            url: $this->url . '/responses',
+            data: $args,
+            method: 'POST',
+            headers: [
+                'Authorization' => 'Bearer ' . $this->api_key
+            ],
+            timeout: $this->timeout,
+            stream_callback: $this->getStreamCallback()
+        );
     }
 }
 
@@ -1298,7 +1350,7 @@ class ai_claude extends aihelper
     {
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
 
-        if (__::nx($this->model) || __::nx($this->api_key) || __::nx($this->session_id) || __::nx($prompt)) {
+        if (__::nx($this->model) || __::nx($this->session_id) || __::nx($prompt)) {
             $return['response'] = 'data missing.';
             return $return;
         }
@@ -1337,18 +1389,7 @@ class ai_claude extends aihelper
         }
 
         $this->log($args, 'ask');
-        $response = __::curl(
-            url: $this->url . '/messages',
-            data: $args,
-            method: 'POST',
-            headers: [
-                'x-api-key' => $this->api_key,
-                'anthropic-version' => '2023-06-01',
-                'anthropic-beta' => 'mcp-client-2025-04-04'
-            ],
-            timeout: $this->timeout,
-            stream_callback: $this->getStreamCallback()
-        );
+        $response = $this->makeApiCall($args);
         if ($this->stream === true) {
             $response = $this->stream_response;
         }
@@ -1379,6 +1420,8 @@ class ai_claude extends aihelper
                 self::$sessions[$this->session_id],
                 $this->transformFormatBackward($response->result)
             );
+
+            // recursively call with updated session
             return $this->askThis($prompt, $files, false);
         }
 
@@ -1430,6 +1473,22 @@ class ai_claude extends aihelper
         $return['response'] = $this->parseJson($return['response']);
 
         return $return;
+    }
+
+    protected function makeApiCall($args = null)
+    {
+        return __::curl(
+            url: $this->url . '/messages',
+            data: $args,
+            method: 'POST',
+            headers: [
+                'x-api-key' => $this->api_key,
+                'anthropic-version' => '2023-06-01',
+                'anthropic-beta' => 'mcp-client-2025-04-04'
+            ],
+            timeout: $this->timeout,
+            stream_callback: $this->getStreamCallback()
+        );
     }
 }
 
@@ -1575,7 +1634,7 @@ class ai_gemini extends aihelper
     {
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
 
-        if (__::nx($this->model) || __::nx($this->api_key) || __::nx($this->session_id) || __::nx($prompt)) {
+        if (__::nx($this->model) || __::nx($this->session_id) || __::nx($prompt)) {
             $return['response'] = 'data missing.';
             return $return;
         }
@@ -1593,13 +1652,7 @@ class ai_gemini extends aihelper
             ]
         ];
         $this->log($args, 'ask');
-        $response = __::curl(
-            url: $this->url . '/models/' . $this->model . ':generateContent?key=' . $this->api_key,
-            data: $args,
-            method: 'POST',
-            headers: null,
-            timeout: $this->timeout
-        );
+        $response = $this->makeApiCall($args);
         $this->log(@$response->result, 'response');
         $this->addCosts($response, $return);
 
@@ -1647,6 +1700,17 @@ class ai_gemini extends aihelper
         $return['response'] = $this->parseJson($return['response']);
 
         return $return;
+    }
+
+    protected function makeApiCall($args = null)
+    {
+        return __::curl(
+            url: $this->url . '/models/' . $this->model . ':generateContent?key=' . $this->api_key,
+            data: $args,
+            method: 'POST',
+            headers: null,
+            timeout: $this->timeout
+        );
     }
 }
 
@@ -1742,4 +1806,181 @@ class ai_deepseek extends ai_claude
             'test' => false
         ]
     ];
+}
+
+class ai_test extends ai_claude
+{
+    public $provider = 'aihelper';
+
+    public $title = 'Test';
+
+    public $name = 'test';
+
+    protected $url = null;
+
+    public $support_mcp = false;
+
+    public $support_stream = true;
+
+    public $models = [
+        [
+            'name' => 'test-model-1',
+            'max_tokens' => 8192,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'default' => true,
+            'test' => true
+        ]
+    ];
+
+    protected function makeApiCall($args = null)
+    {
+        static $call_count = 0;
+        if ($call_count > 0) {
+            $delay = rand(3, 7);
+            $this->log('simulating pause_turn delay: ' . $delay . ' seconds');
+            sleep($delay);
+        }
+        $call_count++;
+
+        // determine pause_turn behavior based on session history
+        $history = self::$sessions[$this->session_id] ?? [];
+        $pause_turn_count = 0;
+        foreach ($history as $history__value) {
+            if (isset($history__value['role']) && $history__value['role'] === 'assistant') {
+                $pause_turn_count++;
+            }
+        }
+
+        // generate multiple sentences
+        $faker = \Faker\Factory::create();
+        $sentences = [];
+        $num_sentences = rand(2, 4);
+        for ($sentence__key = 0; $sentence__key < $num_sentences; $sentence__key++) {
+            $sentences[] = $faker->sentence(rand(10, 25));
+        }
+
+        // simulate pause_turn: only after first sentence, then end_turn
+        $max_pause_turns = 1;
+        $use_pause_turn = $pause_turn_count < $max_pause_turns;
+
+        // decide which sentence to stop at
+        if ($use_pause_turn) {
+            $sentences_to_send = [array_shift($sentences)];
+            $stop_reason = 'pause_turn';
+        } else {
+            $sentences_to_send = $sentences;
+            $stop_reason = 'end_turn';
+        }
+
+        $mock_text = implode(' ', $sentences_to_send);
+
+        // mock non-streaming response
+        if ($this->stream === false) {
+            return (object) [
+                'result' => (object) [
+                    'id' => 'msg_' . uniqid(),
+                    'type' => 'message',
+                    'role' => 'assistant',
+                    'model' => $this->model,
+                    'content' => [
+                        (object) [
+                            'type' => 'text',
+                            'text' => $mock_text
+                        ]
+                    ],
+                    'stop_reason' => $stop_reason,
+                    'stop_sequence' => null,
+                    'usage' => (object) [
+                        'input_tokens' => 150,
+                        'cache_creation_input_tokens' => 0,
+                        'cache_read_input_tokens' => 0,
+                        'output_tokens' => 50
+                    ]
+                ]
+            ];
+        }
+
+        // mock streaming response by calling stream callback
+        $stream_callback = $this->getStreamCallback();
+        if ($stream_callback !== null) {
+            // split mock text into word chunks for streaming simulation
+            $words = explode(' ', $mock_text);
+            $text_chunks = [];
+            for ($words__key = 0; $words__key < count($words); $words__key++) {
+                if ($words__key === 0) {
+                    $text_chunks[] = $words[$words__key];
+                } else {
+                    $text_chunks[] = ' ' . $words[$words__key];
+                }
+            }
+
+            // simulate streaming chunks from anthropic
+            $mock_chunks = [
+                "event: message_start\ndata: " .
+                json_encode([
+                    'type' => 'message_start',
+                    'message' => [
+                        'id' => 'msg_' . uniqid(),
+                        'type' => 'message',
+                        'role' => 'assistant',
+                        'model' => $this->model,
+                        'content' => [],
+                        'stop_reason' => null,
+                        'stop_sequence' => null,
+                        'usage' => [
+                            'input_tokens' => 150,
+                            'cache_creation_input_tokens' => 0,
+                            'cache_read_input_tokens' => 0,
+                            'output_tokens' => 1
+                        ]
+                    ]
+                ]) .
+                "\n\n",
+                "event: content_block_start\ndata: " .
+                json_encode([
+                    'type' => 'content_block_start',
+                    'index' => 0,
+                    'content_block' => ['type' => 'text', 'text' => '']
+                ]) .
+                "\n\n"
+            ];
+
+            // add dynamic content_block_delta events for each word chunk with jitter
+            foreach ($text_chunks as $text_chunk__value) {
+                $mock_chunks[] =
+                    "event: content_block_delta\ndata: " .
+                    json_encode([
+                        'type' => 'content_block_delta',
+                        'index' => 0,
+                        'delta' => ['type' => 'text_delta', 'text' => $text_chunk__value]
+                    ]) .
+                    "\n\n";
+                usleep(rand(20000, 80000));
+            }
+
+            // add closing events
+            $mock_chunks[] =
+                "event: message_delta\ndata: " .
+                json_encode([
+                    'type' => 'message_delta',
+                    'delta' => ['stop_reason' => $stop_reason, 'stop_sequence' => null],
+                    'usage' => ['output_tokens' => 50]
+                ]) .
+                "\n\n";
+            $mock_chunks[] =
+                "event: content_block_stop\ndata: " .
+                json_encode([
+                    'type' => 'content_block_stop',
+                    'index' => 0
+                ]) .
+                "\n\n";
+            $mock_chunks[] = "event: message_stop\ndata: " . json_encode(['type' => 'message_stop']) . "\n\n";
+
+            foreach ($mock_chunks as $mock_chunk__value) {
+                $stream_callback($mock_chunk__value);
+            }
+        }
+
+        return (object) ['result' => (object) []];
+    }
 }
