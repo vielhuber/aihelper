@@ -73,6 +73,7 @@
                             console.error('Error:', error);
                             isLoaded = true;
                             source.close();
+                            $container.innerHTML = '<em style="color: red;">Connection error</em>';
                         };
                         typing();
                     });
