@@ -1060,7 +1060,7 @@ class ai_chatgpt extends aihelper
             $out[] = [
                 'role' => 'assistant',
                 'type' => 'text',
-                'content' => $text
+                'content' => __trim_whitespace($text)
             ];
         }
         return $out;
@@ -1343,7 +1343,7 @@ class ai_claude extends aihelper
             $out[] = [
                 'role' => 'assistant',
                 'type' => 'text',
-                'content' => $text
+                'content' => __trim_whitespace($text)
             ];
         }
         return $out;
@@ -1627,7 +1627,7 @@ class ai_gemini extends aihelper
             $out[] = [
                 'role' => 'assistant',
                 'type' => 'text',
-                'content' => $text
+                'content' => __trim_whitespace($text)
             ];
         }
         return $out;
