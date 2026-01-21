@@ -1354,9 +1354,23 @@ class ai_claude extends aihelper
     protected function addResponseToSession($response)
     {
         if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->content)) {
+            $content = $response->result->content;
+
+            // remove trailing whitespace from last text content block to avoid API errors
+            if (is_array($content) && count($content) > 0) {
+                $lastIndex = count($content) - 1;
+                if (
+                    isset($content[$lastIndex]->type) &&
+                    $content[$lastIndex]->type === 'text' &&
+                    isset($content[$lastIndex]->text)
+                ) {
+                    $content[$lastIndex]->text = rtrim($content[$lastIndex]->text);
+                }
+            }
+
             self::$sessions[$this->session_id][] = [
                 'role' => 'assistant',
-                'content' => $response->result->content
+                'content' => $content
             ];
         }
     }
