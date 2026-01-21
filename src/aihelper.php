@@ -554,7 +554,8 @@ abstract class aihelper
 
     protected function addCosts($response, &$return)
     {
-        $this->log($response, 'add costs');
+        //$this->log($response, 'add costs');
+        $this->log('response with length ' . strlen(json_encode($response)), 'add costs');
 
         $input_tokens = 0;
         if (
@@ -1115,7 +1116,7 @@ class ai_chatgpt extends aihelper
             $out[] = [
                 'role' => 'assistant',
                 'type' => 'text',
-                'content' => __trim_whitespace($text)
+                'content' => __::trim_whitespace($text)
             ];
         }
         return $out;
@@ -1130,7 +1131,7 @@ class ai_chatgpt extends aihelper
             return $return;
         }
 
-        $prompt = __trim_whitespace(__trim_every_line($prompt));
+        $prompt = __::trim_whitespace(__::trim_every_line($prompt));
 
         if ($add_prompt_to_session === true) {
             $this->addPromptToSession($prompt, $files);
@@ -1177,6 +1178,7 @@ class ai_chatgpt extends aihelper
             $args['stream'] = true;
         }
 
+        $this->log((int) round(strlen(json_encode($args)) / 3.5), 'ask with input token length');
         $this->log($args, 'ask');
         $response = $this->makeApiCall($args);
         if ($this->stream === true) {
@@ -1304,16 +1306,23 @@ class ai_claude extends aihelper
             'test' => false
         ],
         [
-            'name' => 'claude-3-7-sonnet-latest',
+            'name' => 'claude-3-7-sonnet',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
-            'name' => 'claude-3-5-haiku-latest',
+            'name' => 'claude-3-5-haiku',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000008, 'input_cached' => 0.0000008, 'output' => 0.000004],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'claude-3-haiku-20240307',
+            'max_tokens' => 4096,
+            'costs' => ['input' => 0.00000025, 'input_cached' => 0.00000025, 'output' => 0.00000125],
             'default' => false,
             'test' => false
         ]
@@ -1348,11 +1357,22 @@ class ai_claude extends aihelper
             if ($current_role === null) {
                 $current_role = $role;
             }
-            if ($item['type'] === 'text') {
+            if ($item['type'] === 'text' && is_string($item['content'])) {
                 $current_content[] = [
                     'type' => 'text',
-                    'text' => (string) ($item['content'] ?? '')
+                    'text' => (string) $item['content']
                 ];
+                continue;
+            }
+            if ($item['type'] === 'text' && is_object($item['content'])) {
+                // restore text block object from assistant response
+                $current_content[] = $item['content'];
+                continue;
+            }
+            if ($item['type'] !== 'text' && isset($item['content']) && is_object($item['content'])) {
+                // restore all non-text content blocks (tool_use, thinking, mcp_tool_use, etc.)
+                // this handles all current and future content block types from the API
+                $current_content[] = $item['content'];
                 continue;
             }
             if ($item['type'] === 'file' && isset($item['content']) && is_string($item['content'])) {
@@ -1386,20 +1406,26 @@ class ai_claude extends aihelper
         if (!is_object($data)) {
             return $out;
         }
-        $text = '';
+        // preserve all content blocks with their original types (text, tool_use, thinking, etc.)
         if (isset($data->content) && is_array($data->content)) {
-            foreach ($data->content as $c) {
-                if (isset($c->type) && $c->type === 'text' && isset($c->text)) {
-                    $text .= (string) $c->text;
+            foreach ($data->content as $content) {
+                if (isset($content->type)) {
+                    if (is_string($content)) {
+                        $content = __::truncate_string(__::trim_whitespace($content), 100, '…');
+                    } else {
+                        $content = __::array_map_deep($content, function ($content__value) {
+                            return is_string($content__value)
+                                ? __::truncate_string(__::trim_whitespace($content__value), 100, '…')
+                                : $content__value;
+                        });
+                    }
+                    $out[] = [
+                        'role' => 'assistant',
+                        'type' => $content->type,
+                        'content' => $content
+                    ];
                 }
             }
-        }
-        if ($text !== '') {
-            $out[] = [
-                'role' => 'assistant',
-                'type' => 'text',
-                'content' => __trim_whitespace($text)
-            ];
         }
         return $out;
     }
@@ -1413,7 +1439,7 @@ class ai_claude extends aihelper
             return $return;
         }
 
-        $prompt = __trim_whitespace(__trim_every_line($prompt));
+        $prompt = __::trim_whitespace(__::trim_every_line($prompt));
 
         if ($add_prompt_to_session === true) {
             $this->addPromptToSession($prompt, $files);
@@ -1446,6 +1472,7 @@ class ai_claude extends aihelper
             $args['stream'] = true;
         }
 
+        $this->log((int) round(strlen(json_encode($args)) / 3.5), 'ask with input token length');
         $this->log($args, 'ask');
         $response = $this->makeApiCall($args);
         if ($this->stream === true) {
@@ -1474,6 +1501,24 @@ class ai_claude extends aihelper
             $response->result->stop_reason === 'pause_turn'
         ) {
             $this->log('pause_turn detected');
+
+            // throttle
+            if (__::x(@$response->result->usage) && __::x(@$response->result->usage->input_tokens)) {
+                $pause_turn_input_tokens = $response->result->usage->input_tokens;
+                if ($pause_turn_input_tokens > 100000) {
+                    $pause_turn_sleep = (int) (ceil($pause_turn_input_tokens / 100000) * 60);
+                    $this->log(
+                        'high input tokens detected (' .
+                            $pause_turn_input_tokens .
+                            '). sleeping for ' .
+                            $pause_turn_sleep .
+                            ' seconds to avoid rate limits...'
+                    );
+                    sleep($pause_turn_sleep);
+                    $this->log('continuing...');
+                }
+            }
+
             self::$sessions[$this->session_id] = array_merge(
                 self::$sessions[$this->session_id],
                 $this->transformFormatBackward($response->result)
@@ -1682,7 +1727,7 @@ class ai_gemini extends aihelper
             $out[] = [
                 'role' => 'assistant',
                 'type' => 'text',
-                'content' => __trim_whitespace($text)
+                'content' => __::trim_whitespace($text)
             ];
         }
         return $out;
@@ -1697,7 +1742,7 @@ class ai_gemini extends aihelper
             return $return;
         }
 
-        $prompt = __trim_whitespace(__trim_every_line($prompt));
+        $prompt = __::trim_whitespace(__::trim_every_line($prompt));
 
         if ($add_prompt_to_session === true) {
             $this->addPromptToSession($prompt, $files);
@@ -1709,6 +1754,7 @@ class ai_gemini extends aihelper
                 'temperature' => $this->temperature
             ]
         ];
+        $this->log((int) round(strlen(json_encode($args)) / 3.5), 'ask with input token length');
         $this->log($args, 'ask');
         $response = $this->makeApiCall($args);
         $this->log(@$response->result, 'response');

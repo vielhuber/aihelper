@@ -546,7 +546,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function test__ai_mcp()
+    function test__ai_mcp_meta_tools()
     {
         if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
             $return = __::curl(
@@ -626,6 +626,109 @@ class Test extends \PHPUnit\Framework\TestCase
                 'xxx'
             );
             $this->assertNull($tool_response);
+        }
+    }
+
+    function test__ai_mcp_long_running_task()
+    {
+        if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
+            $sites = [
+                'https://news.ycombinator.com/?p=1',
+                'https://news.ycombinator.com/?p=2',
+                'https://news.ycombinator.com/?p=3',
+                'https://news.ycombinator.com/?p=4',
+                'https://news.ycombinator.com/?p=5',
+                'https://news.ycombinator.com/?p=6',
+                'https://news.ycombinator.com/?p=7',
+                'https://news.ycombinator.com/?p=8',
+                'https://news.ycombinator.com/?p=9',
+                'https://news.ycombinator.com/?p=10'
+            ];
+
+            $return = __::curl(
+                @$_SERVER['MCP_SERVER_TEST_AUTH_URL'],
+                [
+                    'client_id' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'],
+                    'client_secret' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'],
+                    'audience' => @$_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'],
+                    'grant_type' => 'client_credentials'
+                ],
+                'POST'
+            );
+
+            //$this->log('token: ' . $return->result->access_token);
+            $i_url = 1;
+            $mcp_servers = [];
+            while (@$_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] != '') {
+                $mcp_servers[] = [
+                    'url' => $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
+                    'authorization_token' => $return->result->access_token
+                ];
+                $i_url++;
+            }
+
+            $stream_option = [false, true];
+            foreach ($stream_option as $stream_option__key => $stream_option__value) {
+                // clean up files in /tests/storage folder
+                $files = glob('tests/storage/*.*');
+                foreach ($files as $file) {
+                    if (is_file($file)) {
+                        unlink($file);
+                    }
+                }
+
+                $ai_mcp = aihelper::create(
+                    provider: 'claude',
+                    model: 'claude-3-haiku-20240307',
+                    temperature: 1.0,
+                    api_key: @$_SERVER['CLAUDE_API_KEY'],
+                    session_id: null,
+                    log: 'tests/ai.log',
+                    timeout: 60 * 30,
+                    max_tries: 1,
+                    mcp_servers: $mcp_servers,
+                    stream: $stream_option__value
+                );
+                $prompt = '';
+                $prompt .= 'Starte einen lang laufenden Test mit folgendem Ablauf:';
+                $prompt .= PHP_EOL . PHP_EOL;
+                foreach ($sites as $sites__key => $sites__value) {
+                    $prompt .=
+                        '- Öffne https://' . $sites__value . ', suche nach dem neuesten Artikel und gib den Titel aus.';
+                    $prompt .= PHP_EOL;
+                    $prompt .=
+                        '- Fertige einen Screenshot der Seite mit dem Namen "screenshot-' .
+                        ($sites__key + 1) .
+                        '.png" an';
+                    $prompt .= '- Verschiebe den Screenshot in den Ordner /var/www/aihelper/tests/storage.';
+                    $prompt .= '- Prüfe stets tatsächlich, ob der Screenshot in /var/www/aihelper/tests/storage liegt.';
+                    $prompt .= '- Wenn er fehlt, führe die Aktion erneut durch.';
+                    $prompt .= PHP_EOL;
+                }
+                $prompt .= PHP_EOL;
+                $prompt .= 'Nutze zum Browsen immer das MCP-Browser-Tool.';
+                $prompt .= 'Ich benötige keinen Code, führe die Aktionen alle selbst aus.';
+                $prompt .= 'Prüfe am Ende, ob alle Dateien vorhanden sind.';
+                $prompt .= 'Wenn welche fehlen, erstelle die fehlenden Screenshots.';
+                $prompt .= 'Antworte nur auf Deutsch.';
+                $ai_mcp->ask($prompt);
+
+                $this->assertSame(count(glob('tests/storage/*.*')), count($sites));
+                $this->log(
+                    '✅ Long running task test with ' .
+                        count($sites) .
+                        ' sites ' .
+                        ($stream_option__value ? '(stream)' : '(no stream)') .
+                        ' completed successfully.'
+                );
+
+                // throttle to avoid rate limits on new session
+                if ($stream_option__key < count($stream_option) - 1) {
+                    $throttle = 60 * 2 * count($sites);
+                    $this->log('⏳ Throttling next test for ' . $throttle . ' seconds to avoid rate limits...');
+                    sleep($throttle);
+                }
+            }
         }
     }
 }

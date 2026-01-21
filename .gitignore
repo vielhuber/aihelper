@@ -8,6 +8,8 @@
 /tests/assets/file*.txt
 /tests/assets/file*.csv
 /tests/ai.log
+/tests/storage/
+!/tests/storage/.gitkeep
 /.env
 /.phpunit.result.cache
 /.phpunit.cache
