@@ -1356,6 +1356,21 @@ class ai_claude extends aihelper
         if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->content)) {
             $content = $response->result->content;
 
+            // fix mcp_tool_use blocks with empty array inputs (should be empty objects)
+            if (is_array($content)) {
+                foreach ($content as $contentBlock) {
+                    if (
+                        isset($contentBlock->type) &&
+                        $contentBlock->type === 'mcp_tool_use' &&
+                        isset($contentBlock->input) &&
+                        is_array($contentBlock->input) &&
+                        count($contentBlock->input) === 0
+                    ) {
+                        $contentBlock->input = new \stdClass();
+                    }
+                }
+            }
+
             // remove trailing whitespace from last text content block to avoid API errors
             if (is_array($content) && count($content) > 0) {
                 $lastIndex = count($content) - 1;
