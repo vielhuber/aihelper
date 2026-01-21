@@ -791,9 +791,14 @@ abstract class aihelper
                                 if (isset($this->stream_response->result->content[$index])) {
                                     $block = &$this->stream_response->result->content[$index];
                                     if (isset($block->input) && is_string($block->input)) {
-                                        $parsedInput = json_decode($block->input, true);
-                                        if ($parsedInput !== null) {
-                                            $block->input = $parsedInput;
+                                        // convert empty string to empty array (API expects object/array, not string)
+                                        if ($block->input === '') {
+                                            $block->input = [];
+                                        } else {
+                                            $parsedInput = json_decode($block->input, true);
+                                            if ($parsedInput !== null) {
+                                                $block->input = $parsedInput;
+                                            }
                                         }
                                     }
                                 }
