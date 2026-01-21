@@ -648,12 +648,7 @@ abstract class aihelper
             // mimic non stream result
             $this->stream_response = (object) [
                 'result' => (object) [
-                    'content' => [
-                        (object) [
-                            'type' => 'text',
-                            'text' => ''
-                        ]
-                    ],
+                    'content' => [],
                     'stop_reason' => null,
                     'usage' => (object) [
                         'input_tokens' => 0,
@@ -713,15 +708,17 @@ abstract class aihelper
                                 $this->stream_response->result->stop_reason = $parsed['delta']['stop_reason'];
                             }
 
-                            // track block type and add separator before new block
+                            // add new content block
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_start') {
-                                // if this is not the first block, add separator, but only if the last text does not already end with \n
-                                if ($this->stream_current_block_type !== null) {
-                                    $lastText = $this->stream_response->result->content[0]->text;
-                                    // only send separator if there is not already at least one line break at the end
-                                    if (!preg_match('/\n$/', $lastText)) {
+                                // if this is not the first block and previous was text, add separator
+                                if (
+                                    $this->stream_current_block_type === 'text' &&
+                                    !empty($this->stream_response->result->content)
+                                ) {
+                                    $lastBlock = end($this->stream_response->result->content);
+                                    if (isset($lastBlock->text) && !preg_match('/\n$/', $lastBlock->text)) {
                                         $text = "\n\n";
-                                        $this->stream_response->result->content[0]->text .= $text;
+                                        $lastBlock->text .= $text;
                                         echo 'data: ' .
                                             json_encode([
                                                 'id' => uniqid(),
@@ -734,48 +731,97 @@ abstract class aihelper
                                         @flush();
                                     }
                                 }
+                                // add the full content block from the API
+                                if (isset($parsed['content_block'])) {
+                                    $this->stream_response->result->content[] = (object) $parsed['content_block'];
+                                }
                                 $this->stream_current_block_type = @$parsed['content_block']['type'];
                             }
 
                             // stream delta content
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_delta') {
-                                if (isset($parsed['delta']['text'])) {
-                                    $text = $parsed['delta']['text'];
-                                    $this->stream_response->result->content[0]->text .= $text;
+                                $index = $parsed['index'] ?? 0;
+                                if (isset($this->stream_response->result->content[$index])) {
+                                    $block = &$this->stream_response->result->content[$index];
 
-                                    echo 'data: ' .
-                                        json_encode([
-                                            'id' => uniqid(),
-                                            'choices' => [['delta' => ['content' => $text]]]
-                                        ]) .
-                                        "\n\n";
-                                    if (ob_get_level() > 0) {
-                                        @ob_flush();
+                                    // handle text delta
+                                    if (isset($parsed['delta']['text'])) {
+                                        $text = $parsed['delta']['text'];
+                                        if (!isset($block->text)) {
+                                            $block->text = '';
+                                        }
+                                        $block->text .= $text;
+
+                                        echo 'data: ' .
+                                            json_encode([
+                                                'id' => uniqid(),
+                                                'choices' => [['delta' => ['content' => $text]]]
+                                            ]) .
+                                            "\n\n";
+                                        if (ob_get_level() > 0) {
+                                            @ob_flush();
+                                        }
+                                        @flush();
                                     }
-                                    @flush();
+
+                                    // handle tool_use input delta (partial_json)
+                                    if (isset($parsed['delta']['partial_json'])) {
+                                        // convert input to string if it's an object/array from content_block_start
+                                        if (!isset($block->input) || !is_string($block->input)) {
+                                            $block->input = '';
+                                        }
+                                        $block->input .= $parsed['delta']['partial_json'];
+                                    }
+
+                                    // handle thinking delta
+                                    if (isset($parsed['delta']['thinking'])) {
+                                        if (!isset($block->thinking)) {
+                                            $block->thinking = '';
+                                        }
+                                        $block->thinking .= $parsed['delta']['thinking'];
+                                    }
                                 }
                             }
 
-                            // content_block_stop: add newline for pause_turn (next sentence coming in new request)
-                            if (
-                                isset($parsed['type']) &&
-                                $parsed['type'] === 'content_block_stop' &&
-                                $this->stream_current_block_type === 'text' &&
-                                $this->stream_response->result->stop_reason === 'pause_turn'
-                            ) {
-                                $text = "\n\n";
-                                $this->stream_response->result->content[0]->text .= $text;
+                            // content_block_stop: finalize content blocks and parse partial_json to real json
+                            if (isset($parsed['type']) && $parsed['type'] === 'content_block_stop') {
+                                $index = $parsed['index'] ?? count($this->stream_response->result->content) - 1;
 
-                                echo 'data: ' .
-                                    json_encode([
-                                        'id' => uniqid(),
-                                        'choices' => [['delta' => ['content' => $text]]]
-                                    ]) .
-                                    "\n\n";
-                                if (ob_get_level() > 0) {
-                                    @ob_flush();
+                                // parse partial_json input to real json object for tool_use/mcp_tool_use blocks
+                                if (isset($this->stream_response->result->content[$index])) {
+                                    $block = &$this->stream_response->result->content[$index];
+                                    if (isset($block->input) && is_string($block->input)) {
+                                        $parsedInput = json_decode($block->input, true);
+                                        if ($parsedInput !== null) {
+                                            $block->input = $parsedInput;
+                                        }
+                                    }
                                 }
-                                @flush();
+
+                                // add newline for pause_turn (next sentence coming in new request)
+                                if (
+                                    $this->stream_current_block_type === 'text' &&
+                                    $this->stream_response->result->stop_reason === 'pause_turn'
+                                ) {
+                                    if (
+                                        isset($this->stream_response->result->content[$index]) &&
+                                        isset($this->stream_response->result->content[$index]->text)
+                                    ) {
+                                        $text = "\n\n";
+                                        $this->stream_response->result->content[$index]->text .= $text;
+
+                                        echo 'data: ' .
+                                            json_encode([
+                                                'id' => uniqid(),
+                                                'choices' => [['delta' => ['content' => $text]]]
+                                            ]) .
+                                            "\n\n";
+                                        if (ob_get_level() > 0) {
+                                            @ob_flush();
+                                        }
+                                        @flush();
+                                    }
+                                }
                             }
 
                             if (isset($parsed['usage'])) {
@@ -1410,19 +1456,32 @@ class ai_claude extends aihelper
         if (isset($data->content) && is_array($data->content)) {
             foreach ($data->content as $content) {
                 if (isset($content->type)) {
-                    if (is_string($content)) {
-                        $content = __::truncate_string(__::trim_whitespace($content), 100, '…');
-                    } else {
-                        $content = __::array_map_deep($content, function ($content__value) {
-                            return is_string($content__value)
-                                ? __::truncate_string(__::trim_whitespace($content__value), 100, '…')
-                                : $content__value;
-                        });
+                    // convert object to array for proper json serialization
+                    $contentArray = json_decode(json_encode($content), true);
+
+                    // truncate only text fields for logging/storage, preserve other fields like 'input' as-is
+                    if (is_array($contentArray)) {
+                        // only truncate the 'text' and 'thinking' fields, keep all other fields intact
+                        if (isset($contentArray['text']) && is_string($contentArray['text'])) {
+                            $contentArray['text'] = __::truncate_string(
+                                __::trim_whitespace($contentArray['text']),
+                                100,
+                                '…'
+                            );
+                        }
+                        if (isset($contentArray['thinking']) && is_string($contentArray['thinking'])) {
+                            $contentArray['thinking'] = __::truncate_string(
+                                __::trim_whitespace($contentArray['thinking']),
+                                100,
+                                '…'
+                            );
+                        }
                     }
+
                     $out[] = [
                         'role' => 'assistant',
                         'type' => $content->type,
-                        'content' => $content
+                        'content' => (object) $contentArray
                     ];
                 }
             }

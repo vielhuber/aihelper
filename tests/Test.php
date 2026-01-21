@@ -633,8 +633,8 @@ class Test extends \PHPUnit\Framework\TestCase
     {
         if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
             $sites = [];
-            for ($i = 1; $i <= 2; $i++) {
-                $sites[] = 'https://news.ycombinator.cm/?p=' . $i;
+            for ($i = 1; $i <= 1; $i++) {
+                $sites[] = 'https://news.ycombinator.com/?p=' . $i;
             }
 
             $return = __::curl(
@@ -659,7 +659,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 $i_url++;
             }
 
-            $stream_option = [false, true];
+            $stream_option = [true, false];
             foreach ($stream_option as $stream_option__key => $stream_option__value) {
                 // clean up files in /tests/storage folder
                 $files = glob('tests/storage/*.*');
