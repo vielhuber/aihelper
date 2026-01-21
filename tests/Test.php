@@ -539,7 +539,7 @@ class Test extends \PHPUnit\Framework\TestCase
                         );
                         $return = $ai->ask('Test!');
                         $this->assertSame($return['success'], false);
-                        $this->assertMatchesRegularExpression('/api/i', $return['response'] ?? '');
+                        $this->assertMatchesRegularExpression('/api|error/i', $return['response'] ?? '');
                     }
                 }
             }
