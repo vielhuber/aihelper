@@ -434,34 +434,9 @@ abstract class aihelper
 
     abstract protected function makeApiCall($args = null);
 
-    protected function addPromptToSession($prompt, $files = null)
-    {
-        self::$sessions[$this->session_id][] = [
-            'role' => 'user',
-            'type' => 'text',
-            'content' => $prompt
-        ];
+    abstract protected function addPromptToSession($prompt, $files = null);
 
-        if (__::x(@$files)) {
-            if (!is_array($files)) {
-                $files = [$files];
-            }
-            foreach ($files as $files__value) {
-                if (!file_exists($files__value)) {
-                    continue;
-                }
-                self::$sessions[$this->session_id][] = [
-                    'role' => 'user',
-                    'type' => 'file',
-                    'content' =>
-                        'data:' .
-                        mime_content_type($files__value) .
-                        ';base64,' .
-                        base64_encode(file_get_contents($files__value))
-                ];
-            }
-        }
-    }
+    abstract protected function addResponseToSession($response);
 
     protected function parseJson($msg)
     {
@@ -1173,6 +1148,69 @@ class ai_chatgpt extends aihelper
         return $out;
     }
 
+    protected function addPromptToSession($prompt, $files = null)
+    {
+        $content = [];
+
+        // add text content
+        $content[] = [
+            'type' => 'input_text',
+            'text' => $prompt
+        ];
+
+        // add files
+        if (__::x(@$files)) {
+            if (!is_array($files)) {
+                $files = [$files];
+            }
+            foreach ($files as $files__value) {
+                if (!file_exists($files__value)) {
+                    continue;
+                }
+                $mime = mime_content_type($files__value);
+                $b64 = base64_encode(file_get_contents($files__value));
+
+                if (stripos($mime, 'pdf') !== false || $mime === 'application/pdf') {
+                    $content[] = [
+                        'type' => 'input_file',
+                        'filename' => 'attachment.pdf',
+                        'file_data' => 'data:' . $mime . ';base64,' . $b64
+                    ];
+                } elseif (strpos($mime, 'image/') === 0) {
+                    $content[] = [
+                        'type' => 'input_image',
+                        'image_url' => 'data:' . $mime . ';base64,' . $b64
+                    ];
+                } else {
+                    $content[] = [
+                        'type' => 'input_file',
+                        'filename' => 'attachment.bin',
+                        'file_data' => 'data:' . $mime . ';base64,' . $b64
+                    ];
+                }
+            }
+        }
+
+        self::$sessions[$this->session_id][] = [
+            'role' => 'user',
+            'content' => $content
+        ];
+    }
+
+    protected function addResponseToSession($response)
+    {
+        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->output)) {
+            foreach ($response->result->output as $output__value) {
+                if (__::x(@$output__value->type) && $output__value->type === 'message' && __::x(@$output__value->content)) {
+                    self::$sessions[$this->session_id][] = [
+                        'role' => 'assistant',
+                        'content' => $output__value->content
+                    ];
+                }
+            }
+        }
+    }
+
     protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
     {
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
@@ -1191,7 +1229,7 @@ class ai_chatgpt extends aihelper
         $args = [
             'model' => $this->model,
             'temperature' => $this->temperature,
-            'input' => $this->transformFormatForward(self::$sessions[$this->session_id])
+            'input' => self::$sessions[$this->session_id]
         ];
 
         if (!empty($this->mcp_servers)) {
@@ -1278,12 +1316,7 @@ class ai_chatgpt extends aihelper
         $return['response'] = $output_text;
         $return['success'] = true;
 
-        if (__::x(@$response) && __::x(@$response->result)) {
-            self::$sessions[$this->session_id] = array_merge(
-                self::$sessions[$this->session_id],
-                $this->transformFormatBackward($response->result)
-            );
-        }
+        $this->addResponseToSession($response);
 
         // parse json
         $return['response'] = $this->parseJson($return['response']);
@@ -1494,6 +1527,56 @@ class ai_claude extends aihelper
         return $out;
     }
 
+    protected function addPromptToSession($prompt, $files = null)
+    {
+        $content = [];
+
+        // add text content
+        $content[] = [
+            'type' => 'text',
+            'text' => $prompt
+        ];
+
+        // add files
+        if (__::x(@$files)) {
+            if (!is_array($files)) {
+                $files = [$files];
+            }
+            foreach ($files as $files__value) {
+                if (!file_exists($files__value)) {
+                    continue;
+                }
+                $mime = mime_content_type($files__value);
+                $b64 = base64_encode(file_get_contents($files__value));
+                $type = stripos($mime, 'pdf') !== false || $mime === 'application/pdf' ? 'document' : 'image';
+
+                $content[] = [
+                    'type' => $type,
+                    'source' => [
+                        'type' => 'base64',
+                        'media_type' => $mime,
+                        'data' => $b64
+                    ]
+                ];
+            }
+        }
+
+        self::$sessions[$this->session_id][] = [
+            'role' => 'user',
+            'content' => $content
+        ];
+    }
+
+    protected function addResponseToSession($response)
+    {
+        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->content)) {
+            self::$sessions[$this->session_id][] = [
+                'role' => 'assistant',
+                'content' => $response->result->content
+            ];
+        }
+    }
+
     protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
     {
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
@@ -1512,7 +1595,7 @@ class ai_claude extends aihelper
         $args = [
             'model' => $this->model,
             'max_tokens' => $this->getMaxTokensForModel(),
-            'messages' => $this->transformFormatForward(self::$sessions[$this->session_id]),
+            'messages' => self::$sessions[$this->session_id],
             'temperature' => $this->temperature
         ];
 
@@ -1583,10 +1666,7 @@ class ai_claude extends aihelper
                 }
             }
 
-            self::$sessions[$this->session_id] = array_merge(
-                self::$sessions[$this->session_id],
-                $this->transformFormatBackward($response->result)
-            );
+            $this->addResponseToSession($response);
 
             // recursively call with updated session
             return $this->askThis($prompt, $files, false);
@@ -1629,12 +1709,7 @@ class ai_claude extends aihelper
         $return['response'] = $output_text;
         $return['success'] = true;
 
-        if (__::x(@$response) && __::x(@$response->result)) {
-            self::$sessions[$this->session_id] = array_merge(
-                self::$sessions[$this->session_id],
-                $this->transformFormatBackward($response->result)
-            );
-        }
+        $this->addResponseToSession($response);
 
         // parse json
         $return['response'] = $this->parseJson($return['response']);
@@ -1797,6 +1872,56 @@ class ai_gemini extends aihelper
         return $out;
     }
 
+    protected function addPromptToSession($prompt, $files = null)
+    {
+        $parts = [];
+
+        // add text content
+        $parts[] = [
+            'text' => $prompt
+        ];
+
+        // add files
+        if (__::x(@$files)) {
+            if (!is_array($files)) {
+                $files = [$files];
+            }
+            foreach ($files as $files__value) {
+                if (!file_exists($files__value)) {
+                    continue;
+                }
+                $mime = mime_content_type($files__value);
+                $b64 = base64_encode(file_get_contents($files__value));
+
+                $parts[] = [
+                    'inline_data' => [
+                        'mime_type' => $mime,
+                        'data' => $b64
+                    ]
+                ];
+            }
+        }
+
+        self::$sessions[$this->session_id][] = [
+            'role' => 'user',
+            'parts' => $parts
+        ];
+    }
+
+    protected function addResponseToSession($response)
+    {
+        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->candidates)) {
+            foreach ($response->result->candidates as $candidates__value) {
+                if (__::x(@$candidates__value->content) && __::x(@$candidates__value->content->parts)) {
+                    self::$sessions[$this->session_id][] = [
+                        'role' => 'model',
+                        'parts' => $candidates__value->content->parts
+                    ];
+                }
+            }
+        }
+    }
+
     protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
     {
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
@@ -1813,7 +1938,7 @@ class ai_gemini extends aihelper
         }
 
         $args = [
-            'contents' => $this->transformFormatForward(self::$sessions[$this->session_id]),
+            'contents' => self::$sessions[$this->session_id],
             'generationConfig' => [
                 'temperature' => $this->temperature
             ]
@@ -1857,12 +1982,7 @@ class ai_gemini extends aihelper
         $return['response'] = $output_text;
         $return['success'] = true;
 
-        if (__::x(@$response) && __::x(@$response->result)) {
-            self::$sessions[$this->session_id] = array_merge(
-                self::$sessions[$this->session_id],
-                $this->transformFormatBackward($response->result)
-            );
-        }
+        $this->addResponseToSession($response);
 
         // parse json
         $return['response'] = $this->parseJson($return['response']);

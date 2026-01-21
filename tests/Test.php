@@ -169,7 +169,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #1 (simple)');
             if ($success_this === false) {
-                $this->log($return);
+                $this->log([$return, count($ai->getSessionContent())]);
             }
         }
 
@@ -192,7 +192,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #2 (simple)');
             if ($success_this === false) {
-                $this->log($return);
+                $this->log([$return, count($ai->getSessionContent())]);
             }
         }
 
@@ -215,7 +215,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #3 (memory)');
             if ($success_this === false) {
-                $this->log($return);
+                $this->log([$return, count($ai->getSessionContent())]);
             }
         }
 
@@ -245,7 +245,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #4 (memory)');
             if ($success_this === false) {
-                $this->log($return);
+                $this->log([$return, count($ai->getSessionContent())]);
             }
         }
 
@@ -273,7 +273,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #5 (memory)');
             if ($success_this === false) {
-                $this->log($return);
+                $this->log([$return, count($ai->getSessionContent())]);
             }
         }
 
@@ -283,7 +283,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 15 &&
+                count($ai->getSessionContent()) === 14 &&
                 (stripos($return['response'], 'Tulpe') !== false ||
                     stripos($return['response'], 'Tulpen') !== false ||
                     stripos($return['response'], 'Tulip') !== false ||
@@ -297,7 +297,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #6 (image)');
             if ($success_this === false) {
-                $this->log($return);
+                $this->log([$return, $ai->getSessionContent(), count($ai->getSessionContent())]);
             }
         }
 
@@ -307,7 +307,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 17 &&
+                count($ai->getSessionContent()) === 16 &&
                 (stripos($return['response'], 'Tulpe') !== false ||
                     stripos($return['response'], 'Tulpen') !== false ||
                     stripos($return['response'], 'Tulip') !== false ||
@@ -321,7 +321,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #7 (image)');
             if ($success_this === false) {
-                $this->log($return);
+                $this->log([$return, count($ai->getSessionContent())]);
             }
         }
 
@@ -334,7 +334,7 @@ class Test extends \PHPUnit\Framework\TestCase
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 20 &&
+                count($ai->getSessionContent()) === 18 &&
                 in_array($return['response']->customer_nr ?? '', ['F123465789']) &&
                 in_array($return['response']->date ?? '', ['31. Oktober 2018', 'Oktober 2018', '2018-10-31']) &&
                 in_array($return['response']->author ?? '', ['David Vielhuber']);
@@ -346,7 +346,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #8 (pdf)');
             if ($success_this === false) {
-                $this->log($return);
+                $this->log([$return, count($ai->getSessionContent())]);
             }
         }
 
@@ -364,7 +364,7 @@ class Test extends \PHPUnit\Framework\TestCase
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 25 &&
+                count($ai->getSessionContent()) === 20 &&
                 in_array($return['response']->customer_nr ?? '', ['F123465789']) &&
                 in_array($return['response']->meter_number ?? '', ['123456789']) &&
                 in_array($return['response']->flower ?? '', [
@@ -389,7 +389,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #9 (image+pdf)');
             if ($success_this === false) {
-                $this->log($return);
+                $this->log([$return, count($ai->getSessionContent())]);
             }
         }
 
@@ -418,7 +418,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #10 (stream)');
             if ($success_this === false) {
-                $this->log($return);
+                $this->log([$return, count($ai_stream->getSessionContent())]);
             }
         }
 
@@ -450,7 +450,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $costs += $return['costs'];
             $this->log(($success_this ? '✅' : '⛔') . ' #10 (stream)');
             if ($success_this === false) {
-                $this->log($return);
+                $this->log([$return, count($ai_stream->getSessionContent())]);
             }
         }
 
@@ -505,7 +505,7 @@ class Test extends \PHPUnit\Framework\TestCase
                     $costs += $return['costs'];
                     $this->log(($success_this ? '✅' : '⛔') . ' #11 (mcp nr ' . $i_prompt . ')');
                     if ($success_this === false) {
-                        $this->log($return);
+                        $this->log([$return, count($ai_mcp->getSessionContent())]);
                     }
                     $i_prompt++;
                 }
