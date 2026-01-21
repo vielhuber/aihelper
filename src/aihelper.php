@@ -1373,13 +1373,12 @@ class ai_claude extends aihelper
 
             // remove trailing whitespace from last text content block to avoid API errors
             if (is_array($content) && count($content) > 0) {
-                $lastIndex = count($content) - 1;
-                if (
-                    isset($content[$lastIndex]->type) &&
-                    $content[$lastIndex]->type === 'text' &&
-                    isset($content[$lastIndex]->text)
-                ) {
-                    $content[$lastIndex]->text = rtrim($content[$lastIndex]->text);
+                // find last text block (not last block overall)
+                for ($i = count($content) - 1; $i >= 0; $i--) {
+                    if (isset($content[$i]->type) && $content[$i]->type === 'text' && isset($content[$i]->text)) {
+                        $content[$i]->text = rtrim($content[$i]->text);
+                        break;
+                    }
                 }
             }
 
