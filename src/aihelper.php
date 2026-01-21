@@ -426,10 +426,6 @@ abstract class aihelper
         return $return;
     }
 
-    abstract protected function transformFormatForward($data = null);
-
-    abstract protected function transformFormatBackward($data = null);
-
     abstract protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true);
 
     abstract protected function makeApiCall($args = null);
@@ -1047,107 +1043,6 @@ class ai_chatgpt extends aihelper
         ]
     ];
 
-    protected function transformFormatForward($data = null)
-    {
-        if (!is_array($data)) {
-            return $data;
-        }
-        $messages = [];
-        $current_role = null;
-        $current_content = [];
-        $push_message = function () use (&$messages, &$current_role, &$current_content) {
-            if ($current_role !== null && !empty($current_content)) {
-                $messages[] = [
-                    'role' => $current_role,
-                    'content' => $current_content
-                ];
-            }
-            $current_role = null;
-            $current_content = [];
-        };
-        foreach ($data as $item) {
-            if (!is_array($item) || !isset($item['role']) || !isset($item['type'])) {
-                continue;
-            }
-            $role = $item['role'] === 'assistant' ? 'assistant' : 'user';
-            if ($current_role !== $role && !empty($current_content)) {
-                $push_message();
-            }
-            if ($current_role === null) {
-                $current_role = $role;
-            }
-            if ($item['type'] === 'text') {
-                $current_content[] = [
-                    'type' => $role === 'assistant' ? 'output_text' : 'input_text',
-                    'text' => (string) ($item['content'] ?? '')
-                ];
-                continue;
-            }
-            if ($item['type'] === 'file' && isset($item['content']) && is_string($item['content'])) {
-                if ($role !== 'user') {
-                    continue;
-                }
-                if (preg_match('/^data:([^;]+);base64,(.*)$/s', $item['content'], $m)) {
-                    $mime = $m[1];
-                    $b64 = $m[2];
-                    if (stripos($mime, 'pdf') !== false || $mime === 'application/pdf') {
-                        $current_content[] = [
-                            'type' => 'input_file',
-                            'filename' => 'attachment.pdf',
-                            'file_data' => 'data:' . $mime . ';base64,' . $b64
-                        ];
-                    } elseif (strpos($mime, 'image/') === 0) {
-                        $current_content[] = [
-                            'type' => 'input_image',
-                            'image_url' => $item['content']
-                        ];
-                    } else {
-                        $current_content[] = [
-                            'type' => 'input_file',
-                            'filename' => 'attachment.bin',
-                            'file_data' => 'data:' . $mime . ';base64,' . $b64
-                        ];
-                    }
-                }
-            }
-        }
-        if (!empty($current_content)) {
-            $messages[] = [
-                'role' => $current_role ?? 'user',
-                'content' => $current_content
-            ];
-        }
-        return $messages;
-    }
-
-    protected function transformFormatBackward($data = null)
-    {
-        $out = [];
-        if (!is_object($data)) {
-            return $out;
-        }
-        $text = '';
-        if (isset($data->output) && is_array($data->output)) {
-            foreach ($data->output as $outItem) {
-                if (isset($outItem->type) && $outItem->type === 'message' && isset($outItem->content)) {
-                    foreach ($outItem->content as $c) {
-                        if (isset($c->type) && $c->type === 'output_text' && isset($c->text)) {
-                            $text .= (string) $c->text;
-                        }
-                    }
-                }
-            }
-        }
-        if ($text !== '') {
-            $out[] = [
-                'role' => 'assistant',
-                'type' => 'text',
-                'content' => __::trim_whitespace($text)
-            ];
-        }
-        return $out;
-    }
-
     protected function addPromptToSession($prompt, $files = null)
     {
         $content = [];
@@ -1201,7 +1096,11 @@ class ai_chatgpt extends aihelper
     {
         if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->output)) {
             foreach ($response->result->output as $output__value) {
-                if (__::x(@$output__value->type) && $output__value->type === 'message' && __::x(@$output__value->content)) {
+                if (
+                    __::x(@$output__value->type) &&
+                    $output__value->type === 'message' &&
+                    __::x(@$output__value->content)
+                ) {
                     self::$sessions[$this->session_id][] = [
                         'role' => 'assistant',
                         'content' => $output__value->content
@@ -1411,121 +1310,6 @@ class ai_claude extends aihelper
             'test' => false
         ]
     ];
-
-    protected function transformFormatForward($data = null)
-    {
-        if (!is_array($data)) {
-            return $data;
-        }
-        $messages = [];
-        $current_role = null;
-        $current_content = [];
-        $push_message = function () use (&$messages, &$current_role, &$current_content) {
-            if ($current_role !== null && !empty($current_content)) {
-                $messages[] = [
-                    'role' => $current_role,
-                    'content' => $current_content
-                ];
-            }
-            $current_role = null;
-            $current_content = [];
-        };
-        foreach ($data as $item) {
-            if (!is_array($item) || !isset($item['role']) || !isset($item['type'])) {
-                continue;
-            }
-            $role = $item['role'] === 'assistant' ? 'assistant' : 'user';
-            if ($current_role !== $role && !empty($current_content)) {
-                $push_message();
-            }
-            if ($current_role === null) {
-                $current_role = $role;
-            }
-            if ($item['type'] === 'text' && is_string($item['content'])) {
-                $current_content[] = [
-                    'type' => 'text',
-                    'text' => (string) $item['content']
-                ];
-                continue;
-            }
-            if ($item['type'] === 'text' && is_object($item['content'])) {
-                // restore text block object from assistant response
-                $current_content[] = $item['content'];
-                continue;
-            }
-            if ($item['type'] !== 'text' && isset($item['content']) && is_object($item['content'])) {
-                // restore all non-text content blocks (tool_use, thinking, mcp_tool_use, etc.)
-                // this handles all current and future content block types from the API
-                $current_content[] = $item['content'];
-                continue;
-            }
-            if ($item['type'] === 'file' && isset($item['content']) && is_string($item['content'])) {
-                if (preg_match('/^data:([^;]+);base64,(.*)$/s', $item['content'], $m)) {
-                    $mime = $m[1];
-                    $b64 = $m[2];
-                    $type = stripos($mime, 'pdf') !== false || $mime === 'application/pdf' ? 'document' : 'image';
-                    $current_content[] = [
-                        'type' => $type,
-                        'source' => [
-                            'type' => 'base64',
-                            'media_type' => $mime,
-                            'data' => $b64
-                        ]
-                    ];
-                }
-            }
-        }
-        if (!empty($current_content)) {
-            $messages[] = [
-                'role' => $current_role ?? 'user',
-                'content' => $current_content
-            ];
-        }
-        return $messages;
-    }
-
-    protected function transformFormatBackward($data = null)
-    {
-        $out = [];
-        if (!is_object($data)) {
-            return $out;
-        }
-        // preserve all content blocks with their original types (text, tool_use, thinking, etc.)
-        if (isset($data->content) && is_array($data->content)) {
-            foreach ($data->content as $content) {
-                if (isset($content->type)) {
-                    // convert object to array for proper json serialization
-                    $contentArray = json_decode(json_encode($content), true);
-
-                    // truncate only text fields for logging/storage, preserve other fields like 'input' as-is
-                    if (is_array($contentArray)) {
-                        // only truncate the 'text' and 'thinking' fields, keep all other fields intact
-                        if (isset($contentArray['text']) && is_string($contentArray['text'])) {
-                            $contentArray['text'] = __::truncate_string(
-                                __::trim_whitespace($contentArray['text']),
-                                100,
-                                '…'
-                            );
-                        }
-                        if (isset($contentArray['thinking']) && is_string($contentArray['thinking'])) {
-                            $contentArray['thinking'] = __::truncate_string(
-                                __::trim_whitespace($contentArray['thinking']),
-                                100,
-                                '…'
-                            );
-                        }
-                    }
-
-                    $out[] = [
-                        'role' => 'assistant',
-                        'type' => $content->type,
-                        'content' => (object) $contentArray
-                    ];
-                }
-            }
-        }
-        return $out;
-    }
 
     protected function addPromptToSession($prompt, $files = null)
     {
@@ -1785,92 +1569,6 @@ class ai_gemini extends aihelper
             'test' => false
         ]
     ];
-
-    protected function transformFormatForward($data = null)
-    {
-        if (!is_array($data)) {
-            return $data;
-        }
-        $contents = [];
-        $current_role = null;
-        $current_parts = [];
-        $push_content = function () use (&$contents, &$current_role, &$current_parts) {
-            if ($current_role !== null && !empty($current_parts)) {
-                $contents[] = [
-                    'role' => $current_role,
-                    'parts' => $current_parts
-                ];
-            }
-            $current_role = null;
-            $current_parts = [];
-        };
-        foreach ($data as $item) {
-            if (!is_array($item) || !isset($item['role']) || !isset($item['type'])) {
-                continue;
-            }
-            $role = $item['role'] === 'assistant' ? 'model' : 'user';
-            if ($current_role !== $role && !empty($current_parts)) {
-                $push_content();
-            }
-            if ($current_role === null) {
-                $current_role = $role;
-            }
-
-            if ($item['type'] === 'text') {
-                $current_parts[] = [
-                    'text' => (string) ($item['content'] ?? '')
-                ];
-                continue;
-            }
-            if ($item['type'] === 'file' && isset($item['content']) && is_string($item['content'])) {
-                if (preg_match('/^data:([^;]+);base64,(.*)$/s', $item['content'], $m)) {
-                    $mime = $m[1];
-                    $b64 = $m[2];
-                    $current_parts[] = [
-                        'inline_data' => [
-                            'mime_type' => $mime,
-                            'data' => $b64
-                        ]
-                    ];
-                }
-            }
-        }
-        if (!empty($current_parts)) {
-            $contents[] = [
-                'role' => $current_role ?? 'user',
-                'parts' => $current_parts
-            ];
-        }
-        return $contents;
-    }
-
-    protected function transformFormatBackward($data = null)
-    {
-        $out = [];
-        if (!is_object($data)) {
-            return $out;
-        }
-        $text = '';
-        if (isset($data->candidates) && is_array($data->candidates)) {
-            foreach ($data->candidates as $cand) {
-                if (isset($cand->content) && isset($cand->content->parts) && is_array($cand->content->parts)) {
-                    foreach ($cand->content->parts as $p) {
-                        if (isset($p->text)) {
-                            $text .= (string) $p->text;
-                        }
-                    }
-                }
-            }
-        }
-        if ($text !== '') {
-            $out[] = [
-                'role' => 'assistant',
-                'type' => 'text',
-                'content' => __::trim_whitespace($text)
-            ];
-        }
-        return $out;
-    }
 
     protected function addPromptToSession($prompt, $files = null)
     {
