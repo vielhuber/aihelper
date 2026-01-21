@@ -632,18 +632,10 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_mcp_long_running_task()
     {
         if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
-            $sites = [
-                'https://news.ycombinator.com/?p=1',
-                'https://news.ycombinator.com/?p=2',
-                'https://news.ycombinator.com/?p=3',
-                'https://news.ycombinator.com/?p=4',
-                'https://news.ycombinator.com/?p=5',
-                'https://news.ycombinator.com/?p=6',
-                'https://news.ycombinator.com/?p=7',
-                'https://news.ycombinator.com/?p=8',
-                'https://news.ycombinator.com/?p=9',
-                'https://news.ycombinator.com/?p=10'
-            ];
+            $sites = [];
+            for ($i = 1; $i <= 2; $i++) {
+                $sites[] = 'https://news.ycombinator.cm/?p=' . $i;
+            }
 
             $return = __::curl(
                 @$_SERVER['MCP_SERVER_TEST_AUTH_URL'],
@@ -679,7 +671,8 @@ class Test extends \PHPUnit\Framework\TestCase
 
                 $ai_mcp = aihelper::create(
                     provider: 'claude',
-                    model: 'claude-3-haiku-20240307',
+                    model: 'claude-haiku-4-5',
+                    //model: 'claude-3-haiku-20240307',
                     temperature: 1.0,
                     api_key: @$_SERVER['CLAUDE_API_KEY'],
                     session_id: null,

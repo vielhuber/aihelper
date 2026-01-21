@@ -1505,8 +1505,8 @@ class ai_claude extends aihelper
             // throttle
             if (__::x(@$response->result->usage) && __::x(@$response->result->usage->input_tokens)) {
                 $pause_turn_input_tokens = $response->result->usage->input_tokens;
-                if ($pause_turn_input_tokens > 100000) {
-                    $pause_turn_sleep = (int) (ceil($pause_turn_input_tokens / 100000) * 60);
+                if ($pause_turn_input_tokens > 400000) {
+                    $pause_turn_sleep = (int) (ceil($pause_turn_input_tokens / 400000) * 60);
                     $this->log(
                         'high input tokens detected (' .
                             $pause_turn_input_tokens .
