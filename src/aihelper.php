@@ -430,12 +430,12 @@ abstract class aihelper
 
     abstract protected function makeApiCall($args = null);
 
-    abstract public static function formatPrompt($prompt, $files = null);
-
-    protected function addPromptToSession($prompt)
+    protected function trimPrompt($prompt)
     {
-        self::$sessions[$this->session_id][] = $prompt;
+        return __::trim_whitespace(__::trim_every_line($prompt));
     }
+
+    abstract protected function bringPromptInFormat($prompt, $files = null);
 
     abstract protected function addResponseToSession($response);
 
@@ -465,6 +465,18 @@ abstract class aihelper
     public function getSessionContent()
     {
         return self::$sessions[$this->session_id];
+    }
+
+    public function prependPromptToSession($prompt, $files = null)
+    {
+        $prompt = $this->trimPrompt($prompt);
+        array_unshift(self::$sessions[$this->session_id], $this->bringPromptInFormat($prompt, $files));
+    }
+
+    public function appendPromptToSession($prompt, $files = null)
+    {
+        $prompt = $this->trimPrompt($prompt);
+        self::$sessions[$this->session_id][] = $this->bringPromptInFormat($prompt, $files);
     }
 
     public function log($msg, $prefix = null)
@@ -1048,11 +1060,9 @@ class ai_chatgpt extends aihelper
         ]
     ];
 
-    public static function formatPrompt($prompt, $files = null)
+    protected function bringPromptInFormat($prompt, $files = null)
     {
         $content = [];
-
-        $prompt = __::trim_whitespace(__::trim_every_line($prompt));
 
         // add text content
         $content[] = [
@@ -1126,10 +1136,10 @@ class ai_chatgpt extends aihelper
             return $return;
         }
 
-        $prompt = static::formatPrompt($prompt, $files);
+        $prompt = $this->trimPrompt($prompt);
 
         if ($add_prompt_to_session === true) {
-            $this->addPromptToSession($prompt);
+            $this->appendPromptToSession($prompt, $files);
         }
 
         $args = [
@@ -1318,11 +1328,9 @@ class ai_claude extends aihelper
         ]
     ];
 
-    public static function formatPrompt($prompt, $files = null)
+    protected function bringPromptInFormat($prompt, $files = null)
     {
         $content = [];
-
-        $prompt = __::trim_whitespace(__::trim_every_line($prompt));
 
         // add text content
         $content[] = [
@@ -1407,10 +1415,10 @@ class ai_claude extends aihelper
             return $return;
         }
 
-        $prompt = static::formatPrompt($prompt, $files);
+        $prompt = $this->trimPrompt($prompt);
 
         if ($add_prompt_to_session === true) {
-            $this->addPromptToSession($prompt);
+            $this->appendPromptToSession($prompt, $files);
         }
 
         $args = [
@@ -1607,11 +1615,9 @@ class ai_gemini extends aihelper
         ]
     ];
 
-    public static function formatPrompt($prompt, $files = null)
+    protected function bringPromptInFormat($prompt, $files = null)
     {
         $parts = [];
-
-        $prompt = __::trim_whitespace(__::trim_every_line($prompt));
 
         // add text content
         $parts[] = [
@@ -1668,10 +1674,10 @@ class ai_gemini extends aihelper
             return $return;
         }
 
-        $prompt = static::formatPrompt($prompt, $files);
+        $prompt = $this->trimPrompt($prompt);
 
         if ($add_prompt_to_session === true) {
-            $this->addPromptToSession($prompt);
+            $this->appendPromptToSession($prompt, $files);
         }
 
         $args = [
