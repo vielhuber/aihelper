@@ -1126,7 +1126,7 @@ class ai_chatgpt extends aihelper
             return $return;
         }
 
-        $prompt = $this->formatPrompt($prompt, $files);
+        $prompt = static::formatPrompt($prompt, $files);
 
         if ($add_prompt_to_session === true) {
             $this->addPromptToSession($prompt);
@@ -1407,7 +1407,7 @@ class ai_claude extends aihelper
             return $return;
         }
 
-        $prompt = $this->formatPrompt($prompt, $files);
+        $prompt = static::formatPrompt($prompt, $files);
 
         if ($add_prompt_to_session === true) {
             $this->addPromptToSession($prompt);
@@ -1668,7 +1668,7 @@ class ai_gemini extends aihelper
             return $return;
         }
 
-        $prompt = $this->formatPrompt($prompt, $files);
+        $prompt = static::formatPrompt($prompt, $files);
 
         if ($add_prompt_to_session === true) {
             $this->addPromptToSession($prompt);
