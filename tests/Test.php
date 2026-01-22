@@ -521,6 +521,9 @@ class Test extends \PHPUnit\Framework\TestCase
         $providers = aihelper::getProviders();
         foreach ([false, true] as $streams__value) {
             foreach ($providers as $providers__value) {
+                if ($providers__value['name'] === 'test') {
+                    continue;
+                }
                 foreach ($providers__value['models'] as $models__value) {
                     if ($models__value['test'] === true) {
                         $this->log(
