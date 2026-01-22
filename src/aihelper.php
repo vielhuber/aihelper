@@ -430,7 +430,7 @@ abstract class aihelper
 
     abstract protected function makeApiCall($args = null);
 
-    abstract protected function formatPrompt($prompt, $files = null);
+    abstract public static function formatPrompt($prompt, $files = null);
 
     protected function addPromptToSession($prompt)
     {
@@ -1048,7 +1048,7 @@ class ai_chatgpt extends aihelper
         ]
     ];
 
-    protected function formatPrompt($prompt, $files = null)
+    public static function formatPrompt($prompt, $files = null)
     {
         $content = [];
 
@@ -1318,7 +1318,7 @@ class ai_claude extends aihelper
         ]
     ];
 
-    protected function formatPrompt($prompt, $files = null)
+    public static function formatPrompt($prompt, $files = null)
     {
         $content = [];
 
@@ -1607,7 +1607,7 @@ class ai_gemini extends aihelper
         ]
     ];
 
-    protected function formatPrompt($prompt, $files = null)
+    public static function formatPrompt($prompt, $files = null)
     {
         $parts = [];
 
