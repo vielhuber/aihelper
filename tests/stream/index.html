@@ -71,9 +71,10 @@
                         };
                         source.onerror = error => {
                             console.error('Error:', error);
-                            isLoaded = true;
                             source.close();
                             $container.innerHTML = '<em style="color: red;">Connection error</em>';
+                            isLoaded = true;
+                            isRendered = true;
                         };
                         typing();
                     });

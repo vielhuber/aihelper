@@ -430,7 +430,12 @@ abstract class aihelper
 
     abstract protected function makeApiCall($args = null);
 
-    abstract protected function addPromptToSession($prompt, $files = null);
+    abstract protected function formatPrompt($prompt, $files = null);
+
+    protected function addPromptToSession($prompt)
+    {
+        self::$sessions[$this->session_id][] = $prompt;
+    }
 
     abstract protected function addResponseToSession($response);
 
@@ -1043,9 +1048,11 @@ class ai_chatgpt extends aihelper
         ]
     ];
 
-    protected function addPromptToSession($prompt, $files = null)
+    protected function formatPrompt($prompt, $files = null)
     {
         $content = [];
+
+        $prompt = __::trim_whitespace(__::trim_every_line($prompt));
 
         // add text content
         $content[] = [
@@ -1086,7 +1093,7 @@ class ai_chatgpt extends aihelper
             }
         }
 
-        self::$sessions[$this->session_id][] = [
+        return [
             'role' => 'user',
             'content' => $content
         ];
@@ -1119,10 +1126,10 @@ class ai_chatgpt extends aihelper
             return $return;
         }
 
-        $prompt = __::trim_whitespace(__::trim_every_line($prompt));
+        $prompt = $this->formatPrompt($prompt, $files);
 
         if ($add_prompt_to_session === true) {
-            $this->addPromptToSession($prompt, $files);
+            $this->addPromptToSession($prompt);
         }
 
         $args = [
@@ -1311,9 +1318,11 @@ class ai_claude extends aihelper
         ]
     ];
 
-    protected function addPromptToSession($prompt, $files = null)
+    protected function formatPrompt($prompt, $files = null)
     {
         $content = [];
+
+        $prompt = __::trim_whitespace(__::trim_every_line($prompt));
 
         // add text content
         $content[] = [
@@ -1345,7 +1354,7 @@ class ai_claude extends aihelper
             }
         }
 
-        self::$sessions[$this->session_id][] = [
+        return [
             'role' => 'user',
             'content' => $content
         ];
@@ -1358,15 +1367,15 @@ class ai_claude extends aihelper
 
             // fix mcp_tool_use blocks with empty array inputs (should be empty objects)
             if (is_array($content)) {
-                foreach ($content as $contentBlock) {
+                for ($i = 0; $i < count($content); $i++) {
                     if (
-                        isset($contentBlock->type) &&
-                        $contentBlock->type === 'mcp_tool_use' &&
-                        isset($contentBlock->input) &&
-                        is_array($contentBlock->input) &&
-                        count($contentBlock->input) === 0
+                        isset($content[$i]->type) &&
+                        $content[$i]->type === 'mcp_tool_use' &&
+                        isset($content[$i]->input) &&
+                        is_array($content[$i]->input) &&
+                        count($content[$i]->input) === 0
                     ) {
-                        $contentBlock->input = new \stdClass();
+                        $content[$i]->input = new \stdClass();
                     }
                 }
             }
@@ -1398,10 +1407,10 @@ class ai_claude extends aihelper
             return $return;
         }
 
-        $prompt = __::trim_whitespace(__::trim_every_line($prompt));
+        $prompt = $this->formatPrompt($prompt, $files);
 
         if ($add_prompt_to_session === true) {
-            $this->addPromptToSession($prompt, $files);
+            $this->addPromptToSession($prompt);
         }
 
         $args = [
@@ -1598,9 +1607,11 @@ class ai_gemini extends aihelper
         ]
     ];
 
-    protected function addPromptToSession($prompt, $files = null)
+    protected function formatPrompt($prompt, $files = null)
     {
         $parts = [];
+
+        $prompt = __::trim_whitespace(__::trim_every_line($prompt));
 
         // add text content
         $parts[] = [
@@ -1628,7 +1639,7 @@ class ai_gemini extends aihelper
             }
         }
 
-        self::$sessions[$this->session_id][] = [
+        return [
             'role' => 'user',
             'parts' => $parts
         ];
@@ -1657,10 +1668,10 @@ class ai_gemini extends aihelper
             return $return;
         }
 
-        $prompt = __::trim_whitespace(__::trim_every_line($prompt));
+        $prompt = $this->formatPrompt($prompt, $files);
 
         if ($add_prompt_to_session === true) {
-            $this->addPromptToSession($prompt, $files);
+            $this->addPromptToSession($prompt);
         }
 
         $args = [

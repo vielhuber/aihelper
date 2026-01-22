@@ -56,6 +56,11 @@ $ai->getSessionId() // get current session id
 
 $ai->getSessionContent() // gets messages in chat history
 
+// populate history
+$history = [];
+$history[] = addPromptToSession(prompt: '...', files: [...]);
+$history[] = addPromptToSession(prompt: '...', files: [...]);
+
 aihelper::getMcpOnlineStatus(
     url: 'https://modelcontextprotocol.io/mcp',
     authorization_token: '...'
