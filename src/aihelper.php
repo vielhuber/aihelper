@@ -835,6 +835,8 @@ abstract class aihelper
                             if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
                                 // only send [DONE] if not pause_turn (because stream continues)
                                 if ($this->stream_response->result->stop_reason !== 'pause_turn') {
+                                    // finally sleep to ensure all chunks arrive
+                                    sleep(2);
                                     echo "data: [DONE]\n\n";
                                     if (ob_get_level() > 0) {
                                         @ob_flush();
@@ -954,6 +956,8 @@ abstract class aihelper
 
                             if (isset($parsed['type']) && $parsed['type'] === 'response.completed') {
                                 $this->stream_response->result->id = @$parsed['response']['id'];
+                                // finally sleep to ensure all chunks arrive
+                                sleep(2);
                                 echo "data: [DONE]\n\n";
                                 if (ob_get_level() > 0) {
                                     @ob_flush();
