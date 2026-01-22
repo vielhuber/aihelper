@@ -1881,7 +1881,8 @@ class ai_test extends ai_claude
         $history = self::$sessions[$this->session_id] ?? [];
         $pause_turn_count = 0;
         foreach ($history as $history__value) {
-            if (isset($history__value['role']) && $history__value['role'] === 'assistant') {
+            $role = is_array($history__value) ? $history__value['role'] ?? null : $history__value->role ?? null;
+            if ($role === 'assistant') {
                 $pause_turn_count++;
             }
         }
