@@ -1474,13 +1474,16 @@ class ai_claude extends aihelper
         }
 
         // handle stop reason
+        // normally claude sends pause_turn as a stop reason
+        // but sometimes it also sends no stop reason with partial content
+        // we detect both cases
         if (
             __::x(@$response) &&
             __::x(@$response->result) &&
-            __::x(@$response->result->stop_reason) &&
-            $response->result->stop_reason === 'pause_turn'
+            ((__::x(@$response->result->stop_reason) && $response->result->stop_reason === 'pause_turn') ||
+                (__::nx(@$response->result->stop_reason) && __::x(@$response->result->content)))
         ) {
-            $this->log('pause_turn detected');
+            $this->log('pause_turn / empty stop_reason detected');
 
             // throttle
             if (__::x(@$response->result->usage) && __::x(@$response->result->usage->input_tokens)) {
