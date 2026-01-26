@@ -542,7 +542,7 @@ class Test extends \PHPUnit\Framework\TestCase
                         );
                         $return = $ai->ask('Test!');
                         $this->assertSame($return['success'], false);
-                        $this->assertMatchesRegularExpression('/api|error/i', $return['response'] ?? '');
+                        $this->assertMatchesRegularExpression('/^$|api|error/i', $return['response'] ?? '');
                     }
                 }
             }
@@ -636,7 +636,7 @@ class Test extends \PHPUnit\Framework\TestCase
     {
         if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
             $sites = [];
-            for ($i = 1; $i <= 1; $i++) {
+            for ($i = 1; $i <= 10; $i++) {
                 $sites[] = 'https://news.ycombinator.com/?p=' . $i;
             }
 

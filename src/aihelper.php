@@ -449,6 +449,39 @@ abstract class aihelper
 
     abstract protected function addResponseToSession($response);
 
+    protected function truncateMcpToolResultContent($content, $max_length = 500)
+    {
+        if (!is_array($content)) {
+            return $content;
+        }
+
+        for ($i = 0; $i < count($content); $i++) {
+            if (
+                isset($content[$i]->type) &&
+                $content[$i]->type === 'mcp_tool_result' &&
+                isset($content[$i]->content) &&
+                is_array($content[$i]->content)
+            ) {
+                foreach ($content[$i]->content as $content_item__key => $content_item__value) {
+                    if (
+                        isset($content_item__value['type']) &&
+                        $content_item__value['type'] === 'text' &&
+                        isset($content_item__value['text']) &&
+                        is_string($content_item__value['text']) &&
+                        mb_strlen($content_item__value['text']) > $max_length
+                    ) {
+                        $original_length = mb_strlen($content_item__value['text']);
+                        $truncated = mb_substr($content_item__value['text'], 0, $max_length);
+                        $truncated .= "\n\n[... content truncated: $original_length chars reduced to $max_length chars ...]";
+                        $content[$i]->content[$content_item__key]['text'] = $truncated;
+                    }
+                }
+            }
+        }
+
+        return $content;
+    }
+
     protected function parseJson($msg)
     {
         if (strpos(trim($msg), '```json') === 0 || __::string_is_json($msg)) {
@@ -1132,9 +1165,13 @@ class ai_chatgpt extends aihelper
                     $output__value->type === 'message' &&
                     __::x(@$output__value->content)
                 ) {
+                    $content = $output__value->content;
+
+                    $content = $this->truncateMcpToolResultContent($content);
+
                     self::$sessions[$this->session_id][] = [
                         'role' => 'assistant',
-                        'content' => $output__value->content
+                        'content' => $content
                     ];
                 }
             }
@@ -1221,14 +1258,13 @@ class ai_chatgpt extends aihelper
                                 if (__::x(@$output_text)) {
                                     $output_text .= PHP_EOL . PHP_EOL;
                                 }
-                                $output_text .= $content__value->text;
+                                $output_text .= __::trim_whitespace($content__value->text);
                             }
                         }
                     }
                 }
             }
         }
-        $output_text = __::trim_whitespace($output_text);
 
         if (__::nx(@$output_text)) {
             $this->log($response, 'failed');
@@ -1403,6 +1439,9 @@ class ai_claude extends aihelper
                 }
             }
 
+            // truncate long mcp_tool_result content to avoid token limits
+            $content = $this->truncateMcpToolResultContent($content);
+
             // remove trailing whitespace from last text content block to avoid API errors
             if (is_array($content) && count($content) > 0) {
                 // find last text block (not last block overall)
@@ -1479,11 +1518,10 @@ class ai_claude extends aihelper
                     if (__::x(@$output_text)) {
                         $output_text .= PHP_EOL . PHP_EOL;
                     }
-                    $output_text .= $content__value->text;
+                    $output_text .= __::trim_whitespace($content__value->text);
                 }
             }
         }
-        $output_text = __::trim_whitespace($output_text);
 
         // handle stop reason
         // normally claude sends pause_turn as a stop reason
@@ -1498,6 +1536,7 @@ class ai_claude extends aihelper
             $this->log('pause_turn / empty stop_reason detected');
 
             // throttle
+            /*
             if (__::x(@$response->result->usage) && __::x(@$response->result->usage->input_tokens)) {
                 $pause_turn_input_tokens = $response->result->usage->input_tokens;
                 if ($pause_turn_input_tokens > 400000) {
@@ -1513,6 +1552,7 @@ class ai_claude extends aihelper
                     $this->log('continuing...');
                 }
             }
+            */
 
             $this->addResponseToSession($response);
 
@@ -1680,9 +1720,13 @@ class ai_gemini extends aihelper
         if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->candidates)) {
             foreach ($response->result->candidates as $candidates__value) {
                 if (__::x(@$candidates__value->content) && __::x(@$candidates__value->content->parts)) {
+                    $content = $candidates__value->content->parts;
+
+                    $content = $this->truncateMcpToolResultContent($content);
+
                     self::$sessions[$this->session_id][] = [
                         'role' => 'model',
-                        'parts' => $candidates__value->content->parts
+                        'parts' => $content
                     ];
                 }
             }
@@ -1725,13 +1769,12 @@ class ai_gemini extends aihelper
                             if (__::x(@$output_text)) {
                                 $output_text .= PHP_EOL . PHP_EOL;
                             }
-                            $output_text .= $parts__value->text;
+                            $output_text .= __::trim_whitespace($parts__value->text);
                         }
                     }
                 }
             }
         }
-        $output_text = __::trim_whitespace($output_text);
 
         if (__::nx($output_text)) {
             $this->log($response, 'failed');
