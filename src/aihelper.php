@@ -419,14 +419,24 @@ abstract class aihelper
             if ($max_tries < $this->max_tries) {
                 $this->log('⚠️ tries left: ' . $max_tries);
             }
-            $return = $this->askThis($prompt, $files, $max_tries === $this->max_tries);
+            $return = $this->askThis(
+                prompt: $prompt,
+                files: $files,
+                add_prompt_to_session: $max_tries === $this->max_tries,
+                prev_output_text: null
+            );
             $this->log($return, 'return');
             $max_tries--;
         }
         return $return;
     }
 
-    abstract protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true);
+    abstract protected function askThis(
+        $prompt = null,
+        $files = null,
+        $add_prompt_to_session = true,
+        $prev_output_text = null
+    );
 
     abstract protected function makeApiCall($args = null);
 
@@ -1131,7 +1141,7 @@ class ai_chatgpt extends aihelper
         }
     }
 
-    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
+    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true, $prev_output_text = null)
     {
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
 
@@ -1196,7 +1206,7 @@ class ai_chatgpt extends aihelper
         $this->log(@$response->result, 'response');
         $this->addCosts($response, $return);
 
-        $output_text = '';
+        $output_text = $prev_output_text !== null ? $prev_output_text : '';
         if (
             __::x(@$response) &&
             __::x(@$response->result) &&
@@ -1209,7 +1219,7 @@ class ai_chatgpt extends aihelper
                         foreach ($output__value->content as $content__value) {
                             if (__::x(@$content__value->text)) {
                                 if (__::x(@$output_text)) {
-                                    $output_text .= PHP_EOL . '---' . PHP_EOL;
+                                    $output_text .= PHP_EOL . PHP_EOL;
                                 }
                                 $output_text .= $content__value->text;
                             }
@@ -1218,6 +1228,7 @@ class ai_chatgpt extends aihelper
                 }
             }
         }
+        $output_text = __::trim_whitespace($output_text);
 
         if (__::nx(@$output_text)) {
             $this->log($response, 'failed');
@@ -1410,7 +1421,7 @@ class ai_claude extends aihelper
         }
     }
 
-    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
+    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true, $prev_output_text = null)
     {
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
 
@@ -1461,17 +1472,18 @@ class ai_claude extends aihelper
         $this->log(@$response->result, 'response');
         $this->addCosts($response, $return);
 
-        $output_text = '';
+        $output_text = $prev_output_text !== null ? $prev_output_text : '';
         if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->content)) {
             foreach ($response->result->content as $content__value) {
                 if (__::x(@$content__value->text)) {
                     if (__::x(@$output_text)) {
-                        $output_text .= PHP_EOL . '---' . PHP_EOL;
+                        $output_text .= PHP_EOL . PHP_EOL;
                     }
                     $output_text .= $content__value->text;
                 }
             }
         }
+        $output_text = __::trim_whitespace($output_text);
 
         // handle stop reason
         // normally claude sends pause_turn as a stop reason
@@ -1505,7 +1517,12 @@ class ai_claude extends aihelper
             $this->addResponseToSession($response);
 
             // recursively call with updated session
-            return $this->askThis($prompt, $files, false);
+            return $this->askThis(
+                prompt: $prompt,
+                files: $files,
+                add_prompt_to_session: false,
+                prev_output_text: $output_text
+            );
         }
 
         if (__::nx(@$output_text)) {
@@ -1672,7 +1689,7 @@ class ai_gemini extends aihelper
         }
     }
 
-    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true)
+    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true, $prev_output_text = null)
     {
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
 
@@ -1699,14 +1716,14 @@ class ai_gemini extends aihelper
         $this->log(@$response->result, 'response');
         $this->addCosts($response, $return);
 
-        $output_text = '';
+        $output_text = $prev_output_text !== null ? $prev_output_text : '';
         if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->candidates)) {
             foreach ($response->result->candidates as $candidates__value) {
                 if (__::x(@$candidates__value->content) && __::x(@$candidates__value->content->parts)) {
                     foreach ($candidates__value->content->parts as $parts__value) {
                         if (__::x(@$parts__value->text)) {
                             if (__::x(@$output_text)) {
-                                $output_text .= PHP_EOL . PHP_EOL . PHP_EOL . '---' . PHP_EOL . PHP_EOL . PHP_EOL;
+                                $output_text .= PHP_EOL . PHP_EOL;
                             }
                             $output_text .= $parts__value->text;
                         }
@@ -1714,6 +1731,7 @@ class ai_gemini extends aihelper
                 }
             }
         }
+        $output_text = __::trim_whitespace($output_text);
 
         if (__::nx($output_text)) {
             $this->log($response, 'failed');
@@ -1898,8 +1916,10 @@ class ai_test extends ai_claude
             $sentences[] = $faker->sentence(rand(10, 25));
         }
 
-        // simulate pause_turn: only after first sentence, then end_turn
-        $max_pause_turns = 1;
+        // ensure between 3 and 5 pause_turns are simulated before final end_turn
+        $min_required_pause_turns = 3;
+        $max_required_pause_turns = 5;
+        $max_pause_turns = rand($min_required_pause_turns, $max_required_pause_turns);
         $use_pause_turn = $pause_turn_count < $max_pause_turns;
 
         // decide which sentence to stop at
