@@ -1424,17 +1424,23 @@ class ai_claude extends aihelper
         if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->content)) {
             $content = $response->result->content;
 
-            // fix mcp_tool_use blocks with empty array inputs (should be empty objects)
+            // fix mcp_tool_use blocks with empty array or string inputs (should be objects)
             if (is_array($content)) {
                 for ($i = 0; $i < count($content); $i++) {
                     if (
                         isset($content[$i]->type) &&
                         $content[$i]->type === 'mcp_tool_use' &&
-                        isset($content[$i]->input) &&
-                        is_array($content[$i]->input) &&
-                        count($content[$i]->input) === 0
+                        isset($content[$i]->input)
                     ) {
-                        $content[$i]->input = new \stdClass();
+                        if (is_array($content[$i]->input) && count($content[$i]->input) === 0) {
+                            $content[$i]->input = new \stdClass();
+                        }
+                        if (is_string($content[$i]->input)) {
+                            $decoded = json_decode($content[$i]->input);
+                            if (is_object($decoded)) {
+                                $content[$i]->input = $decoded;
+                            }
+                        }
                     }
                 }
             }
