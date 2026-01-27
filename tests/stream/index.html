@@ -72,9 +72,11 @@
                         source.onerror = error => {
                             console.error('Error:', error);
                             source.close();
-                            $container.innerHTML = '<em style="color: red;">Connection error</em>';
                             isLoaded = true;
                             isRendered = true;
+                            setTimeout(() => {
+                                $container.innerHTML = '<em style="color: red;">Connection error</em>';
+                            }, 1000);
                         };
                         typing();
                     });
