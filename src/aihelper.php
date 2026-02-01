@@ -423,7 +423,8 @@ abstract class aihelper
                 prompt: $prompt,
                 files: $files,
                 add_prompt_to_session: $max_tries === $this->max_tries,
-                prev_output_text: null
+                prev_output_text: null,
+                prev_costs: $return['costs']
             );
             $this->log($return, 'return');
             $max_tries--;
@@ -435,7 +436,8 @@ abstract class aihelper
         $prompt = null,
         $files = null,
         $add_prompt_to_session = true,
-        $prev_output_text = null
+        $prev_output_text = null,
+        $prev_costs = 0.0
     );
 
     abstract protected function makeApiCall($args = null);
@@ -463,17 +465,23 @@ abstract class aihelper
                 is_array($content[$i]->content)
             ) {
                 foreach ($content[$i]->content as $content_item__key => $content_item__value) {
-                    if (
-                        isset($content_item__value['type']) &&
-                        $content_item__value['type'] === 'text' &&
-                        isset($content_item__value['text']) &&
-                        is_string($content_item__value['text']) &&
-                        mb_strlen($content_item__value['text']) > $max_length
-                    ) {
-                        $original_length = mb_strlen($content_item__value['text']);
-                        $truncated = mb_substr($content_item__value['text'], 0, $max_length);
+                    // handle both object and array access (API might return either)
+                    $type = is_object($content_item__value)
+                        ? @$content_item__value->type
+                        : @$content_item__value['type'];
+                    $text = is_object($content_item__value)
+                        ? @$content_item__value->text
+                        : @$content_item__value['text'];
+                    if ($type === 'text' && is_string($text) && mb_strlen($text) > $max_length) {
+                        $original_length = mb_strlen($text);
+                        $truncated = mb_substr($text, 0, $max_length);
                         $truncated .= "\n\n[... content truncated: $original_length chars reduced to $max_length chars ...]";
-                        $content[$i]->content[$content_item__key]['text'] = $truncated;
+
+                        if (is_object($content_item__value)) {
+                            $content[$i]->content[$content_item__key]->text = $truncated;
+                        } else {
+                            $content[$i]->content[$content_item__key]['text'] = $truncated;
+                        }
                     }
                 }
             }
@@ -586,7 +594,7 @@ abstract class aihelper
     protected function addCosts($response, &$return)
     {
         //$this->log($response, 'add costs');
-        $this->log('response with length ' . strlen(json_encode($response)), 'add costs');
+        //$this->log('response with length ' . strlen(json_encode($response)), 'add costs');
 
         $input_tokens = 0;
         if (
@@ -661,6 +669,8 @@ abstract class aihelper
                 break;
             }
         }
+
+        $this->log((float) round($costs, 5) . ' - response with length ' . strlen(json_encode($response)), 'add costs');
         $return['costs'] += (float) round($costs, 5);
     }
 
@@ -873,6 +883,14 @@ abstract class aihelper
                                 $this->stream_response->result->usage->output_tokens += @$parsed['usage'][
                                     'output_tokens'
                                 ];
+                                $this->log(
+                                    'ADDED USAGE [' .
+                                        json_encode($parsed['usage']) .
+                                        ' - overall cur ' .
+                                        json_encode($this->stream_response->result->usage) .
+                                        ']',
+                                    'stream usage'
+                                );
                             }
 
                             if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
@@ -1066,42 +1084,42 @@ class ai_chatgpt extends aihelper
         [
             'name' => 'gpt-5',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
+            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'gpt-5-mini',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
+            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5-nano',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000025, 'input_cached' => 0.00000025, 'output' => 0.00000075],
+            'costs' => ['input' => 0.000000125, 'input_cached' => 0.0000000125, 'output' => 0.000001],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'gpt-4.1',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.00000075, 'output' => 0.000012],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.00000125, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o-mini',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000015, 'input_cached' => 0.00000015, 'output' => 0.0000006],
+            'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000015, 'output' => 0.0000006],
             'default' => false,
             'test' => false
         ]
@@ -1178,9 +1196,14 @@ class ai_chatgpt extends aihelper
         }
     }
 
-    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true, $prev_output_text = null)
-    {
-        $return = ['response' => null, 'success' => false, 'costs' => 0.0];
+    protected function askThis(
+        $prompt = null,
+        $files = null,
+        $add_prompt_to_session = true,
+        $prev_output_text = null,
+        $prev_costs = 0.0
+    ) {
+        $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
         if (__::nx($this->model) || __::nx($this->session_id) || __::nx($prompt)) {
             $return['response'] = 'data missing.';
@@ -1329,6 +1352,13 @@ class ai_claude extends aihelper
             'test' => false
         ],
         [
+            'name' => 'claude-opus-4-5',
+            'max_tokens' => 8192,
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000025],
+            'default' => false,
+            'test' => false
+        ],
+        [
             'name' => 'claude-haiku-4-5',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000008, 'input_cached' => 0.0000008, 'output' => 0.000004],
@@ -1357,7 +1387,7 @@ class ai_claude extends aihelper
             'test' => false
         ],
         [
-            'name' => 'claude-3-7-sonnet',
+            'name' => 'claude-3-7-sonnet-latest',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
             'default' => false,
@@ -1373,7 +1403,7 @@ class ai_claude extends aihelper
         [
             'name' => 'claude-3-haiku-20240307',
             'max_tokens' => 4096,
-            'costs' => ['input' => 0.00000025, 'input_cached' => 0.00000025, 'output' => 0.00000125],
+            'costs' => ['input' => 0.0000008, 'input_cached' => 0.0000008, 'output' => 0.000004],
             'default' => false,
             'test' => false
         ]
@@ -1466,9 +1496,14 @@ class ai_claude extends aihelper
         }
     }
 
-    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true, $prev_output_text = null)
-    {
-        $return = ['response' => null, 'success' => false, 'costs' => 0.0];
+    protected function askThis(
+        $prompt = null,
+        $files = null,
+        $add_prompt_to_session = true,
+        $prev_output_text = null,
+        $prev_costs = 0.0
+    ) {
+        $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
         if (__::nx($this->model) || __::nx($this->session_id) || __::nx($prompt)) {
             $return['response'] = 'data missing.';
@@ -1567,7 +1602,8 @@ class ai_claude extends aihelper
                 prompt: $prompt,
                 files: $files,
                 add_prompt_to_session: false,
-                prev_output_text: $output_text
+                prev_output_text: $output_text,
+                prev_costs: $return['costs']
             );
         }
 
@@ -1651,35 +1687,35 @@ class ai_gemini extends aihelper
         [
             'name' => 'gemini-2.5-pro',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000035, 'input_cached' => 0.0000035, 'output' => 0.00001],
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'gemini-2.5-flash',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000035, 'input_cached' => 0.00000035, 'output' => 0.00000053],
+            'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gemini-2.5-flash-lite',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.0000001, 'output' => 0.0000002],
+            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'gemini-2.0-flash',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000035, 'input_cached' => 0.00000035, 'output' => 0.00000053],
+            'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gemini-2.0-flash-lite',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.0000001, 'output' => 0.0000002],
+            'costs' => ['input' => 0.000000075, 'input_cached' => 0.00000001, 'output' => 0.0000003],
             'default' => false,
             'test' => false
         ]
@@ -1739,9 +1775,14 @@ class ai_gemini extends aihelper
         }
     }
 
-    protected function askThis($prompt = null, $files = null, $add_prompt_to_session = true, $prev_output_text = null)
-    {
-        $return = ['response' => null, 'success' => false, 'costs' => 0.0];
+    protected function askThis(
+        $prompt = null,
+        $files = null,
+        $add_prompt_to_session = true,
+        $prev_output_text = null,
+        $prev_costs = 0.0
+    ) {
+        $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
         if (__::nx($this->model) || __::nx($this->session_id) || __::nx($prompt)) {
             $return['response'] = 'data missing.';
@@ -1838,42 +1879,42 @@ class ai_grok extends ai_claude
         [
             'name' => 'grok-4',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'grok-4-fast-reasoning',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.000002, 'output' => 0.000006],
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'grok-4-fast-non-reasoning',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000015, 'input_cached' => 0.0000015, 'output' => 0.0000045],
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-code-fast-1',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000001, 'input_cached' => 0.000001, 'output' => 0.000003],
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-3',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000006, 'input_cached' => 0.000006, 'output' => 0.000018],
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-3-mini',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000001, 'input_cached' => 0.000001, 'output' => 0.000003],
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'default' => false,
             'test' => false
         ]
@@ -1899,14 +1940,14 @@ class ai_deepseek extends ai_claude
         [
             'name' => 'deepseek-chat',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000027, 'input_cached' => 0.00000027, 'output' => 0.0000011],
+            'costs' => ['input' => 0.00000028, 'input_cached' => 0.000000028, 'output' => 0.00000042],
             'default' => true,
             'test' => true
         ],
         [
             'name' => 'deepseek-reasoner',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000055, 'input_cached' => 0.00000055, 'output' => 0.00000219],
+            'costs' => ['input' => 0.00000028, 'input_cached' => 0.000000028, 'output' => 0.00000042],
             'default' => false,
             'test' => false
         ]

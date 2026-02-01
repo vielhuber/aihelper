@@ -675,6 +675,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 $ai_mcp = aihelper::create(
                     provider: 'claude',
                     model: 'claude-haiku-4-5',
+                    //model: 'claude-sonnet-4-5',
                     //model: 'claude-3-haiku-20240307',
                     temperature: 1.0,
                     api_key: @$_SERVER['CLAUDE_API_KEY'],
@@ -696,8 +697,8 @@ class Test extends \PHPUnit\Framework\TestCase
                         '- Fertige einen Screenshot der Seite mit dem Namen "screenshot-' .
                         ($sites__key + 1) .
                         '.png" an';
-                    $prompt .= '- Verschiebe den Screenshot in den Ordner /var/www/aihelper/tests/storage.';
-                    $prompt .= '- Prüfe stets tatsächlich, ob der Screenshot in /var/www/aihelper/tests/storage liegt.';
+                    $prompt .= '- Verschiebe den Screenshot in den Ordner /host/aihelper/tests/storage.';
+                    $prompt .= '- Prüfe stets tatsächlich, ob der Screenshot in /host/aihelper/tests/storage liegt.';
                     $prompt .= '- Wenn er fehlt, führe die Aktion erneut durch.';
                     $prompt .= PHP_EOL;
                 }
@@ -707,7 +708,16 @@ class Test extends \PHPUnit\Framework\TestCase
                 $prompt .= 'Prüfe am Ende, ob alle Dateien vorhanden sind.';
                 $prompt .= 'Wenn welche fehlen, erstelle die fehlenden Screenshots.';
                 $prompt .= 'Antworte nur auf Deutsch.';
-                $ai_mcp->ask($prompt);
+                $return = $ai_mcp->ask($prompt);
+
+                $this->log(
+                    $return['costs'] .
+                        '€ total costs for long running task test with ' .
+                        count($sites) .
+                        ' sites (stream: ' .
+                        ($stream_option__value ? 'yes' : 'no') .
+                        ').'
+                );
 
                 $this->assertSame(count(glob('tests/storage/*.*')), count($sites));
                 $this->log(
@@ -720,7 +730,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
                 // throttle to avoid rate limits on new session
                 if ($stream_option__key < count($stream_option) - 1) {
-                    $throttle = 60 * 2 * count($sites);
+                    $throttle = max(60 * 2 * count($sites), 60 * 5);
                     $this->log('⏳ Throttling next test for ' . $throttle . ' seconds to avoid rate limits...');
                     sleep($throttle);
                 }
