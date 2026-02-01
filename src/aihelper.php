@@ -1394,13 +1394,6 @@ class ai_claude extends aihelper
             'test' => false
         ],
         [
-            'name' => 'claude-3-5-haiku',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000008, 'input_cached' => 0.0000008, 'output' => 0.000004],
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'claude-3-haiku-20240307',
             'max_tokens' => 4096,
             'costs' => ['input' => 0.0000008, 'input_cached' => 0.0000008, 'output' => 0.000004],
