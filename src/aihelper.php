@@ -1468,6 +1468,38 @@ class ai_claude extends aihelper
                 }
             }
 
+            // remove mcp_tool_use blocks without corresponding mcp_tool_result
+            if (is_array($content)) {
+                $filtered_content = [];
+                for ($i = 0; $i < count($content); $i++) {
+                    if (isset($content[$i]->type) && $content[$i]->type === 'mcp_tool_use') {
+                        $tool_use_id = $content[$i]->id ?? null;
+                        $has_result = false;
+
+                        // check if corresponding mcp_tool_result exists
+                        for ($j = $i + 1; $j < count($content); $j++) {
+                            if (
+                                isset($content[$j]->type) &&
+                                $content[$j]->type === 'mcp_tool_result' &&
+                                isset($content[$j]->tool_use_id) &&
+                                $content[$j]->tool_use_id === $tool_use_id
+                            ) {
+                                $has_result = true;
+                                break;
+                            }
+                        }
+
+                        // only add if result exists
+                        if ($has_result) {
+                            $filtered_content[] = $content[$i];
+                        }
+                    } else {
+                        $filtered_content[] = $content[$i];
+                    }
+                }
+                $content = $filtered_content;
+            }
+
             // truncate long mcp_tool_result content to avoid token limits
             $content = $this->truncateMcpToolResultContent($content);
 
