@@ -32,6 +32,16 @@
                             isRendered = false,
                             typing = () => {
                                 let speed = 100;
+                                // pause on selection
+                                let selection = window.getSelection();
+                                if (
+                                    selection &&
+                                    selection.toString().length > 0 &&
+                                    $container.contains(selection.anchorNode)
+                                ) {
+                                    setTimeout(typing, speed);
+                                    return;
+                                }
                                 if (content === '') {
                                     if ($container.textContent.length >= 3) {
                                         $container.textContent = '';
