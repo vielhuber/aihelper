@@ -647,39 +647,57 @@ class Test extends \PHPUnit\Framework\TestCase
             );
             $access_token = $return->result->access_token;
 
-            $i_max = 1;
-            while (@$_SERVER['MCP_SERVER_TEST_' . $i_max . '_URL'] != '') {
-                $i_max++;
-            }
-            $i_max--;
-            for ($i_cur = 1; $i_cur <= $i_max; $i_cur++) {
-                $i_url = 1;
-                $mcp_servers = [];
-                while ($i_url <= $i_cur) {
-                    $mcp_servers[] = [
-                        'url' => $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
-                        'authorization_token' => $access_token
-                    ];
-                    $i_url++;
+            for ($run = 1; $run <= 2; $run++) {
+                $mcp_servers_all = [];
+                $i_cur = 1;
+                while (@$_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'] != '') {
+                    $mcp_servers_all[] = $_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'];
+                    $i_cur++;
                 }
-                $ai_mcp = aihelper::create(
-                    provider: 'claude',
-                    model: 'claude-haiku-4-5',
-                    temperature: 1.0,
-                    api_key: @$_SERVER['CLAUDE_API_KEY'],
-                    session_id: null,
-                    log: 'tests/ai.log',
-                    timeout: 60 * 30,
-                    max_tries: 1,
-                    mcp_servers: $mcp_servers,
-                    stream: false
-                );
-                $prompt = 'Hallo. Wie geht es Dir?';
-                __::log_begin('mcp');
-                $return = $ai_mcp->ask($prompt);
-                $time = __::log_end('mcp', false)['time'];
-                $this->assertTrue($return['success']);
-                $this->log('Response time with ' . count($mcp_servers) . ' MCP server(s): ' . $time . ' seconds.');
+                // randomize mcp servers
+                shuffle($mcp_servers_all);
+                for ($i_cur = 0; $i_cur <= count($mcp_servers_all); $i_cur++) {
+                    $i_url = 1;
+                    $mcp_servers = [];
+                    while ($i_url <= $i_cur) {
+                        $mcp_servers[] = [
+                            'url' => $mcp_servers_all[$i_url - 1],
+                            'authorization_token' => $access_token
+                        ];
+                        $i_url++;
+                    }
+                    $ai_mcp = aihelper::create(
+                        provider: 'claude',
+                        model: 'claude-haiku-4-5',
+                        temperature: 1.0,
+                        api_key: @$_SERVER['CLAUDE_API_KEY'],
+                        session_id: null,
+                        log: 'tests/ai.log',
+                        timeout: 60 * 30,
+                        max_tries: 1,
+                        mcp_servers: $mcp_servers,
+                        stream: false
+                    );
+                    $prompt = 'Hallo. Wie geht es Dir?';
+                    __::log_begin('mcp');
+                    $return = $ai_mcp->ask($prompt);
+                    $time = __::log_end('mcp', false)['time'];
+                    if ($return['success'] === false) {
+                        __::o($return);
+                    }
+                    $this->assertTrue($return['success']);
+                    $this->log(
+                        'RUN ' .
+                            $run .
+                            ': Response time with ' .
+                            count($mcp_servers) .
+                            ' MCP server(s): ' .
+                            number_format($time, 2, ',', '.') .
+                            ' seconds (' .
+                            number_format($return['costs'], 5, '.', ',') .
+                            '$).'
+                    );
+                }
             }
         }
     }
