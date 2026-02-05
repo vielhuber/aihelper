@@ -632,6 +632,58 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
+    function test__ai_mcp_response_times()
+    {
+        if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
+            $return = __::curl(
+                @$_SERVER['MCP_SERVER_TEST_AUTH_URL'],
+                [
+                    'client_id' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'],
+                    'client_secret' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'],
+                    'audience' => @$_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'],
+                    'grant_type' => 'client_credentials'
+                ],
+                'POST'
+            );
+            $access_token = $return->result->access_token;
+
+            $i_max = 1;
+            while (@$_SERVER['MCP_SERVER_TEST_' . $i_max . '_URL'] != '') {
+                $i_max++;
+            }
+            $i_max--;
+            for ($i_cur = 1; $i_cur <= $i_max; $i_cur++) {
+                $i_url = 1;
+                $mcp_servers = [];
+                while ($i_url <= $i_cur) {
+                    $mcp_servers[] = [
+                        'url' => $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
+                        'authorization_token' => $access_token
+                    ];
+                    $i_url++;
+                }
+                $ai_mcp = aihelper::create(
+                    provider: 'claude',
+                    model: 'claude-haiku-4-5',
+                    temperature: 1.0,
+                    api_key: @$_SERVER['CLAUDE_API_KEY'],
+                    session_id: null,
+                    log: 'tests/ai.log',
+                    timeout: 60 * 30,
+                    max_tries: 1,
+                    mcp_servers: $mcp_servers,
+                    stream: false
+                );
+                $prompt = 'Hallo. Wie geht es Dir?';
+                __::log_begin('mcp');
+                $return = $ai_mcp->ask($prompt);
+                $time = __::log_end('mcp', false)['time'];
+                $this->assertTrue($return['success']);
+                $this->log('Response time with ' . count($mcp_servers) . ' MCP server(s): ' . $time . ' seconds.');
+            }
+        }
+    }
+
     function test__ai_mcp_long_running_task()
     {
         if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
