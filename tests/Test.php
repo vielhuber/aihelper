@@ -662,7 +662,7 @@ class Test extends \PHPUnit\Framework\TestCase
                     while ($i_url <= $i_cur) {
                         $url = $mcp_servers_all[$i_url - 1];
                         // replace chat id with random number
-                        $url = str_replace('%CHAT_ID%', rand(100000, 999999), $url);
+                        $url = str_replace('[CHAT_ID]', '[' . rand(100000, 999999) . ']', $url);
                         $mcp_servers[] = [
                             'url' => $url,
                             'authorization_token' => $access_token
