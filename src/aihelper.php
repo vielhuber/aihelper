@@ -42,7 +42,8 @@ abstract class aihelper
         $mcp_servers = null,
         $session_id = null,
         $history = null,
-        $stream = null
+        $stream = null,
+        $url = null
     ) {
         if ($provider === 'chatgpt') {
             return new ai_chatgpt(
@@ -55,7 +56,8 @@ abstract class aihelper
                 mcp_servers: $mcp_servers,
                 session_id: $session_id,
                 history: $history,
-                stream: $stream
+                stream: $stream,
+                url: $url
             );
         }
         if ($provider === 'claude') {
@@ -69,7 +71,8 @@ abstract class aihelper
                 mcp_servers: $mcp_servers,
                 session_id: $session_id,
                 history: $history,
-                stream: $stream
+                stream: $stream,
+                url: $url
             );
         }
         if ($provider === 'gemini') {
@@ -83,7 +86,8 @@ abstract class aihelper
                 mcp_servers: $mcp_servers,
                 session_id: $session_id,
                 history: $history,
-                stream: $stream
+                stream: $stream,
+                url: $url
             );
         }
         if ($provider === 'grok') {
@@ -97,7 +101,8 @@ abstract class aihelper
                 mcp_servers: $mcp_servers,
                 session_id: $session_id,
                 history: $history,
-                stream: $stream
+                stream: $stream,
+                url: $url
             );
         }
         if ($provider === 'deepseek') {
@@ -111,7 +116,23 @@ abstract class aihelper
                 mcp_servers: $mcp_servers,
                 session_id: $session_id,
                 history: $history,
-                stream: $stream
+                stream: $stream,
+                url: $url
+            );
+        }
+        if ($provider === 'lmstudio') {
+            return new ai_lmstudio(
+                model: $model,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream,
+                url: $url
             );
         }
         if ($provider === 'test') {
@@ -125,7 +146,8 @@ abstract class aihelper
                 mcp_servers: $mcp_servers,
                 session_id: $session_id,
                 history: $history,
-                stream: $stream
+                stream: $stream,
+                url: $url
             );
         }
         return null;
@@ -135,7 +157,15 @@ abstract class aihelper
     {
         $data = [];
         foreach (
-            [new ai_claude(), new ai_gemini(), new ai_chatgpt(), new ai_grok(), new ai_deepseek(), new ai_test()]
+            [
+                new ai_claude(),
+                new ai_gemini(),
+                new ai_chatgpt(),
+                new ai_grok(),
+                new ai_deepseek(),
+                new ai_lmstudio(),
+                new ai_test()
+            ]
             as $providers__value
         ) {
             $data[] = [
@@ -370,7 +400,8 @@ abstract class aihelper
         $mcp_servers = null,
         $session_id = null,
         $history = null,
-        $stream = null
+        $stream = null,
+        $url = null
     ) {
         if ($model === null) {
             $model = $this->getDefaultModel();
@@ -383,6 +414,9 @@ abstract class aihelper
         }
         if ($log !== null) {
             $this->log = $log;
+        }
+        if ($url !== null) {
+            $this->url = $url;
         }
         $this->max_tries = $max_tries !== null ? $max_tries : 1;
         if ($this->support_mcp && $mcp_servers !== null && !empty($mcp_servers)) {
@@ -1945,6 +1979,24 @@ class ai_deepseek extends ai_claude
             'test' => false
         ]
     ];
+}
+
+/* compatible with the openai api */
+class ai_lmstudio extends ai_chatgpt
+{
+    public $provider = 'Element Labs';
+
+    public $title = 'LM Studio';
+
+    public $name = 'lmstudio';
+
+    protected $url = 'http://localhost:1234/v1';
+
+    public $support_mcp = false;
+
+    public $support_stream = false;
+
+    public $models = [];
 }
 
 class ai_test extends ai_claude

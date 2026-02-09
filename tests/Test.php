@@ -48,6 +48,10 @@ class Test extends \PHPUnit\Framework\TestCase
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
+            $this->test__ai_lmstudio($stats);
+        }
+        for ($i = 1; $i <= $this->run_count; $i++) {
+            $this->log('run ' . $i . '/' . $this->run_count . '...');
             $this->test__ai_test($stats);
         }
         $this->log('stats (' . $this->run_count . ' runs):');
@@ -85,40 +89,53 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__ai_claude(&$stats = [])
     {
-        $this->ai_test_prepare('claude', @$_SERVER['CLAUDE_API_KEY'], $stats);
+        $this->ai_test_prepare('claude', $_SERVER['CLAUDE_API_KEY'] ?? null, null, $stats);
     }
 
     function test__ai_gemini(&$stats = [])
     {
-        $this->ai_test_prepare('gemini', @$_SERVER['GEMINI_API_KEY'], $stats);
+        $this->ai_test_prepare('gemini', $_SERVER['GEMINI_API_KEY'] ?? null, null, $stats);
     }
 
     function test__ai_chatgpt(&$stats = [])
     {
-        $this->ai_test_prepare('chatgpt', @$_SERVER['CHATGPT_API_KEY'], $stats);
+        $this->ai_test_prepare('chatgpt', $_SERVER['CHATGPT_API_KEY'] ?? null, null, $stats);
     }
 
     function test__ai_grok(&$stats = [])
     {
-        $this->ai_test_prepare('grok', @$_SERVER['GROK_API_KEY'], $stats);
+        $this->ai_test_prepare('grok', $_SERVER['GROK_API_KEY'] ?? null, null, $stats);
     }
 
     function test__ai_deepseek(&$stats = [])
     {
-        $this->ai_test_prepare('deepseek', @$_SERVER['DEEPSEEK_API_KEY'], $stats);
+        $this->ai_test_prepare('deepseek', $_SERVER['DEEPSEEK_API_KEY'] ?? null, null, $stats);
+    }
+
+    function test__ai_lmstudio(&$stats = [])
+    {
+        $this->ai_test_prepare(
+            'lmstudio',
+            $_SERVER['LMSTUDIO_API_KEY'] ?? null,
+            $_SERVER['LMSTUDIO_URL'] ?? null,
+            $stats
+        );
     }
 
     function test__ai_test(&$stats = [])
     {
-        $this->ai_test_prepare('test', null, $stats);
+        $this->ai_test_prepare('test', null, null, $stats);
     }
 
-    function ai_test_prepare($provider, $api_key, &$stats = [])
+    function ai_test_prepare($provider, $api_key = null, $url = null, &$stats = [])
     {
         $models = aihelper::create(provider: $provider)->getTestModels();
+        if (empty($models) && isset($_SERVER[strtoupper($provider) . '_MODEL'])) {
+            $models = [$_SERVER[strtoupper($provider) . '_MODEL']];
+        }
         foreach ($models as $models__value) {
             __::log_begin('ai');
-            [$costs, $success_count, $fail_count] = $this->ai_test($provider, $models__value, $api_key);
+            [$costs, $success_count, $fail_count] = $this->ai_test($provider, $models__value, $api_key, $url);
             $time = __::log_end('ai', false)['time'];
             if (!isset($stats[$provider])) {
                 $stats[$provider] = [];
@@ -135,7 +152,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function ai_test($provider, $model, $api_key)
+    function ai_test($provider, $model, $api_key, $url)
     {
         $this->log('Testing ' . $provider . ' (' . $model . ')...');
 
@@ -145,14 +162,15 @@ class Test extends \PHPUnit\Framework\TestCase
             temperature: 1.0,
             api_key: $api_key,
             session_id: null,
-            log: 'tests/ai.log'
+            log: 'tests/ai.log',
+            url: $url
         );
 
         $costs = 0;
         $fail_count = 0;
         $success_count = 0;
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek']);
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'lmstudio']);
         if ($supported === true) {
             $return = $ai->ask('Wer wurde 2018 Fußball-Weltmeister? Antworte bitte kurz.');
             //$this->log($return);
@@ -173,7 +191,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek']);
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'lmstudio']);
         if ($supported === true) {
             $return = $ai->ask('Was habe ich vorher gefragt?');
             //$this->log($return);
@@ -196,7 +214,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek']);
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'lmstudio']);
         if ($supported === true) {
             $return = $ai->ask('Welchen Satz hast Du exakt zuvor geschrieben?');
             //$this->log($return);
@@ -219,7 +237,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek']);
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'lmstudio']);
         if ($supported === true) {
             $return = $ai->ask('Ich heiße David mit Vornamen. Bitte merk Dir das!');
             //$this->log($return);
@@ -249,7 +267,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek']);
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'lmstudio']);
         if ($supported === true) {
             $ai = aihelper::create(
                 provider: $provider,
