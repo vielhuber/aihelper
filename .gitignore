@@ -7,7 +7,7 @@
 /tests/assets/file.csv
 /tests/assets/file*.txt
 /tests/assets/file*.csv
-/tests/ai.log
+/tests/*.log
 /tests/storage/
 !/tests/storage/.gitkeep
 /.env

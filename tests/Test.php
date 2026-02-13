@@ -25,7 +25,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_all()
     {
         $stats = [];
-        file_put_contents('tests/ai.log', '');
+        file_put_contents('tests/aihelper.log', '');
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
             $this->test__ai_claude($stats);
@@ -162,7 +162,7 @@ class Test extends \PHPUnit\Framework\TestCase
             temperature: 1.0,
             api_key: $api_key,
             session_id: null,
-            log: 'tests/ai.log',
+            log: 'tests/aihelper.log',
             url: $url
         );
 
@@ -247,7 +247,8 @@ class Test extends \PHPUnit\Framework\TestCase
                 temperature: 1.0,
                 api_key: $api_key,
                 session_id: $ai->getSessionId(),
-                log: 'tests/ai.log'
+                log: 'tests/aihelper.log',
+                url: $url
             );
             $return = $ai->ask('Wie heiße ich mit Vornamen?');
             //$this->log($return);
@@ -275,7 +276,8 @@ class Test extends \PHPUnit\Framework\TestCase
                 temperature: 1.0,
                 api_key: $api_key,
                 history: $ai->getSessionContent(),
-                log: 'tests/ai.log'
+                log: 'tests/aihelper.log',
+                url: $url
             );
             $return = $ai->ask('Wie heiße ich mit Vornamen?');
             //$this->log($return);
@@ -419,7 +421,8 @@ class Test extends \PHPUnit\Framework\TestCase
                 temperature: 1.0,
                 api_key: $api_key,
                 session_id: null,
-                log: 'tests/ai.log',
+                log: 'tests/aihelper.log',
+                url: $url,
                 max_tries: 1,
                 mcp_servers: null,
                 stream: true
@@ -448,7 +451,8 @@ class Test extends \PHPUnit\Framework\TestCase
                 temperature: 1.0,
                 api_key: $api_key,
                 session_id: null,
-                log: 'tests/ai.log',
+                log: 'tests/aihelper.log',
+                url: $url,
                 max_tries: 1,
                 mcp_servers: null,
                 stream: true
@@ -502,7 +506,8 @@ class Test extends \PHPUnit\Framework\TestCase
                     temperature: 1.0,
                     api_key: $api_key,
                     session_id: null,
-                    log: 'tests/ai.log',
+                    log: 'tests/aihelper.log',
+                    url: $url,
                     max_tries: 1,
                     mcp_servers: $mcp_servers
                 );
@@ -555,7 +560,7 @@ class Test extends \PHPUnit\Framework\TestCase
                             provider: $providers__value['name'],
                             model: $models__value['name'],
                             api_key: '123',
-                            log: 'tests/ai.log',
+                            log: 'tests/aihelper.log',
                             stream: $streams__value
                         );
                         $return = $ai->ask('Test!');
@@ -693,7 +698,7 @@ class Test extends \PHPUnit\Framework\TestCase
                         temperature: 1.0,
                         api_key: @$_SERVER['CLAUDE_API_KEY'],
                         session_id: null,
-                        log: 'tests/ai.log',
+                        log: 'tests/aihelper.log',
                         timeout: 60 * 30,
                         max_tries: 1,
                         mcp_servers: $mcp_servers,
@@ -771,7 +776,7 @@ class Test extends \PHPUnit\Framework\TestCase
                     temperature: 1.0,
                     api_key: @$_SERVER['CLAUDE_API_KEY'],
                     session_id: null,
-                    log: 'tests/ai.log',
+                    log: 'tests/aihelper.log',
                     timeout: 60 * 30,
                     max_tries: 1,
                     mcp_servers: $mcp_servers,
