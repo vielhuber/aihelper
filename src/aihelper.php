@@ -474,7 +474,25 @@ abstract class aihelper
         $prev_costs = 0.0
     );
 
+    abstract public function ping(): bool;
+
     abstract protected function makeApiCall($args = null);
+
+    protected function callPing(string $url, array $headers = []): bool
+    {
+        try {
+            $response = __::curl(
+                url: $url,
+                data: null,
+                method: 'GET',
+                headers: !empty($headers) ? $headers : null,
+                timeout: 10
+            );
+            return $response->status >= 200 && $response->status < 300;
+        } catch (\Exception) {
+            return false;
+        }
+    }
 
     protected function trimPrompt($prompt)
     {
@@ -1348,6 +1366,11 @@ class ai_chatgpt extends aihelper
         return $return;
     }
 
+    public function ping(): bool
+    {
+        return $this->callPing($this->url . '/models', ['Authorization' => 'Bearer ' . $this->api_key]);
+    }
+
     protected function makeApiCall($args = null)
     {
         return __::curl(
@@ -1679,6 +1702,14 @@ class ai_claude extends aihelper
         return $return;
     }
 
+    public function ping(): bool
+    {
+        return $this->callPing($this->url . '/models', [
+            'x-api-key' => $this->api_key,
+            'anthropic-version' => '2023-06-01'
+        ]);
+    }
+
     protected function makeApiCall($args = null)
     {
         return __::curl(
@@ -1875,6 +1906,11 @@ class ai_gemini extends aihelper
         return $return;
     }
 
+    public function ping(): bool
+    {
+        return $this->callPing($this->url . '/models?key=' . $this->api_key);
+    }
+
     protected function makeApiCall($args = null)
     {
         return __::curl(
@@ -1996,6 +2032,7 @@ class ai_lmstudio extends ai_chatgpt
 
     public $support_stream = false;
 
+    // gets populated dynamically
     public $models = [];
 }
 
@@ -2022,6 +2059,11 @@ class ai_test extends ai_claude
             'test' => true
         ]
     ];
+
+    public function ping(): bool
+    {
+        return true;
+    }
 
     protected function makeApiCall($args = null)
     {

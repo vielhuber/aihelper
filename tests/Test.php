@@ -172,6 +172,19 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'lmstudio']);
         if ($supported === true) {
+            $return = $ai->ping();
+            $this->log($return);
+            $success_this = $return === true;
+            if ($success_this) {
+                $success_count++;
+            } else {
+                $fail_count++;
+            }
+            $this->log(($success_this ? '✅' : '⛔') . ' #1 (ping)');
+        }
+
+        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'lmstudio']);
+        if ($supported === true) {
             $return = $ai->ask('Wer wurde 2018 Fußball-Weltmeister? Antworte bitte kurz.');
             //$this->log($return);
             $success_this =
@@ -563,6 +576,8 @@ class Test extends \PHPUnit\Framework\TestCase
                             log: 'tests/aihelper.log',
                             stream: $streams__value
                         );
+                        $return = $ai->ping();
+                        $this->assertSame($return, false);
                         $return = $ai->ask('Test!');
                         $this->assertSame($return['success'], false);
                         $this->assertMatchesRegularExpression('/^$|api|error/i', $return['response'] ?? '');

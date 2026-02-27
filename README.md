@@ -53,6 +53,8 @@ $ai->ask(prompt: 'Was habe ich vorher gefragt?');
 
 aihelper::getProviders() // gets overview of providers and models
 
+$ai->ping() // gets health, returns true|false
+
 $ai->getSessionId() // get current session id
 
 $ai->getSessionContent() // gets messages in chat history
