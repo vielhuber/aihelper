@@ -403,9 +403,6 @@ abstract class aihelper
         $stream = null,
         $url = null
     ) {
-        if ($model === null) {
-            $model = $this->getDefaultModel();
-        }
         if ($temperature === null) {
             $temperature = 1.0;
         }
@@ -417,6 +414,15 @@ abstract class aihelper
         }
         if ($url !== null) {
             $this->url = $url;
+        }
+        if (method_exists($this, 'fetchModels')) {
+            $this->fetchModels();
+        }
+        if ($model === null) {
+            $model = $this->getDefaultModel();
+        }
+        if (method_exists($this, 'loadModel')) {
+            $this->loadModel($model);
         }
         $this->max_tries = $max_tries !== null ? $max_tries : 1;
         if ($this->support_mcp && $mcp_servers !== null && !empty($mcp_servers)) {
@@ -617,6 +623,13 @@ abstract class aihelper
                 PHP_EOL;
             file_put_contents($this->log, $msg, FILE_APPEND);
         }
+    }
+
+    public function getModels()
+    {
+        return array_map(function ($models__value) {
+            return $models__value['name'];
+        }, array_values($this->models));
     }
 
     public function getTestModels()
@@ -971,7 +984,7 @@ abstract class aihelper
             };
         }
 
-        if ($this->name === 'chatgpt') {
+        if ($this->name === 'chatgpt' || $this->name === 'lmstudio') {
             // mimic non stream result
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -1290,6 +1303,15 @@ class ai_chatgpt extends aihelper
                 if (isset($mcp__value['authorization_token']) && !isset($mcp__value['authorization'])) {
                     $mcp__value['authorization'] = $mcp__value['authorization_token'];
                     unset($mcp__value['authorization_token']);
+                }
+                // lmstudio needs this
+                if ($this->name === 'lmstudio') {
+                    if (isset($mcp__value['authorization']) && !isset($mcp__value['headers'])) {
+                        $mcp__value['headers'] = [
+                            'Authorization' => 'Bearer ' . $mcp__value['authorization']
+                        ];
+                        unset($mcp__value['authorization']);
+                    }
                 }
                 if (isset($mcp__value['url']) && !isset($mcp__value['server_url'])) {
                     $mcp__value['server_url'] = $mcp__value['url'];
@@ -2028,12 +2050,81 @@ class ai_lmstudio extends ai_chatgpt
 
     protected $url = 'http://localhost:1234/v1';
 
-    public $support_mcp = false;
+    public $support_mcp = true;
 
-    public $support_stream = false;
+    public $support_stream = true;
 
-    // gets populated dynamically
     public $models = [];
+
+    protected function fetchModels(): void
+    {
+        $response = __::curl(
+            url: rtrim(str_replace('/v1', '/api/v1', $this->url), '/') . '/models',
+            method: 'GET',
+            headers: [
+                'Authorization' => 'Bearer ' . $this->api_key
+            ],
+            timeout: $this->timeout
+        );
+        $this->log($response);
+        if (
+            __::x(@$response) &&
+            __::x(@$response->result) &&
+            __::x(@$response->result->models) &&
+            is_array($response->result->models)
+        ) {
+            $this->models = [];
+            foreach ($response->result->models as $model__value) {
+                // only include llm models, skip embeddings and other types
+                if (!isset($model__value->type) || $model__value->type !== 'llm') {
+                    continue;
+                }
+                if (__::x(@$model__value->key)) {
+                    $this->models[] = [
+                        'name' => $model__value->key,
+                        'max_tokens' => isset($model__value->max_context_length)
+                            ? (int) $model__value->max_context_length
+                            : 8192,
+                        'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+                        'default' => false,
+                        'test' => false
+                    ];
+                }
+            }
+            // set first model as default + test
+            if (count($this->models) > 0) {
+                $this->models[0]['default'] = true;
+                $this->models[0]['test'] = true;
+            }
+        }
+    }
+
+    protected function loadModel($model): void
+    {
+        if (empty($model)) {
+            return;
+        }
+        $context_length = 8192;
+        foreach ($this->models as $models__value) {
+            if ($models__value['name'] === $model) {
+                $context_length = $models__value['max_tokens'];
+                break;
+            }
+        }
+        $response = __::curl(
+            url: rtrim(str_replace('/v1', '/api/v1', $this->url), '/') . '/models/load',
+            data: [
+                'model' => $model,
+                'context_length' => $context_length
+            ],
+            method: 'POST',
+            headers: [
+                'Authorization' => 'Bearer ' . $this->api_key
+            ],
+            timeout: $this->timeout
+        );
+        $this->log($response);
+    }
 }
 
 class ai_test extends ai_claude

@@ -129,26 +129,30 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function ai_test_prepare($provider, $api_key = null, $url = null, &$stats = [])
     {
-        $models = aihelper::create(provider: $provider)->getTestModels();
-        if (empty($models) && isset($_SERVER[strtoupper($provider) . '_MODEL'])) {
-            $models = [$_SERVER[strtoupper($provider) . '_MODEL']];
-        }
-        foreach ($models as $models__value) {
-            __::log_begin('ai');
-            [$costs, $success_count, $fail_count] = $this->ai_test($provider, $models__value, $api_key, $url);
-            $time = __::log_end('ai', false)['time'];
-            if (!isset($stats[$provider])) {
-                $stats[$provider] = [];
+        $models = aihelper::create(
+            provider: $provider,
+            api_key: $api_key,
+            url: $url,
+            log: 'tests/aihelper.log'
+        )->getTestModels();
+        if (!empty($models)) {
+            foreach ($models as $models__value) {
+                __::log_begin('ai');
+                [$costs, $success_count, $fail_count] = $this->ai_test($provider, $models__value, $api_key, $url);
+                $time = __::log_end('ai', false)['time'];
+                if (!isset($stats[$provider])) {
+                    $stats[$provider] = [];
+                }
+                if (!isset($stats[$provider][$models__value])) {
+                    $stats[$provider][$models__value] = [];
+                }
+                $stats[$provider][$models__value][] = [
+                    'time' => $time,
+                    'costs' => $costs,
+                    'fail_count' => $fail_count,
+                    'success_count' => $success_count
+                ];
             }
-            if (!isset($stats[$provider][$models__value])) {
-                $stats[$provider][$models__value] = [];
-            }
-            $stats[$provider][$models__value][] = [
-                'time' => $time,
-                'costs' => $costs,
-                'fail_count' => $fail_count,
-                'success_count' => $success_count
-            ];
         }
     }
 
@@ -173,7 +177,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'lmstudio']);
         if ($supported === true) {
             $return = $ai->ping();
-            $this->log($return);
+            //$this->log($return);
             $success_this = $return === true;
             if ($success_this) {
                 $success_count++;
@@ -426,7 +430,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'chatgpt', 'test']);
+        $supported = in_array($provider, ['claude', 'chatgpt', 'lmstudio', 'test']);
         if ($supported === true) {
             $ai_stream = aihelper::create(
                 provider: $provider,
@@ -456,7 +460,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'chatgpt']);
+        $supported = in_array($provider, ['claude', 'chatgpt', 'lmstudio']);
         if ($supported === true) {
             $ai_stream = aihelper::create(
                 provider: $provider,
@@ -490,7 +494,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
 
         if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
-            $supported = in_array($provider, ['claude', 'chatgpt']);
+            $supported = in_array($provider, ['claude', 'chatgpt', 'lmstudio']);
             if ($supported === true) {
                 $return = __::curl(
                     @$_SERVER['MCP_SERVER_TEST_AUTH_URL'],
