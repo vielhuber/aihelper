@@ -53,7 +53,7 @@ $ai->ask(prompt: 'Was habe ich vorher gefragt?');
 
 aihelper::getProviders() // gets overview of providers and models
 
-aihelper::create(provider: 'lmstudio', api_key: '...')->getModels() // get models of provider
+aihelper::create(provider: 'lmstudio')->getModels() // get models of provider
 
 $ai->ping() // gets health, returns true|false
 
