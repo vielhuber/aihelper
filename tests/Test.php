@@ -552,7 +552,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $this->assertTrue(true);
+        $this->assertTrue($fail_count === 0);
         return [$costs, $success_count, $fail_count];
     }
 

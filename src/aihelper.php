@@ -2037,6 +2037,13 @@ class ai_deepseek extends ai_claude
             'test' => false
         ]
     ];
+
+    public function ping(): bool
+    {
+        return $this->callPing(str_replace('/anthropic', '', $this->url) . '/models', [
+            'x-api-key' => $this->api_key
+        ]);
+    }
 }
 
 /* compatible with the openai api */
