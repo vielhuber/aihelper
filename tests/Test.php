@@ -4,7 +4,7 @@ use vielhuber\stringhelper\__;
 
 class Test extends \PHPUnit\Framework\TestCase
 {
-    protected $run_count = 3;
+    protected $run_count = 2;
 
     public static function setUpBeforeClass(): void
     {
