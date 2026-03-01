@@ -2010,9 +2010,9 @@ class ai_chatgpt extends aihelper
             __::x(@$response->result->data) &&
             is_array($response->result->data)
         ) {
-            foreach ($response->result->data as $model__value) {
-                if (__::x(@$model__value->id)) {
-                    $models[] = $model__value->id;
+            foreach ($response->result->data as $models__value) {
+                if (__::x(@$models__value->id)) {
+                    $models[] = $models__value->id;
                 }
             }
         }
@@ -2934,9 +2934,12 @@ class ai_gemini extends aihelper
             __::x(@$response->result->models) &&
             is_array($response->result->models)
         ) {
-            foreach ($response->result->models as $model__value) {
-                if (__::x(@$model__value->name)) {
-                    $models[] = str_replace('models/', '', $model__value->name);
+            foreach ($response->result->models as $models__value) {
+                if (__::x(@$models__value->name)) {
+                    if (substr($models__value->name, -4) === '-exp') {
+                        continue;
+                    }
+                    $models[] = str_replace('models/', '', $models__value->name);
                 }
             }
         }
@@ -3283,13 +3286,13 @@ class ai_lmstudio extends ai_chatgpt
             __::x(@$response->result->models) &&
             is_array($response->result->models)
         ) {
-            foreach ($response->result->models as $model__value) {
+            foreach ($response->result->models as $models__value) {
                 // only include llm models, skip embeddings and other types
-                if (!isset($model__value->type) || $model__value->type !== 'llm') {
+                if (!isset($models__value->type) || $models__value->type !== 'llm') {
                     continue;
                 }
-                if (__::x(@$model__value->key)) {
-                    $models[] = $model__value->key;
+                if (__::x(@$models__value->key)) {
+                    $models[] = $models__value->key;
                 }
             }
         }
