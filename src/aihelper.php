@@ -1152,7 +1152,7 @@ class ai_chatgpt extends aihelper
         [
             'name' => 'gpt-5',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => true,
             'test' => false
         ],
@@ -1166,28 +1166,28 @@ class ai_chatgpt extends aihelper
         [
             'name' => 'gpt-5-nano',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000000125, 'input_cached' => 0.0000000125, 'output' => 0.000001],
+            'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4.1',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.00000075, 'output' => 0.000012],
+            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.00000125, 'output' => 0.000015],
+            'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o-mini',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000015, 'output' => 0.0000006],
+            'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
             'default' => false,
             'test' => false
         ],
@@ -2268,63 +2268,63 @@ class ai_claude extends aihelper
         [
             'name' => 'claude-sonnet-4-6',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-6',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000025],
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-sonnet-4-5',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-5',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000025],
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-haiku-4-5',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000008, 'input_cached' => 0.0000008, 'output' => 0.000004],
+            'costs' => ['input' => 0.000001, 'input_cached' => 0.0000001, 'output' => 0.000005],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'claude-sonnet-4-0',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-1',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.000075],
+            'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-0',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.000075],
+            'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-3-haiku-20240307',
             'max_tokens' => 4096,
-            'costs' => ['input' => 0.0000008, 'input_cached' => 0.0000008, 'output' => 0.000004],
+            'costs' => ['input' => 0.00000025, 'input_cached' => 0.00000003, 'output' => 0.00000125],
             'default' => false,
             'test' => false
         ]
@@ -2672,7 +2672,7 @@ class ai_gemini extends aihelper
         [
             'name' => 'gemini-2.0-flash-lite',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000000075, 'input_cached' => 0.00000001, 'output' => 0.0000003],
+            'costs' => ['input' => 0.000000075, 'input_cached' => 0.000000075, 'output' => 0.0000003],
             'default' => false,
             'test' => false
         ],
@@ -2791,7 +2791,7 @@ class ai_gemini extends aihelper
         [
             'name' => 'gemini-2.0-flash-lite-001',
             'max_tokens' => 8192,
-            'costs' => ['input' => 0.000000075, 'input_cached' => 0.00000001, 'output' => 0.0000003],
+            'costs' => ['input' => 0.000000075, 'input_cached' => 0.000000075, 'output' => 0.0000003],
             'default' => false,
             'test' => false
         ],
