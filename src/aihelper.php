@@ -490,25 +490,12 @@ abstract class aihelper
         $prev_costs = 0.0
     );
 
-    abstract public function ping(): bool;
+    public function ping(): bool
+    {
+        return !empty($this->fetchModels());
+    }
 
     abstract protected function makeApiCall($args = null);
-
-    protected function callPing(string $url, array $headers = []): bool
-    {
-        try {
-            $response = __::curl(
-                url: $url,
-                data: null,
-                method: 'GET',
-                headers: !empty($headers) ? $headers : null,
-                timeout: 10
-            );
-            return $response->status >= 200 && $response->status < 300;
-        } catch (\Exception) {
-            return false;
-        }
-    }
 
     protected function trimPrompt($prompt)
     {
@@ -2230,11 +2217,6 @@ class ai_chatgpt extends aihelper
         return $return;
     }
 
-    public function ping(): bool
-    {
-        return $this->callPing($this->url . '/models', ['Authorization' => 'Bearer ' . $this->api_key]);
-    }
-
     protected function makeApiCall($args = null)
     {
         return __::curl(
@@ -2599,14 +2581,6 @@ class ai_claude extends aihelper
         $return['response'] = $this->parseJson($return['response']);
 
         return $return;
-    }
-
-    public function ping(): bool
-    {
-        return $this->callPing($this->url . '/models', [
-            'x-api-key' => $this->api_key,
-            'anthropic-version' => '2023-06-01'
-        ]);
     }
 
     protected function makeApiCall($args = null)
@@ -3096,11 +3070,6 @@ class ai_gemini extends aihelper
         return $return;
     }
 
-    public function ping(): bool
-    {
-        return $this->callPing($this->url . '/models?key=' . $this->api_key);
-    }
-
     protected function makeApiCall($args = null)
     {
         return __::curl(
@@ -3130,10 +3099,24 @@ class ai_grok extends ai_claude
 
     public $models = [
         [
+            'name' => 'grok-4-1-fast-reasoning',
+            'max_tokens' => 8192,
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'default' => true,
+            'test' => true
+        ],
+        [
+            'name' => 'grok-4-1-fast-non-reasoning',
+            'max_tokens' => 8192,
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'default' => false,
+            'test' => false
+        ],
+        [
             'name' => 'grok-4-0',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
-            'default' => true,
+            'default' => false,
             'test' => false
         ],
         [
@@ -3141,7 +3124,7 @@ class ai_grok extends ai_claude
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'default' => false,
-            'test' => true
+            'test' => false
         ],
         [
             'name' => 'grok-4-fast-non-reasoning',
@@ -3166,20 +3149,6 @@ class ai_grok extends ai_claude
         ],
         [
             'name' => 'grok-3-mini',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-4-1-fast-reasoning',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-4-1-fast-non-reasoning',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'default' => false,
@@ -3276,13 +3245,6 @@ class ai_deepseek extends ai_claude
             }
         }
         return $models;
-    }
-
-    public function ping(): bool
-    {
-        return $this->callPing(str_replace('/anthropic', '', $this->url) . '/models', [
-            'x-api-key' => $this->api_key
-        ]);
     }
 }
 
@@ -3391,11 +3353,6 @@ class ai_test extends ai_claude
         return array_map(function ($model) {
             return $model['name'];
         }, $this->models);
-    }
-
-    public function ping(): bool
-    {
-        return true;
     }
 
     protected function makeApiCall($args = null)
