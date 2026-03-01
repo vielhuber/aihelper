@@ -852,4 +852,47 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
     }
+
+    function test__ai_missing_or_wrong_models()
+    {
+        $providers = aihelper::getProviders();
+        $success = true;
+        foreach ($providers as $providers__value) {
+            if (in_array($providers__value['name'], ['lmstudio', 'test'])) {
+                continue;
+            }
+            $modelsApi = aihelper::create(
+                provider: $providers__value['name'],
+                api_key: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_KEY'] ?? null,
+                url: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_URL'] ?? null,
+                log: 'tests/aihelper.log'
+            )->fetchModels();
+            $modelsStatic = array_map(function ($models__value) {
+                return $models__value['name'];
+            }, $providers__value['models']);
+            foreach ($modelsApi as $models__value) {
+                if (!in_array($models__value, $modelsStatic)) {
+                    $this->log(
+                        '⚠️ Model ' .
+                            $models__value .
+                            ' is available via API but not listed in static array for provider ' .
+                            $providers__value['name']
+                    );
+                    $success = false;
+                }
+            }
+            foreach ($modelsStatic as $models__value) {
+                if (!in_array($models__value, $modelsApi)) {
+                    $this->log(
+                        '⛔ Model ' .
+                            $models__value .
+                            ' is listed in static array but not available via API for provider ' .
+                            $providers__value['name']
+                    );
+                    $success = false;
+                }
+            }
+        }
+        $this->assertTrue($success);
+    }
 }
