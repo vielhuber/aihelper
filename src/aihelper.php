@@ -2282,7 +2282,7 @@ class ai_gemini extends aihelper
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'default' => false,
-            'test' => true
+            'test' => false
         ],
         [
             'name' => 'gemini-2.5-flash-lite',
@@ -2331,7 +2331,7 @@ class ai_gemini extends aihelper
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.00000005, 'output' => 0.000003],
             'default' => false,
-            'test' => false
+            'test' => true
         ],
         [
             'name' => 'gemini-3-pro-image-preview',
