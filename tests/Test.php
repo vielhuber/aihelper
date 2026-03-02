@@ -892,6 +892,30 @@ class Test extends \PHPUnit\Framework\TestCase
                     $success = false;
                 }
             }
+            foreach ($providers__value['models'] as $models__value) {
+                $ai = aihelper::create(
+                    provider: $providers__value['name'],
+                    model: $models__value['name'],
+                    temperature: 1.0,
+                    api_key: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_KEY'] ?? null,
+                    url: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_URL'] ?? null,
+                    log: 'tests/aihelper.log',
+                    max_tries: 2
+                );
+                $return = $ai->ask('Hallo!');
+                if ($return['success'] === true) {
+                    $this->log('✅ ' . $models__value['name']);
+                } else {
+                    $this->log(
+                        '⛔ Model ' .
+                            $models__value['name'] .
+                            ' of provider ' .
+                            $providers__value['name'] .
+                            ' is not responding to API calls.'
+                    );
+                    $success = false;
+                }
+            }
         }
         $this->assertTrue($success);
     }

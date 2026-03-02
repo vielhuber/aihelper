@@ -27,6 +27,7 @@ abstract class aihelper
     protected $stream_buffer_in = null;
     protected $stream_buffer_data = null;
     protected $stream_current_block_type = null;
+    protected $stream_first_text_sent = false;
 
     protected $session_id = null;
     protected static $sessions = [];
@@ -739,6 +740,7 @@ abstract class aihelper
         $this->stream_buffer_in = '';
         $this->stream_buffer_data = '';
         $this->stream_current_block_type = null;
+        $this->stream_first_text_sent = false;
 
         if ($this->name === 'claude' || $this->name === 'test') {
             // mimic non stream result
@@ -1042,6 +1044,18 @@ abstract class aihelper
                             if (isset($parsed['type']) && $parsed['type'] === 'response.output_text.delta') {
                                 if (isset($parsed['delta'])) {
                                     $text = $parsed['delta'];
+
+                                    // strip leading newlines from the very first text chunk
+                                    if (!$this->stream_first_text_sent) {
+                                        $text = ltrim($text, "\n");
+                                        if ($text === '') {
+                                            $this->stream_buffer_data = '';
+                                            $this->stream_event = null;
+                                            continue;
+                                        }
+                                        $this->stream_first_text_sent = true;
+                                    }
+
                                     $this->stream_response->result->output[0]->content[0]->text .= $text;
 
                                     echo 'data: ' .
@@ -1319,20 +1333,6 @@ class ai_chatgpt extends aihelper
             'test' => false
         ],
         [
-            'name' => 'gpt-5-search-api',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-search-api-2025-10-14',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'gpt-4.1-2025-04-14',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
@@ -1410,20 +1410,6 @@ class ai_chatgpt extends aihelper
             'test' => false
         ],
         [
-            'name' => 'o3-deep-research',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00001, 'input_cached' => 0.0000025, 'output' => 0.00004],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3-deep-research-2025-06-26',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00001, 'input_cached' => 0.0000025, 'output' => 0.00004],
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'o4-mini',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
@@ -1434,20 +1420,6 @@ class ai_chatgpt extends aihelper
             'name' => 'o4-mini-2025-04-16',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o4-mini-deep-research',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o4-mini-deep-research-2025-06-26',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'default' => false,
             'test' => false
         ],
@@ -1504,244 +1476,6 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4o-mini-2024-07-18',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-search-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.0000025, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-search-preview-2025-03-11',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.0000025, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-search-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000015, 'input_cached' => 0.00000015, 'output' => 0.0000006],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-search-preview-2025-03-11',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000015, 'input_cached' => 0.00000015, 'output' => 0.0000006],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-audio-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.0000025, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-audio-preview-2024-12-17',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.0000025, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-audio-preview-2025-06-03',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.0000025, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-realtime-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000025, 'output' => 0.00002],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-realtime-preview-2024-12-17',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000025, 'output' => 0.00002],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-realtime-preview-2025-06-03',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000025, 'output' => 0.00002],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-audio-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000015, 'input_cached' => 0.00000015, 'output' => 0.0000006],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-audio-preview-2024-12-17',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000015, 'input_cached' => 0.00000015, 'output' => 0.0000006],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-realtime-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.0000003, 'output' => 0.0000024],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-realtime-preview-2024-12-17',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.0000003, 'output' => 0.0000024],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-realtime',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000004, 'input_cached' => 0.0000004, 'output' => 0.000016],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-realtime-2025-08-28',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000004, 'input_cached' => 0.0000004, 'output' => 0.000016],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-realtime-1.5',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000004, 'input_cached' => 0.0000004, 'output' => 0.000016],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-realtime-mini',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-realtime-mini-2025-10-06',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-realtime-mini-2025-12-15',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-audio',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.0000025, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-audio-2025-08-28',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.0000025, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-audio-1.5',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.0000025, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-audio-mini',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.0000006, 'output' => 0.0000024],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-audio-mini-2025-10-06',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.0000006, 'output' => 0.0000024],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-audio-mini-2025-12-15',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.0000006, 'output' => 0.0000024],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-transcribe',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.0000025, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-transcribe-diarize',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.0000025, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-transcribe',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.00000125, 'output' => 0.000005],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-transcribe-2025-03-20',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.00000125, 'output' => 0.000005],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-transcribe-2025-12-15',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.00000125, 'output' => 0.000005],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-tts',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.0000006, 'output' => 0.000012],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-tts-2025-03-20',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.0000006, 'output' => 0.000012],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-tts-2025-12-15',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.0000006, 'output' => 0.000012],
             'default' => false,
             'test' => false
         ],
@@ -1828,167 +1562,6 @@ class ai_chatgpt extends aihelper
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
             'default' => false,
             'test' => false
-        ],
-        [
-            'name' => 'gpt-3.5-turbo-instruct',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000015, 'input_cached' => 0.0000015, 'output' => 0.000002],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-3.5-turbo-instruct-0914',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000015, 'input_cached' => 0.0000015, 'output' => 0.000002],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-3.5-turbo-16k',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000004],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'davinci-002',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.000002, 'output' => 0.000002],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'babbage-002',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000004, 'output' => 0.0000004],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-image-1',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.00000125, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-image-1-mini',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-image-1.5',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.00000125, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'chatgpt-image-latest',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.00000125, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'dall-e-3',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'dall-e-2',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'sora-2',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'sora-2-pro',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'text-embedding-3-small',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000002, 'input_cached' => 0.00000002, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'text-embedding-3-large',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000013, 'input_cached' => 0.00000013, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'text-embedding-ada-002',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.0000001, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'omni-moderation-latest',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'omni-moderation-2024-09-26',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'tts-1',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'tts-1-hd',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'tts-1-1106',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'tts-1-hd-1106',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'whisper-1',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
         ]
     ];
 
@@ -2012,7 +1585,78 @@ class ai_chatgpt extends aihelper
         ) {
             foreach ($response->result->data as $models__value) {
                 if (__::x(@$models__value->id)) {
-                    $models[] = $models__value->id;
+                    $name = $models__value->id;
+
+                    if (
+                        in_array($name, [
+                            'gpt-5-search-api',
+                            'gpt-5-search-api-2025-10-14',
+                            'o3-deep-research',
+                            'o3-deep-research-2025-06-26',
+                            'o4-mini-deep-research',
+                            'o4-mini-deep-research-2025-06-26',
+                            'gpt-4o-search-preview',
+                            'gpt-4o-search-preview-2025-03-11',
+                            'gpt-4o-mini-search-preview',
+                            'gpt-4o-mini-search-preview-2025-03-11',
+                            'gpt-4o-audio-preview',
+                            'gpt-4o-audio-preview-2024-12-17',
+                            'gpt-4o-audio-preview-2025-06-03',
+                            'gpt-4o-realtime-preview',
+                            'gpt-4o-realtime-preview-2024-12-17',
+                            'gpt-4o-realtime-preview-2025-06-03',
+                            'gpt-4o-mini-audio-preview',
+                            'gpt-4o-mini-audio-preview-2024-12-17',
+                            'gpt-4o-mini-realtime-preview',
+                            'gpt-4o-mini-realtime-preview-2024-12-17',
+                            'gpt-realtime',
+                            'gpt-realtime-2025-08-28',
+                            'gpt-realtime-1.5',
+                            'gpt-realtime-mini',
+                            'gpt-realtime-mini-2025-10-06',
+                            'gpt-realtime-mini-2025-12-15',
+                            'gpt-audio',
+                            'gpt-audio-2025-08-28',
+                            'gpt-audio-1.5',
+                            'gpt-audio-mini',
+                            'gpt-audio-mini-2025-10-06',
+                            'gpt-audio-mini-2025-12-15',
+                            'gpt-4o-transcribe',
+                            'gpt-4o-transcribe-diarize',
+                            'gpt-4o-mini-transcribe',
+                            'gpt-4o-mini-transcribe-2025-03-20',
+                            'gpt-4o-mini-transcribe-2025-12-15',
+                            'gpt-4o-mini-tts',
+                            'gpt-4o-mini-tts-2025-03-20',
+                            'gpt-4o-mini-tts-2025-12-15',
+                            'gpt-3.5-turbo-instruct',
+                            'gpt-3.5-turbo-instruct-0914',
+                            'gpt-3.5-turbo-16k',
+                            'davinci-002',
+                            'babbage-002',
+                            'gpt-image-1',
+                            'gpt-image-1-mini',
+                            'gpt-image-1.5',
+                            'chatgpt-image-latest',
+                            'dall-e-3',
+                            'dall-e-2',
+                            'sora-2',
+                            'sora-2-pro',
+                            'text-embedding-3-small',
+                            'text-embedding-3-large',
+                            'text-embedding-ada-002',
+                            'omni-moderation-latest',
+                            'omni-moderation-2024-09-26',
+                            'tts-1',
+                            'tts-1-hd',
+                            'tts-1-1106',
+                            'tts-1-hd-1106',
+                            'whisper-1'
+                        ])
+                    ) {
+                        continue;
+                    }
+                    $models[] = $name;
                 }
             }
         }
@@ -2333,6 +1977,17 @@ class ai_claude extends aihelper
                     $name = preg_replace('/([a-zA-Z]+)-([0-9]+)-[0-9]{3,}$/', '$1-$2-0', $name);
                     // replace [a-zA-Z]+-[0-9]-[0-9]-[0-9]+$ with [a-zA-Z]+-[0-9]-[0-9]$
                     $name = preg_replace('/([a-zA-Z]+)-([0-9]+)-([0-9]+)-[0-9]+$/', '$1-$2-$3', $name);
+                    if (
+                        in_array($name, [
+                            'grok-4-0',
+                            'grok-2-image-1212',
+                            'grok-imagine-image',
+                            'grok-imagine-image-pro',
+                            'grok-imagine-video'
+                        ])
+                    ) {
+                        continue;
+                    }
                     $models[] = $name;
                 }
             }
@@ -2714,72 +2369,9 @@ class ai_gemini extends aihelper
             'test' => false
         ],
         [
-            'name' => 'gemini-2.5-flash-preview-tts',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000005, 'input_cached' => 0.00000005, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-2.5-pro-preview-tts',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000001, 'input_cached' => 0.0000001, 'output' => 0.00002],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-2.5-computer-use-preview-10-2025',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-2.5-flash-native-audio-latest',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000005, 'input_cached' => 0.00000005, 'output' => 0.000002],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-2.5-flash-native-audio-preview-09-2025',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000005, 'input_cached' => 0.00000005, 'output' => 0.000002],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-2.5-flash-native-audio-preview-12-2025',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000005, 'input_cached' => 0.00000005, 'output' => 0.000002],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-2.0-flash-001',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-2.0-flash-lite-001',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000000075, 'input_cached' => 0.000000075, 'output' => 0.0000003],
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'gemini-robotics-er-1.5-preview',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'deep-research-pro-preview-12-2025',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000012],
             'default' => false,
             'test' => false
         ],
@@ -2845,76 +2437,6 @@ class ai_gemini extends aihelper
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'default' => false,
             'test' => false
-        ],
-        [
-            'name' => 'gemini-embedding-001',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000015, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'aqa',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'imagen-4.0-generate-001',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'imagen-4.0-ultra-generate-001',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'imagen-4.0-fast-generate-001',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'veo-2.0-generate-001',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'veo-3.0-generate-001',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'veo-3.0-fast-generate-001',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'veo-3.1-generate-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'veo-3.1-fast-generate-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
         ]
     ];
 
@@ -2936,10 +2458,37 @@ class ai_gemini extends aihelper
         ) {
             foreach ($response->result->models as $models__value) {
                 if (__::x(@$models__value->name)) {
-                    if (strpos($models__value->name, '-exp') !== false) {
+                    $name = $models__value->name;
+                    $name = str_replace('models/', '', $name);
+                    if (strpos($name, '-exp') !== false) {
                         continue;
                     }
-                    $models[] = str_replace('models/', '', $models__value->name);
+                    if (
+                        in_array($name, [
+                            'gemini-2.5-flash-preview-tts',
+                            'gemini-2.5-pro-preview-tts',
+                            'gemini-2.5-computer-use-preview-10-2025',
+                            'gemini-2.5-flash-native-audio-latest',
+                            'gemini-2.5-flash-native-audio-preview-09-2025',
+                            'gemini-2.5-flash-native-audio-preview-12-2025',
+                            'gemini-2.0-flash-001',
+                            'gemini-2.0-flash-lite-001',
+                            'deep-research-pro-preview-12-2025',
+                            'gemini-embedding-001',
+                            'aqa',
+                            'imagen-4.0-generate-001',
+                            'imagen-4.0-ultra-generate-001',
+                            'imagen-4.0-fast-generate-001',
+                            'veo-2.0-generate-001',
+                            'veo-3.0-generate-001',
+                            'veo-3.0-fast-generate-001',
+                            'veo-3.1-generate-preview',
+                            'veo-3.1-fast-generate-preview'
+                        ])
+                    ) {
+                        continue;
+                    }
+                    $models[] = $name;
                 }
             }
         }
@@ -3116,13 +2665,6 @@ class ai_grok extends ai_claude
             'test' => false
         ],
         [
-            'name' => 'grok-4-0',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'grok-4-fast-reasoning',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
@@ -3161,34 +2703,6 @@ class ai_grok extends ai_claude
             'name' => 'grok-2-vision-1212',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.000002, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-2-image-1212',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.000002, 'output' => 0.00001],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-imagine-image',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-imagine-image-pro',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-imagine-video',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'default' => false,
             'test' => false
         ]
@@ -3243,7 +2757,8 @@ class ai_deepseek extends ai_claude
         if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->data)) {
             foreach ($response->result->data as $data__value) {
                 if (__::x(@$data__value->id)) {
-                    $models[] = $data__value->id;
+                    $name = $data__value->id;
+                    $models[] = $name;
                 }
             }
         }
