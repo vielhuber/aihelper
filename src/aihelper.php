@@ -2936,7 +2936,7 @@ class ai_gemini extends aihelper
         ) {
             foreach ($response->result->models as $models__value) {
                 if (__::x(@$models__value->name)) {
-                    if (substr($models__value->name, -4) === '-exp') {
+                    if (strpos($models__value->name, '-exp') !== false) {
                         continue;
                     }
                     $models[] = str_replace('models/', '', $models__value->name);
