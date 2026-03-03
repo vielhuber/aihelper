@@ -98,7 +98,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_claude(&$stats = [])
     {
         if ($this->isCi()) {
-            return;
+            $this->markTestSkipped('Skipped in CI environment.');
         }
         $this->ai_test_prepare('claude', $_SERVER['CLAUDE_API_KEY'] ?? null, null, $stats);
     }
@@ -106,7 +106,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_gemini(&$stats = [])
     {
         if ($this->isCi()) {
-            return;
+            $this->markTestSkipped('Skipped in CI environment.');
         }
         $this->ai_test_prepare('gemini', $_SERVER['GEMINI_API_KEY'] ?? null, null, $stats);
     }
@@ -114,7 +114,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_chatgpt(&$stats = [])
     {
         if ($this->isCi()) {
-            return;
+            $this->markTestSkipped('Skipped in CI environment.');
         }
         $this->ai_test_prepare('chatgpt', $_SERVER['CHATGPT_API_KEY'] ?? null, null, $stats);
     }
@@ -122,7 +122,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_grok(&$stats = [])
     {
         if ($this->isCi()) {
-            return;
+            $this->markTestSkipped('Skipped in CI environment.');
         }
         $this->ai_test_prepare('grok', $_SERVER['GROK_API_KEY'] ?? null, null, $stats);
     }
@@ -130,7 +130,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_deepseek(&$stats = [])
     {
         if ($this->isCi()) {
-            return;
+            $this->markTestSkipped('Skipped in CI environment.');
         }
         $this->ai_test_prepare('deepseek', $_SERVER['DEEPSEEK_API_KEY'] ?? null, null, $stats);
     }
@@ -138,7 +138,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_lmstudio(&$stats = [])
     {
         if ($this->isCi()) {
-            return;
+            $this->markTestSkipped('Skipped in CI environment.');
         }
         $this->ai_test_prepare(
             'lmstudio',
@@ -151,7 +151,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_test(&$stats = [])
     {
         if ($this->isCi()) {
-            return;
+            $this->markTestSkipped('Skipped in CI environment.');
         }
         $this->ai_test_prepare('test', null, null, $stats);
     }
@@ -942,8 +942,10 @@ class Test extends \PHPUnit\Framework\TestCase
                 if ($return['success'] === true) {
                     $this->log('✅ ' . $models__value['name']);
                 } else {
+                    $temp = stripos($return['response'] ?? '', 'try again later') !== false;
                     $this->log(
-                        '⛔ Model ' .
+                        ($temp === true ? '⚠️' : '⛔') .
+                            ' Model ' .
                             $models__value['name'] .
                             ' of provider ' .
                             $providers__value['name'] .
@@ -951,7 +953,9 @@ class Test extends \PHPUnit\Framework\TestCase
                             json_encode($return) .
                             ').'
                     );
-                    $success = false;
+                    if ($temp === false) {
+                        $success = false;
+                    }
                 }
             }
         }
