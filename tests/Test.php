@@ -4,7 +4,7 @@ use vielhuber\stringhelper\__;
 
 class Test extends \PHPUnit\Framework\TestCase
 {
-    protected $run_count = 2;
+    protected $run_count = 3;
 
     public static function setUpBeforeClass(): void
     {
@@ -164,6 +164,7 @@ class Test extends \PHPUnit\Framework\TestCase
             provider: $provider,
             model: $model,
             temperature: 1.0,
+            max_tries: 2,
             api_key: $api_key,
             session_id: null,
             log: 'tests/aihelper.log',
