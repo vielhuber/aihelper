@@ -2275,14 +2275,14 @@ class ai_gemini extends aihelper
             'max_tokens' => 8192,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => true,
-            'test' => true
+            'test' => false
         ],
         [
             'name' => 'gemini-2.5-flash',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'default' => false,
-            'test' => false
+            'test' => true
         ],
         [
             'name' => 'gemini-2.5-flash-lite',
