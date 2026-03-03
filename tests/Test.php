@@ -36,31 +36,31 @@ class Test extends \PHPUnit\Framework\TestCase
         file_put_contents('tests/aihelper.log', '');
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
-            $this->test__ai_claude($stats);
+            $this->test__ai_claude($stats, true);
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
-            $this->test__ai_gemini($stats);
+            $this->test__ai_gemini($stats, true);
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
-            $this->test__ai_chatgpt($stats);
+            $this->test__ai_chatgpt($stats, true);
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
-            $this->test__ai_grok($stats);
+            $this->test__ai_grok($stats, true);
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
-            $this->test__ai_deepseek($stats);
+            $this->test__ai_deepseek($stats, true);
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
-            $this->test__ai_lmstudio($stats);
+            $this->test__ai_lmstudio($stats, true);
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
-            $this->test__ai_test($stats);
+            $this->test__ai_test($stats, true);
         }
         $this->log('stats (' . $this->run_count . ' runs):');
         foreach ($stats as $stats__key => $stats__value) {
@@ -95,49 +95,49 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function test__ai_claude(&$stats = [])
+    function test__ai_claude(&$stats = [], $force = false)
     {
-        if ($this->isCi()) {
+        if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('claude', $_SERVER['CLAUDE_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_gemini(&$stats = [])
+    function test__ai_gemini(&$stats = [], $force = false)
     {
-        if ($this->isCi()) {
+        if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('gemini', $_SERVER['GEMINI_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_chatgpt(&$stats = [])
+    function test__ai_chatgpt(&$stats = [], $force = false)
     {
-        if ($this->isCi()) {
+        if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('chatgpt', $_SERVER['CHATGPT_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_grok(&$stats = [])
+    function test__ai_grok(&$stats = [], $force = false)
     {
-        if ($this->isCi()) {
+        if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('grok', $_SERVER['GROK_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_deepseek(&$stats = [])
+    function test__ai_deepseek(&$stats = [], $force = false)
     {
-        if ($this->isCi()) {
+        if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('deepseek', $_SERVER['DEEPSEEK_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_lmstudio(&$stats = [])
+    function test__ai_lmstudio(&$stats = [], $force = false)
     {
-        if ($this->isCi()) {
+        if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare(
@@ -148,9 +148,9 @@ class Test extends \PHPUnit\Framework\TestCase
         );
     }
 
-    function test__ai_test(&$stats = [])
+    function test__ai_test(&$stats = [], $force = false)
     {
-        if ($this->isCi()) {
+        if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('test', null, null, $stats);
