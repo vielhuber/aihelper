@@ -929,32 +929,38 @@ class Test extends \PHPUnit\Framework\TestCase
                 }
             }
             foreach ($providers__value['models'] as $models__value) {
-                $ai = aihelper::create(
-                    provider: $providers__value['name'],
-                    model: $models__value['name'],
-                    temperature: 1.0,
-                    api_key: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_KEY'] ?? null,
-                    url: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_URL'] ?? null,
-                    log: 'tests/aihelper.log',
-                    max_tries: 3
-                );
-                $return = $ai->ask('Hallo!');
-                if ($return['success'] === true) {
-                    $this->log('✅ ' . $models__value['name']);
-                } else {
-                    $temp = stripos($return['response'] ?? '', 'try again later') !== false;
-                    $this->log(
-                        ($temp === true ? '⚠️' : '⛔') .
-                            ' Model ' .
-                            $models__value['name'] .
-                            ' of provider ' .
-                            $providers__value['name'] .
-                            ' is not responding to API calls (' .
-                            json_encode($return) .
-                            ').'
+                for ($i = 1; $i <= 3; $i++) {
+                    $ai = aihelper::create(
+                        provider: $providers__value['name'],
+                        model: $models__value['name'],
+                        temperature: 1.0,
+                        api_key: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_KEY'] ?? null,
+                        url: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_URL'] ?? null,
+                        log: 'tests/aihelper.log',
+                        max_tries: 1
                     );
-                    if ($temp === false) {
-                        $success = false;
+                    $return = $ai->ask('Hallo!');
+                    if ($return['success'] === true) {
+                        $this->log('✅ ' . $models__value['name']);
+                        break;
+                    } else {
+                        $temp = stripos($return['response'] ?? '', 'try again later') !== false;
+                        $this->log(
+                            ($temp === true ? '⚠️' : '⛔') .
+                                ' Model ' .
+                                $models__value['name'] .
+                                ' of provider ' .
+                                $providers__value['name'] .
+                                ' is not responding to API calls (' .
+                                json_encode($return) .
+                                ').'
+                        );
+                        if ($temp === true) {
+                            break;
+                        }
+                        if ($i === 3 && $temp === false) {
+                            $success = false;
+                        }
                     }
                 }
             }
