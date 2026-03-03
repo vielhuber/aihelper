@@ -1480,20 +1480,6 @@ class ai_chatgpt extends aihelper
             'test' => false
         ],
         [
-            'name' => 'computer-use-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000012],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'computer-use-preview-2025-03-11',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000012],
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'gpt-4-0613',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
@@ -1504,27 +1490,6 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4-1106-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4-0125-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4-turbo-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
             'default' => false,
             'test' => false
         ],
@@ -1586,7 +1551,9 @@ class ai_chatgpt extends aihelper
             foreach ($response->result->data as $models__value) {
                 if (__::x(@$models__value->id)) {
                     $name = $models__value->id;
-
+                    if (strpos($name, '-preview') !== false) {
+                        continue;
+                    }
                     if (
                         in_array($name, [
                             'gpt-5-search-api',
@@ -1595,20 +1562,6 @@ class ai_chatgpt extends aihelper
                             'o3-deep-research-2025-06-26',
                             'o4-mini-deep-research',
                             'o4-mini-deep-research-2025-06-26',
-                            'gpt-4o-search-preview',
-                            'gpt-4o-search-preview-2025-03-11',
-                            'gpt-4o-mini-search-preview',
-                            'gpt-4o-mini-search-preview-2025-03-11',
-                            'gpt-4o-audio-preview',
-                            'gpt-4o-audio-preview-2024-12-17',
-                            'gpt-4o-audio-preview-2025-06-03',
-                            'gpt-4o-realtime-preview',
-                            'gpt-4o-realtime-preview-2024-12-17',
-                            'gpt-4o-realtime-preview-2025-06-03',
-                            'gpt-4o-mini-audio-preview',
-                            'gpt-4o-mini-audio-preview-2024-12-17',
-                            'gpt-4o-mini-realtime-preview',
-                            'gpt-4o-mini-realtime-preview-2024-12-17',
                             'gpt-realtime',
                             'gpt-realtime-2025-08-28',
                             'gpt-realtime-1.5',
@@ -2307,70 +2260,7 @@ class ai_gemini extends aihelper
             'test' => false
         ],
         [
-            'name' => 'gemini-3.1-pro-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000012],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-3.1-pro-preview-customtools',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000012],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-3-pro-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000012],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-3-flash-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000005, 'input_cached' => 0.00000005, 'output' => 0.000003],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-3-pro-image-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000012],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'nano-banana-pro-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000012],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-3.1-flash-image-preview',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.0000015],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-2.5-flash-lite-preview-09-2025',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'gemini-2.5-flash-image',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-robotics-er-1.5-preview',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'default' => false,
@@ -2464,17 +2354,14 @@ class ai_gemini extends aihelper
                     if (strpos($name, '-exp') !== false) {
                         continue;
                     }
+                    if (strpos($name, '-preview') !== false) {
+                        continue;
+                    }
                     if (
                         in_array($name, [
-                            'gemini-2.5-flash-preview-tts',
-                            'gemini-2.5-pro-preview-tts',
-                            'gemini-2.5-computer-use-preview-10-2025',
                             'gemini-2.5-flash-native-audio-latest',
-                            'gemini-2.5-flash-native-audio-preview-09-2025',
-                            'gemini-2.5-flash-native-audio-preview-12-2025',
                             'gemini-2.0-flash-001',
                             'gemini-2.0-flash-lite-001',
-                            'deep-research-pro-preview-12-2025',
                             'gemini-embedding-001',
                             'aqa',
                             'imagen-4.0-generate-001',
@@ -2482,9 +2369,7 @@ class ai_gemini extends aihelper
                             'imagen-4.0-fast-generate-001',
                             'veo-2.0-generate-001',
                             'veo-3.0-generate-001',
-                            'veo-3.0-fast-generate-001',
-                            'veo-3.1-generate-preview',
-                            'veo-3.1-fast-generate-preview'
+                            'veo-3.0-fast-generate-001'
                         ])
                     ) {
                         continue;
