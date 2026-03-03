@@ -943,7 +943,9 @@ class Test extends \PHPUnit\Framework\TestCase
                         $this->log('✅ ' . $models__value['name']);
                         break;
                     } else {
-                        $temp = stripos($return['response'] ?? '', 'try again later') !== false;
+                        $temp =
+                            stripos($return['response'] ?? '', 'try again later') !== false ||
+                            stripos($return['response'] ?? '', 'overloaded') !== false;
                         $this->log(
                             ($temp === true ? '⚠️' : '⛔') .
                                 ' Model ' .
