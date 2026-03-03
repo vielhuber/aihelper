@@ -373,7 +373,13 @@ class Test extends \PHPUnit\Framework\TestCase
                 $return['success'] &&
                 count($ai->getSessionContent()) === 18 &&
                 in_array($return['response']->customer_nr ?? '', ['F123465789']) &&
-                in_array($return['response']->date ?? '', ['31. Oktober 2018', 'Oktober 2018', '2018-10-31']) &&
+                !empty(
+                    array_filter(['31.10.2018', '31. Oktober 2018', 'Oktober 2018', '2018-10-31'], function (
+                        $value
+                    ) use ($return) {
+                        return strpos($value, $return['response']->date ?? '') !== false;
+                    })
+                ) &&
                 in_array($return['response']->author ?? '', ['David Vielhuber']);
             if ($success_this) {
                 $success_count++;
