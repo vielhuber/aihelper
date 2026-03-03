@@ -1983,7 +1983,8 @@ class ai_claude extends aihelper
                             'grok-2-image-1212',
                             'grok-imagine-image',
                             'grok-imagine-image-pro',
-                            'grok-imagine-video'
+                            'grok-imagine-video',
+                            'grok-2-vision-1212'
                         ])
                     ) {
                         continue;
@@ -2696,13 +2697,6 @@ class ai_grok extends ai_claude
             'name' => 'grok-3-mini',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-2-vision-1212',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.000002, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ]

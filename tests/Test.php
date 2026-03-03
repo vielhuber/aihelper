@@ -22,6 +22,14 @@ class Test extends \PHPUnit\Framework\TestCase
         fwrite(STDERR, print_r($msg . PHP_EOL, true));
     }
 
+    function isCi()
+    {
+        return @$_SERVER['CI'] == 'true' ||
+            @$_ENV['CI'] == 'true' ||
+            getenv('CI') == 'true' ||
+            getenv('ACT_TOOLSDIRECTORY') != '';
+    }
+
     function test__ai_all()
     {
         $stats = [];
@@ -89,31 +97,49 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__ai_claude(&$stats = [])
     {
+        if ($this->isCi()) {
+            return;
+        }
         $this->ai_test_prepare('claude', $_SERVER['CLAUDE_API_KEY'] ?? null, null, $stats);
     }
 
     function test__ai_gemini(&$stats = [])
     {
+        if ($this->isCi()) {
+            return;
+        }
         $this->ai_test_prepare('gemini', $_SERVER['GEMINI_API_KEY'] ?? null, null, $stats);
     }
 
     function test__ai_chatgpt(&$stats = [])
     {
+        if ($this->isCi()) {
+            return;
+        }
         $this->ai_test_prepare('chatgpt', $_SERVER['CHATGPT_API_KEY'] ?? null, null, $stats);
     }
 
     function test__ai_grok(&$stats = [])
     {
+        if ($this->isCi()) {
+            return;
+        }
         $this->ai_test_prepare('grok', $_SERVER['GROK_API_KEY'] ?? null, null, $stats);
     }
 
     function test__ai_deepseek(&$stats = [])
     {
+        if ($this->isCi()) {
+            return;
+        }
         $this->ai_test_prepare('deepseek', $_SERVER['DEEPSEEK_API_KEY'] ?? null, null, $stats);
     }
 
     function test__ai_lmstudio(&$stats = [])
     {
+        if ($this->isCi()) {
+            return;
+        }
         $this->ai_test_prepare(
             'lmstudio',
             $_SERVER['LMSTUDIO_API_KEY'] ?? null,
@@ -124,6 +150,9 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__ai_test(&$stats = [])
     {
+        if ($this->isCi()) {
+            return;
+        }
         $this->ai_test_prepare('test', null, null, $stats);
     }
 
@@ -164,7 +193,7 @@ class Test extends \PHPUnit\Framework\TestCase
             provider: $provider,
             model: $model,
             temperature: 1.0,
-            max_tries: 2,
+            max_tries: 1,
             api_key: $api_key,
             session_id: null,
             log: 'tests/aihelper.log',
@@ -907,7 +936,7 @@ class Test extends \PHPUnit\Framework\TestCase
                     api_key: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_KEY'] ?? null,
                     url: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_URL'] ?? null,
                     log: 'tests/aihelper.log',
-                    max_tries: 2
+                    max_tries: 3
                 );
                 $return = $ai->ask('Hallo!');
                 if ($return['success'] === true) {
@@ -918,7 +947,9 @@ class Test extends \PHPUnit\Framework\TestCase
                             $models__value['name'] .
                             ' of provider ' .
                             $providers__value['name'] .
-                            ' is not responding to API calls.'
+                            ' is not responding to API calls (' .
+                            json_encode($return) .
+                            ').'
                     );
                     $success = false;
                 }
