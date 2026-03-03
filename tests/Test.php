@@ -98,7 +98,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_claude(&$stats = [])
     {
         if ($this->isCi()) {
-            $this->markTestSkipped('Skipped in CI environment.');
+            $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('claude', $_SERVER['CLAUDE_API_KEY'] ?? null, null, $stats);
     }
@@ -106,7 +106,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_gemini(&$stats = [])
     {
         if ($this->isCi()) {
-            $this->markTestSkipped('Skipped in CI environment.');
+            $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('gemini', $_SERVER['GEMINI_API_KEY'] ?? null, null, $stats);
     }
@@ -114,7 +114,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_chatgpt(&$stats = [])
     {
         if ($this->isCi()) {
-            $this->markTestSkipped('Skipped in CI environment.');
+            $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('chatgpt', $_SERVER['CHATGPT_API_KEY'] ?? null, null, $stats);
     }
@@ -122,7 +122,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_grok(&$stats = [])
     {
         if ($this->isCi()) {
-            $this->markTestSkipped('Skipped in CI environment.');
+            $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('grok', $_SERVER['GROK_API_KEY'] ?? null, null, $stats);
     }
@@ -130,7 +130,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_deepseek(&$stats = [])
     {
         if ($this->isCi()) {
-            $this->markTestSkipped('Skipped in CI environment.');
+            $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('deepseek', $_SERVER['DEEPSEEK_API_KEY'] ?? null, null, $stats);
     }
@@ -138,7 +138,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_lmstudio(&$stats = [])
     {
         if ($this->isCi()) {
-            $this->markTestSkipped('Skipped in CI environment.');
+            $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare(
             'lmstudio',
@@ -151,7 +151,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__ai_test(&$stats = [])
     {
         if ($this->isCi()) {
-            $this->markTestSkipped('Skipped in CI environment.');
+            $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('test', null, null, $stats);
     }
@@ -629,205 +629,127 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__ai_mcp_meta_tools()
     {
-        if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
-            $return = __::curl(
-                @$_SERVER['MCP_SERVER_TEST_AUTH_URL'],
-                [
-                    'client_id' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'],
-                    'client_secret' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'],
-                    'audience' => @$_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'],
-                    'grant_type' => 'client_credentials'
-                ],
-                'POST'
+        if (@$_SERVER['MCP_SERVER_TEST'] != '1') {
+            $this->markTestSkipped('Skipped.');
+        }
+
+        $return = __::curl(
+            @$_SERVER['MCP_SERVER_TEST_AUTH_URL'],
+            [
+                'client_id' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'],
+                'client_secret' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'],
+                'audience' => @$_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'],
+                'grant_type' => 'client_credentials'
+            ],
+            'POST'
+        );
+        //$this->log('token: ' . $return->result->access_token);
+        $i_url = 1;
+        while (@$_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] != '') {
+            $status = aihelper::getMcpOnlineStatus(
+                $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
+                $return->result->access_token
             );
-            //$this->log('token: ' . $return->result->access_token);
-            $i_url = 1;
-            while (@$_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] != '') {
-                $status = aihelper::getMcpOnlineStatus(
-                    $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
-                    $return->result->access_token
-                );
-                $this->assertTrue(is_bool($status));
-                $this->assertTrue($status);
-
-                $meta = aihelper::getMcpMetaInfo(
-                    $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
-                    $return->result->access_token
-                );
-                $this->assertTrue(array_key_exists('name', $meta));
-                $this->assertTrue(array_key_exists('online', $meta));
-                $this->assertTrue(array_key_exists('instructions', $meta));
-                $this->assertTrue(array_key_exists('tools', $meta));
-                $this->assertTrue(is_string($meta['name']));
-                $this->assertTrue(is_bool($meta['online']));
-                $this->assertTrue(is_string($meta['instructions']));
-                $this->assertTrue(is_array($meta['tools']));
-                $this->assertTrue($meta['name'] !== '');
-                $this->assertTrue($meta['online']);
-                $this->assertTrue($meta['instructions'] !== '');
-                $this->assertTrue(!empty($meta['tools']) && count($meta['tools']) > 0);
-
-                if (@$_SERVER['MCP_SERVER_TEST_' . $i_url . '_TOOL'] != '') {
-                    $tool_response = aihelper::callMcpTool(
-                        $_SERVER['MCP_SERVER_TEST_' . $i_url . '_TOOL'],
-                        null,
-                        $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
-                        $return->result->access_token
-                    );
-                    $this->assertTrue(is_array($tool_response));
-                    $this->assertTrue(isset($tool_response['result']));
-                    $this->assertTrue(mb_strpos(serialize($tool_response), '"jsonrpc"') !== false);
-                }
-
-                $i_url++;
-            }
-
-            $status = aihelper::getMcpOnlineStatus('https://tld.test/mcp_invalid_endpoint', 'xxx');
             $this->assertTrue(is_bool($status));
-            $this->assertFalse($status);
+            $this->assertTrue($status);
 
-            $meta = aihelper::getMcpMetaInfo('https://tld.test/mcp_invalid_endpoint', 'xxx');
+            $meta = aihelper::getMcpMetaInfo(
+                $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
+                $return->result->access_token
+            );
             $this->assertTrue(array_key_exists('name', $meta));
             $this->assertTrue(array_key_exists('online', $meta));
             $this->assertTrue(array_key_exists('instructions', $meta));
             $this->assertTrue(array_key_exists('tools', $meta));
-            $this->assertTrue(is_null($meta['name']));
+            $this->assertTrue(is_string($meta['name']));
             $this->assertTrue(is_bool($meta['online']));
-            $this->assertTrue(is_null($meta['instructions']));
+            $this->assertTrue(is_string($meta['instructions']));
             $this->assertTrue(is_array($meta['tools']));
-            $this->assertNull($meta['name']);
-            $this->assertFalse($meta['online']);
-            $this->assertNull($meta['instructions']);
-            $this->assertTrue(empty($meta['tools']));
+            $this->assertTrue($meta['name'] !== '');
+            $this->assertTrue($meta['online']);
+            $this->assertTrue($meta['instructions'] !== '');
+            $this->assertTrue(!empty($meta['tools']) && count($meta['tools']) > 0);
 
-            $tool_response = aihelper::callMcpTool(
-                'unknown_tool',
-                null,
-                'https://tld.test/mcp_invalid_endpoint',
-                'xxx'
-            );
-            $this->assertNull($tool_response);
+            if (@$_SERVER['MCP_SERVER_TEST_' . $i_url . '_TOOL'] != '') {
+                $tool_response = aihelper::callMcpTool(
+                    $_SERVER['MCP_SERVER_TEST_' . $i_url . '_TOOL'],
+                    null,
+                    $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
+                    $return->result->access_token
+                );
+                $this->assertTrue(is_array($tool_response));
+                $this->assertTrue(isset($tool_response['result']));
+                $this->assertTrue(mb_strpos(serialize($tool_response), '"jsonrpc"') !== false);
+            }
+
+            $i_url++;
         }
+
+        $status = aihelper::getMcpOnlineStatus('https://tld.test/mcp_invalid_endpoint', 'xxx');
+        $this->assertTrue(is_bool($status));
+        $this->assertFalse($status);
+
+        $meta = aihelper::getMcpMetaInfo('https://tld.test/mcp_invalid_endpoint', 'xxx');
+        $this->assertTrue(array_key_exists('name', $meta));
+        $this->assertTrue(array_key_exists('online', $meta));
+        $this->assertTrue(array_key_exists('instructions', $meta));
+        $this->assertTrue(array_key_exists('tools', $meta));
+        $this->assertTrue(is_null($meta['name']));
+        $this->assertTrue(is_bool($meta['online']));
+        $this->assertTrue(is_null($meta['instructions']));
+        $this->assertTrue(is_array($meta['tools']));
+        $this->assertNull($meta['name']);
+        $this->assertFalse($meta['online']);
+        $this->assertNull($meta['instructions']);
+        $this->assertTrue(empty($meta['tools']));
+
+        $tool_response = aihelper::callMcpTool('unknown_tool', null, 'https://tld.test/mcp_invalid_endpoint', 'xxx');
+        $this->assertNull($tool_response);
     }
 
     function test__ai_mcp_response_times()
     {
-        if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
-            $return = __::curl(
-                @$_SERVER['MCP_SERVER_TEST_AUTH_URL'],
-                [
-                    'client_id' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'],
-                    'client_secret' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'],
-                    'audience' => @$_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'],
-                    'grant_type' => 'client_credentials'
-                ],
-                'POST'
-            );
-            $access_token = $return->result->access_token;
-
-            for ($run = 1; $run <= 2; $run++) {
-                $mcp_servers_all = [];
-                $i_cur = 1;
-                while (@$_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'] != '') {
-                    $mcp_servers_all[] = $_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'];
-                    $i_cur++;
-                }
-                // randomize mcp servers
-                shuffle($mcp_servers_all);
-                for ($i_cur = 0; $i_cur <= count($mcp_servers_all); $i_cur++) {
-                    $i_url = 1;
-                    $mcp_servers = [];
-                    while ($i_url <= $i_cur) {
-                        $url = $mcp_servers_all[$i_url - 1];
-                        // replace chat id with random number
-                        $url = str_replace('[CHAT_ID]', '[' . rand(100000, 999999) . ']', $url);
-                        $mcp_servers[] = [
-                            'url' => $url,
-                            'authorization_token' => $access_token
-                        ];
-                        $i_url++;
-                    }
-                    $ai_mcp = aihelper::create(
-                        provider: 'claude',
-                        model: 'claude-haiku-4-5',
-                        temperature: 1.0,
-                        api_key: @$_SERVER['CLAUDE_API_KEY'],
-                        session_id: null,
-                        log: 'tests/aihelper.log',
-                        timeout: 60 * 30,
-                        max_tries: 1,
-                        mcp_servers: $mcp_servers,
-                        stream: false
-                    );
-                    $prompt = 'Hallo. Wie geht es Dir?';
-                    __::log_begin('mcp');
-                    $return = $ai_mcp->ask($prompt);
-                    $time = __::log_end('mcp', false)['time'];
-                    if ($return['success'] === false) {
-                        __::o($return);
-                    }
-                    $this->assertTrue($return['success']);
-                    $this->log(
-                        'RUN ' .
-                            $run .
-                            ': Response time with ' .
-                            count($mcp_servers) .
-                            ' MCP server(s): ' .
-                            number_format($time, 2, ',', '.') .
-                            ' seconds (' .
-                            number_format($return['costs'], 5, '.', ',') .
-                            '$).'
-                    );
-                }
-            }
+        if (@$_SERVER['MCP_SERVER_TEST'] != '1') {
+            $this->markTestSkipped('Skipped.');
         }
-    }
 
-    function test__ai_mcp_long_running_task()
-    {
-        if (@$_SERVER['MCP_SERVER_TEST'] == '1') {
-            $sites = [];
-            for ($i = 1; $i <= 10; $i++) {
-                $sites[] = 'https://news.ycombinator.com/?p=' . $i;
+        $return = __::curl(
+            @$_SERVER['MCP_SERVER_TEST_AUTH_URL'],
+            [
+                'client_id' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'],
+                'client_secret' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'],
+                'audience' => @$_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'],
+                'grant_type' => 'client_credentials'
+            ],
+            'POST'
+        );
+        $access_token = $return->result->access_token;
+
+        for ($run = 1; $run <= 2; $run++) {
+            $mcp_servers_all = [];
+            $i_cur = 1;
+            while (@$_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'] != '') {
+                $mcp_servers_all[] = $_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'];
+                $i_cur++;
             }
-
-            $return = __::curl(
-                @$_SERVER['MCP_SERVER_TEST_AUTH_URL'],
-                [
-                    'client_id' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'],
-                    'client_secret' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'],
-                    'audience' => @$_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'],
-                    'grant_type' => 'client_credentials'
-                ],
-                'POST'
-            );
-
-            //$this->log('token: ' . $return->result->access_token);
-            $i_url = 1;
-            $mcp_servers = [];
-            while (@$_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] != '') {
-                $mcp_servers[] = [
-                    'url' => $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
-                    'authorization_token' => $return->result->access_token
-                ];
-                $i_url++;
-            }
-
-            $stream_option = [true, false];
-            foreach ($stream_option as $stream_option__key => $stream_option__value) {
-                // clean up files in /tests/storage folder
-                $files = glob('tests/storage/*.*');
-                foreach ($files as $file) {
-                    if (is_file($file)) {
-                        unlink($file);
-                    }
+            // randomize mcp servers
+            shuffle($mcp_servers_all);
+            for ($i_cur = 0; $i_cur <= count($mcp_servers_all); $i_cur++) {
+                $i_url = 1;
+                $mcp_servers = [];
+                while ($i_url <= $i_cur) {
+                    $url = $mcp_servers_all[$i_url - 1];
+                    // replace chat id with random number
+                    $url = str_replace('[CHAT_ID]', '[' . rand(100000, 999999) . ']', $url);
+                    $mcp_servers[] = [
+                        'url' => $url,
+                        'authorization_token' => $access_token
+                    ];
+                    $i_url++;
                 }
-
                 $ai_mcp = aihelper::create(
                     provider: 'claude',
                     model: 'claude-haiku-4-5',
-                    //model: 'claude-sonnet-4-5',
-                    //model: 'claude-3-haiku-20240307',
                     temperature: 1.0,
                     api_key: @$_SERVER['CLAUDE_API_KEY'],
                     session_id: null,
@@ -835,56 +757,133 @@ class Test extends \PHPUnit\Framework\TestCase
                     timeout: 60 * 30,
                     max_tries: 1,
                     mcp_servers: $mcp_servers,
-                    stream: $stream_option__value
+                    stream: false
                 );
-                $prompt = '';
-                $prompt .= 'Starte einen lang laufenden Test mit folgendem Ablauf:';
-                $prompt .= PHP_EOL . PHP_EOL;
-                foreach ($sites as $sites__key => $sites__value) {
-                    $prompt .=
-                        '- Öffne https://' . $sites__value . ', suche nach dem neuesten Artikel und gib den Titel aus.';
-                    $prompt .= PHP_EOL;
-                    $prompt .=
-                        '- Fertige einen Screenshot der Seite mit dem Namen "screenshot-' .
-                        ($sites__key + 1) .
-                        '.png" an';
-                    $prompt .= '- Verschiebe den Screenshot in den Ordner /host/aihelper/tests/storage.';
-                    $prompt .= '- Prüfe stets tatsächlich, ob der Screenshot in /host/aihelper/tests/storage liegt.';
-                    $prompt .= '- Wenn er fehlt, führe die Aktion erneut durch.';
-                    $prompt .= PHP_EOL;
-                }
-                $prompt .= PHP_EOL;
-                $prompt .= 'Nutze zum Browsen immer das MCP-Browser-Tool.';
-                $prompt .= 'Ich benötige keinen Code, führe die Aktionen alle selbst aus.';
-                $prompt .= 'Prüfe am Ende, ob alle Dateien vorhanden sind.';
-                $prompt .= 'Wenn welche fehlen, erstelle die fehlenden Screenshots.';
-                $prompt .= 'Antworte nur auf Deutsch.';
+                $prompt = 'Hallo. Wie geht es Dir?';
+                __::log_begin('mcp');
                 $return = $ai_mcp->ask($prompt);
-
-                $this->log(
-                    $return['costs'] .
-                        '€ total costs for long running task test with ' .
-                        count($sites) .
-                        ' sites (stream: ' .
-                        ($stream_option__value ? 'yes' : 'no') .
-                        ').'
-                );
-
-                $this->assertSame(count(glob('tests/storage/*.*')), count($sites));
-                $this->log(
-                    '✅ Long running task test with ' .
-                        count($sites) .
-                        ' sites ' .
-                        ($stream_option__value ? '(stream)' : '(no stream)') .
-                        ' completed successfully.'
-                );
-
-                // throttle to avoid rate limits on new session
-                if ($stream_option__key < count($stream_option) - 1) {
-                    $throttle = max(60 * 2 * count($sites), 60 * 5);
-                    $this->log('⏳ Throttling next test for ' . $throttle . ' seconds to avoid rate limits...');
-                    sleep($throttle);
+                $time = __::log_end('mcp', false)['time'];
+                if ($return['success'] === false) {
+                    __::o($return);
                 }
+                $this->assertTrue($return['success']);
+                $this->log(
+                    'RUN ' .
+                        $run .
+                        ': Response time with ' .
+                        count($mcp_servers) .
+                        ' MCP server(s): ' .
+                        number_format($time, 2, ',', '.') .
+                        ' seconds (' .
+                        number_format($return['costs'], 5, '.', ',') .
+                        '$).'
+                );
+            }
+        }
+    }
+
+    function test__ai_mcp_long_running_task()
+    {
+        if (@$_SERVER['MCP_SERVER_TEST'] != '1') {
+            $this->markTestSkipped('Skipped.');
+        }
+
+        $sites = [];
+        for ($i = 1; $i <= 10; $i++) {
+            $sites[] = 'https://news.ycombinator.com/?p=' . $i;
+        }
+
+        $return = __::curl(
+            @$_SERVER['MCP_SERVER_TEST_AUTH_URL'],
+            [
+                'client_id' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'],
+                'client_secret' => @$_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'],
+                'audience' => @$_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'],
+                'grant_type' => 'client_credentials'
+            ],
+            'POST'
+        );
+
+        //$this->log('token: ' . $return->result->access_token);
+        $i_url = 1;
+        $mcp_servers = [];
+        while (@$_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] != '') {
+            $mcp_servers[] = [
+                'url' => $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
+                'authorization_token' => $return->result->access_token
+            ];
+            $i_url++;
+        }
+
+        $stream_option = [true, false];
+        foreach ($stream_option as $stream_option__key => $stream_option__value) {
+            // clean up files in /tests/storage folder
+            $files = glob('tests/storage/*.*');
+            foreach ($files as $file) {
+                if (is_file($file)) {
+                    unlink($file);
+                }
+            }
+
+            $ai_mcp = aihelper::create(
+                provider: 'claude',
+                model: 'claude-haiku-4-5',
+                //model: 'claude-sonnet-4-5',
+                //model: 'claude-3-haiku-20240307',
+                temperature: 1.0,
+                api_key: @$_SERVER['CLAUDE_API_KEY'],
+                session_id: null,
+                log: 'tests/aihelper.log',
+                timeout: 60 * 30,
+                max_tries: 1,
+                mcp_servers: $mcp_servers,
+                stream: $stream_option__value
+            );
+            $prompt = '';
+            $prompt .= 'Starte einen lang laufenden Test mit folgendem Ablauf:';
+            $prompt .= PHP_EOL . PHP_EOL;
+            foreach ($sites as $sites__key => $sites__value) {
+                $prompt .=
+                    '- Öffne https://' . $sites__value . ', suche nach dem neuesten Artikel und gib den Titel aus.';
+                $prompt .= PHP_EOL;
+                $prompt .=
+                    '- Fertige einen Screenshot der Seite mit dem Namen "screenshot-' . ($sites__key + 1) . '.png" an';
+                $prompt .= '- Verschiebe den Screenshot in den Ordner /host/aihelper/tests/storage.';
+                $prompt .= '- Prüfe stets tatsächlich, ob der Screenshot in /host/aihelper/tests/storage liegt.';
+                $prompt .= '- Wenn er fehlt, führe die Aktion erneut durch.';
+                $prompt .= PHP_EOL;
+            }
+            $prompt .= PHP_EOL;
+            $prompt .= 'Nutze zum Browsen immer das MCP-Browser-Tool.';
+            $prompt .= 'Ich benötige keinen Code, führe die Aktionen alle selbst aus.';
+            $prompt .= 'Prüfe am Ende, ob alle Dateien vorhanden sind.';
+            $prompt .= 'Wenn welche fehlen, erstelle die fehlenden Screenshots.';
+            $prompt .= 'Antworte nur auf Deutsch.';
+            $return = $ai_mcp->ask($prompt);
+
+            $this->log(
+                $return['costs'] .
+                    '€ total costs for long running task test with ' .
+                    count($sites) .
+                    ' sites (stream: ' .
+                    ($stream_option__value ? 'yes' : 'no') .
+                    ').'
+            );
+
+            $this->assertSame(count(glob('tests/storage/*.*')), count($sites));
+            $this->log(
+                '✅ Long running task test with ' .
+                    count($sites) .
+                    ' sites ' .
+                    ($stream_option__value ? '(stream)' : '(no stream)') .
+                    ' completed successfully.'
+            );
+
+            // throttle to avoid rate limits on new session
+            if ($stream_option__key < count($stream_option) - 1) {
+                $throttle = max(60 * 2 * count($sites), 60 * 5);
+                $this->log('⏳ Throttling next test for ' . $throttle . ' seconds to avoid rate limits...');
+                sleep($throttle);
             }
         }
     }
