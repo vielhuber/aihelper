@@ -1895,14 +1895,14 @@ class ai_claude extends aihelper
         ],
         [
             'name' => 'claude-opus-4-1',
-            'max_tokens' => 64000,
+            'max_tokens' => 32000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-0',
-            'max_tokens' => 64000,
+            'max_tokens' => 32000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
             'default' => false,
             'test' => false
