@@ -419,8 +419,8 @@ abstract class aihelper
         if (empty($this->models) && method_exists($this, 'fetchModels')) {
             foreach ($this->fetchModels() as $models__key => $models__value) {
                 $this->models[] = [
-                    'name' => $models__value,
-                    'max_tokens' => 8192,
+                    'name' => $models__value['name'],
+                    'max_tokens' => $models__value['max_tokens'],
                     'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
                     'default' => $models__key === 0 ? true : false,
                     'test' => $models__key === 0 ? true : false
@@ -1616,7 +1616,14 @@ class ai_chatgpt extends aihelper
                     ) {
                         continue;
                     }
-                    $models[] = $name;
+                    $max_tokens = 8192;
+                    foreach ($this->models as $definedModel) {
+                        if ($definedModel['name'] === $name) {
+                            $max_tokens = $definedModel['max_tokens'];
+                            break;
+                        }
+                    }
+                    $models[] = ['name' => $name, 'max_tokens' => $max_tokens];
                 }
             }
         }
@@ -1949,7 +1956,14 @@ class ai_claude extends aihelper
                     ) {
                         continue;
                     }
-                    $models[] = $name;
+                    $max_tokens = 8192;
+                    foreach ($this->models as $definedModel) {
+                        if ($definedModel['name'] === $name) {
+                            $max_tokens = $definedModel['max_tokens'];
+                            break;
+                        }
+                    }
+                    $models[] = ['name' => $name, 'max_tokens' => $max_tokens];
                 }
             }
         }
@@ -2381,7 +2395,18 @@ class ai_gemini extends aihelper
                     ) {
                         continue;
                     }
-                    $models[] = $name;
+                    $max_tokens = 8192;
+                    if (!empty($models__value->outputTokenLimit)) {
+                        $max_tokens = (int) $models__value->outputTokenLimit;
+                    } else {
+                        foreach ($this->models as $definedModel) {
+                            if ($definedModel['name'] === $name) {
+                                $max_tokens = $definedModel['max_tokens'];
+                                break;
+                            }
+                        }
+                    }
+                    $models[] = ['name' => $name, 'max_tokens' => $max_tokens];
                 }
             }
         }
@@ -2644,7 +2669,14 @@ class ai_deepseek extends ai_claude
             foreach ($response->result->data as $data__value) {
                 if (__::x(@$data__value->id)) {
                     $name = $data__value->id;
-                    $models[] = $name;
+                    $max_tokens = 8192;
+                    foreach ($this->models as $definedModel) {
+                        if ($definedModel['name'] === $name) {
+                            $max_tokens = $definedModel['max_tokens'];
+                            break;
+                        }
+                    }
+                    $models[] = ['name' => $name, 'max_tokens' => $max_tokens];
                 }
             }
         }
@@ -2693,7 +2725,11 @@ class ai_lmstudio extends ai_chatgpt
                     continue;
                 }
                 if (__::x(@$models__value->key)) {
-                    $models[] = $models__value->key;
+                    $max_tokens = 32768;
+                    if (!empty($models__value->max_context_length)) {
+                        $max_tokens = min((int) $models__value->max_context_length, 65536);
+                    }
+                    $models[] = ['name' => $models__value->key, 'max_tokens' => $max_tokens];
                 }
             }
         }
@@ -2782,7 +2818,7 @@ class ai_test extends ai_claude
     public function fetchModels(): array
     {
         return array_map(function ($model) {
-            return $model['name'];
+            return ['name' => $model['name'], 'max_tokens' => $model['max_tokens']];
         }, $this->models);
     }
 

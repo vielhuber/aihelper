@@ -896,12 +896,17 @@ class Test extends \PHPUnit\Framework\TestCase
             if (in_array($providers__value['name'], ['lmstudio', 'test'])) {
                 continue;
             }
-            $modelsApi = aihelper::create(
-                provider: $providers__value['name'],
-                api_key: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_KEY'] ?? null,
-                url: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_URL'] ?? null,
-                log: 'tests/aihelper.log'
-            )->fetchModels();
+            $modelsApi = array_map(
+                function ($m) {
+                    return $m['name'];
+                },
+                aihelper::create(
+                    provider: $providers__value['name'],
+                    api_key: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_KEY'] ?? null,
+                    url: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_URL'] ?? null,
+                    log: 'tests/aihelper.log'
+                )->fetchModels()
+            );
             $modelsStatic = array_map(function ($models__value) {
                 return $models__value['name'];
             }, $providers__value['models']);
