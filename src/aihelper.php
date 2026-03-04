@@ -2698,6 +2698,33 @@ class ai_lmstudio extends ai_chatgpt
         if (empty($model)) {
             return;
         }
+        // check via API whether the model is already loaded
+        $response = __::curl(
+            url: rtrim(str_replace('/v1', '/api/v1', $this->url), '/') . '/models',
+            method: 'GET',
+            headers: [
+                'Authorization' => 'Bearer ' . $this->api_key
+            ],
+            timeout: $this->timeout
+        );
+        $this->log($response);
+        if (
+            __::x(@$response) &&
+            __::x(@$response->result) &&
+            __::x(@$response->result->models) &&
+            is_array($response->result->models)
+        ) {
+            foreach ($response->result->models as $models__value) {
+                if (
+                    isset($models__value->key) &&
+                    $models__value->key === $model &&
+                    !empty($models__value->loaded_instances)
+                ) {
+                    // model is already loaded, nothing to do
+                    return;
+                }
+            }
+        }
         $context_length = 8192;
         foreach ($this->models as $models__value) {
             if ($models__value['name'] === $model) {
