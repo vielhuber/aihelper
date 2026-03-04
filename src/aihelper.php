@@ -1194,91 +1194,91 @@ class ai_chatgpt extends aihelper
         ],
         [
             'name' => 'gpt-5.2',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5.2-2025-12-11',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5.2-chat-latest',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5.2-pro',
-            'max_tokens' => 8192,
+            'max_tokens' => 272000,
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5.2-pro-2025-12-11',
-            'max_tokens' => 8192,
+            'max_tokens' => 272000,
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5.2-codex',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5.1',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5.1-2025-11-13',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5.1-chat-latest',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5.1-codex',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5.1-codex-mini',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5.1-codex-max',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5.3-codex',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'default' => false,
             'test' => false
