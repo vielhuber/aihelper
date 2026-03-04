@@ -1152,42 +1152,42 @@ class ai_chatgpt extends aihelper
     public $models = [
         [
             'name' => 'gpt-5',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'gpt-5-mini',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'gpt-5-nano',
-            'max_tokens' => 8192,
+            'max_tokens' => 32768,
             'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4.1',
-            'max_tokens' => 8192,
+            'max_tokens' => 32768,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o',
-            'max_tokens' => 8192,
+            'max_tokens' => 16384,
             'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o-mini',
-            'max_tokens' => 8192,
+            'max_tokens' => 16384,
             'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
             'default' => false,
             'test' => false
@@ -1284,197 +1284,204 @@ class ai_chatgpt extends aihelper
             'test' => false
         ],
         [
+            'name' => 'gpt-5.3-chat-latest',
+            'max_tokens' => 128000,
+            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'default' => false,
+            'test' => false
+        ],
+        [
             'name' => 'gpt-5-chat-latest',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5-2025-08-07',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5-mini-2025-08-07',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5-nano-2025-08-07',
-            'max_tokens' => 8192,
+            'max_tokens' => 32768,
             'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5-codex',
-            'max_tokens' => 8192,
+            'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5-pro',
-            'max_tokens' => 8192,
+            'max_tokens' => 272000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-5-pro-2025-10-06',
-            'max_tokens' => 8192,
+            'max_tokens' => 272000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4.1-2025-04-14',
-            'max_tokens' => 8192,
+            'max_tokens' => 32768,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4.1-mini',
-            'max_tokens' => 8192,
+            'max_tokens' => 32768,
             'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4.1-mini-2025-04-14',
-            'max_tokens' => 8192,
+            'max_tokens' => 32768,
             'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4.1-nano',
-            'max_tokens' => 8192,
+            'max_tokens' => 32768,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4.1-nano-2025-04-14',
-            'max_tokens' => 8192,
+            'max_tokens' => 32768,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'o3',
-            'max_tokens' => 8192,
+            'max_tokens' => 100000,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'o3-2025-04-16',
-            'max_tokens' => 8192,
+            'max_tokens' => 100000,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'o3-pro',
-            'max_tokens' => 8192,
+            'max_tokens' => 100000,
             'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'o3-pro-2025-06-10',
-            'max_tokens' => 8192,
+            'max_tokens' => 100000,
             'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'o3-mini',
-            'max_tokens' => 8192,
+            'max_tokens' => 100000,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'o3-mini-2025-01-31',
-            'max_tokens' => 8192,
+            'max_tokens' => 100000,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'o4-mini',
-            'max_tokens' => 8192,
+            'max_tokens' => 100000,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'o4-mini-2025-04-16',
-            'max_tokens' => 8192,
+            'max_tokens' => 100000,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'o1',
-            'max_tokens' => 8192,
+            'max_tokens' => 100000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'o1-2024-12-17',
-            'max_tokens' => 8192,
+            'max_tokens' => 100000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'o1-pro',
-            'max_tokens' => 8192,
+            'max_tokens' => 100000,
             'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'o1-pro-2025-03-19',
-            'max_tokens' => 8192,
+            'max_tokens' => 100000,
             'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o-2024-05-13',
-            'max_tokens' => 8192,
+            'max_tokens' => 4096,
             'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o-2024-08-06',
-            'max_tokens' => 8192,
+            'max_tokens' => 16384,
             'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o-2024-11-20',
-            'max_tokens' => 8192,
+            'max_tokens' => 16384,
             'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o-mini-2024-07-18',
-            'max_tokens' => 8192,
+            'max_tokens' => 16384,
             'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
             'default' => false,
             'test' => false
@@ -1495,35 +1502,35 @@ class ai_chatgpt extends aihelper
         ],
         [
             'name' => 'gpt-4-turbo',
-            'max_tokens' => 8192,
+            'max_tokens' => 4096,
             'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4-turbo-2024-04-09',
-            'max_tokens' => 8192,
+            'max_tokens' => 4096,
             'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-3.5-turbo',
-            'max_tokens' => 8192,
+            'max_tokens' => 4096,
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-3.5-turbo-1106',
-            'max_tokens' => 8192,
+            'max_tokens' => 4096,
             'costs' => ['input' => 0.000001, 'input_cached' => 0.000001, 'output' => 0.000002],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-3.5-turbo-0125',
-            'max_tokens' => 8192,
+            'max_tokens' => 4096,
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
             'default' => false,
             'test' => false
@@ -1846,56 +1853,56 @@ class ai_claude extends aihelper
     public $models = [
         [
             'name' => 'claude-sonnet-4-6',
-            'max_tokens' => 8192,
+            'max_tokens' => 64000,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-6',
-            'max_tokens' => 8192,
+            'max_tokens' => 64000,
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-sonnet-4-5',
-            'max_tokens' => 8192,
+            'max_tokens' => 64000,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-5',
-            'max_tokens' => 8192,
+            'max_tokens' => 64000,
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-haiku-4-5',
-            'max_tokens' => 8192,
+            'max_tokens' => 64000,
             'costs' => ['input' => 0.000001, 'input_cached' => 0.0000001, 'output' => 0.000005],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'claude-sonnet-4-0',
-            'max_tokens' => 8192,
+            'max_tokens' => 64000,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-1',
-            'max_tokens' => 8192,
+            'max_tokens' => 64000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'claude-opus-4-0',
-            'max_tokens' => 8192,
+            'max_tokens' => 64000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
             'default' => false,
             'test' => false
@@ -2226,21 +2233,21 @@ class ai_gemini extends aihelper
     public $models = [
         [
             'name' => 'gemini-2.5-pro',
-            'max_tokens' => 8192,
+            'max_tokens' => 65536,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => true,
             'test' => false
         ],
         [
             'name' => 'gemini-2.5-flash',
-            'max_tokens' => 8192,
+            'max_tokens' => 65536,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'default' => false,
             'test' => true
         ],
         [
             'name' => 'gemini-2.5-flash-lite',
-            'max_tokens' => 8192,
+            'max_tokens' => 65536,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'default' => false,
             'test' => false
@@ -2261,28 +2268,28 @@ class ai_gemini extends aihelper
         ],
         [
             'name' => 'gemini-2.5-flash-image',
-            'max_tokens' => 8192,
+            'max_tokens' => 65536,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gemini-pro-latest',
-            'max_tokens' => 8192,
+            'max_tokens' => 65536,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gemini-flash-latest',
-            'max_tokens' => 8192,
+            'max_tokens' => 65536,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gemini-flash-lite-latest',
-            'max_tokens' => 8192,
+            'max_tokens' => 65536,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'default' => false,
             'test' => false
@@ -2538,49 +2545,49 @@ class ai_grok extends ai_claude
     public $models = [
         [
             'name' => 'grok-4-1-fast-reasoning',
-            'max_tokens' => 8192,
+            'max_tokens' => 131072,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'default' => true,
             'test' => true
         ],
         [
             'name' => 'grok-4-1-fast-non-reasoning',
-            'max_tokens' => 8192,
+            'max_tokens' => 131072,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-4-fast-reasoning',
-            'max_tokens' => 8192,
+            'max_tokens' => 131072,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-4-fast-non-reasoning',
-            'max_tokens' => 8192,
+            'max_tokens' => 131072,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-code-fast-1',
-            'max_tokens' => 8192,
+            'max_tokens' => 131072,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-3',
-            'max_tokens' => 8192,
+            'max_tokens' => 131072,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-3-mini',
-            'max_tokens' => 8192,
+            'max_tokens' => 131072,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'default' => false,
             'test' => false
@@ -2708,6 +2715,8 @@ class ai_lmstudio extends ai_chatgpt
             timeout: $this->timeout
         );
         $this->log($response);
+        // default context length; overridden by max_context_length from API if available
+        $context_length = 32768;
         if (
             __::x(@$response) &&
             __::x(@$response->result) &&
@@ -2717,19 +2726,17 @@ class ai_lmstudio extends ai_chatgpt
             foreach ($response->result->models as $models__value) {
                 if (
                     isset($models__value->key) &&
-                    $models__value->key === $model &&
-                    !empty($models__value->loaded_instances)
+                    $models__value->key === $model
                 ) {
-                    // model is already loaded, nothing to do
-                    return;
+                    if (!empty($models__value->loaded_instances)) {
+                        // model is already loaded, nothing to do
+                        return;
+                    }
+                    // use max_context_length from API, capped at 65536 to limit memory usage
+                    if (!empty($models__value->max_context_length)) {
+                        $context_length = min((int) $models__value->max_context_length, 65536);
+                    }
                 }
-            }
-        }
-        $context_length = 8192;
-        foreach ($this->models as $models__value) {
-            if ($models__value['name'] === $model) {
-                $context_length = $models__value['max_tokens'];
-                break;
             }
         }
         $response = __::curl(

@@ -908,7 +908,7 @@ class Test extends \PHPUnit\Framework\TestCase
             foreach ($modelsApi as $models__value) {
                 if (!in_array($models__value, $modelsStatic)) {
                     $this->log(
-                        '⚠️ Model ' .
+                        '⛔ Model ' .
                             $models__value .
                             ' is available via API but not listed in static array for provider ' .
                             $providers__value['name']
