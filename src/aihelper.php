@@ -845,6 +845,18 @@ abstract class aihelper
                                     // handle text delta
                                     if (isset($parsed['delta']['text'])) {
                                         $text = $parsed['delta']['text'];
+
+                                        // strip leading newlines from the very first text chunk
+                                        if (!$this->stream_first_text_sent) {
+                                            $text = ltrim($text, "\n");
+                                            if ($text === '') {
+                                                $this->stream_buffer_data = '';
+                                                $this->stream_event = null;
+                                                continue;
+                                            }
+                                            $this->stream_first_text_sent = true;
+                                        }
+
                                         if (!isset($block->text)) {
                                             $block->text = '';
                                         }
@@ -1760,6 +1772,8 @@ class ai_chatgpt extends aihelper
                 if (!isset($mcp__value['server_label'])) {
                     $mcp__value['server_label'] = 'mcp-server-' . ($mcp__key + 1);
                 }
+                // sanitize server_label to match pattern ^[A-Za-z][A-Za-z0-9_-]*$
+                $mcp__value['server_label'] = preg_replace('/[^A-Za-z0-9_-]/', '_', $mcp__value['server_label']);
                 if (isset($mcp__value['server_url'])) {
                     $mcp__value['server_url'] = rtrim($mcp__value['server_url'], '/') . '/';
                 }
@@ -2760,10 +2774,7 @@ class ai_lmstudio extends ai_chatgpt
             is_array($response->result->models)
         ) {
             foreach ($response->result->models as $models__value) {
-                if (
-                    isset($models__value->key) &&
-                    $models__value->key === $model
-                ) {
+                if (isset($models__value->key) && $models__value->key === $model) {
                     if (!empty($models__value->loaded_instances)) {
                         // model is already loaded, nothing to do
                         return;
@@ -2792,11 +2803,11 @@ class ai_lmstudio extends ai_chatgpt
 
     protected function makeApiCall($args = null)
     {
-        if( str_contains(strtolower($this->model ?? ''), 'qwen3') ) {
+        if (str_contains(strtolower($this->model ?? ''), 'qwen3')) {
             if (!empty($args['messages'])) {
                 $args['messages'][] = [
                     'role' => 'assistant',
-                    'content' => "<think>\n\n</think>\n\n",
+                    'content' => "<think>\n\n</think>\n\n"
                 ];
             }
         }
