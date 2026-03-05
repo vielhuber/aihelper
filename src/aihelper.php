@@ -500,7 +500,7 @@ abstract class aihelper
 
     protected function trimPrompt($prompt)
     {
-        return __::trim_whitespace(__::trim_every_line($prompt));
+        return __::trim_whitespace(__::trim_indentation($prompt));
     }
 
     abstract protected function bringPromptInFormat($prompt, $files = null);
