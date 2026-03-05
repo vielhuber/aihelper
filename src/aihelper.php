@@ -2789,6 +2789,19 @@ class ai_lmstudio extends ai_chatgpt
         );
         $this->log($response);
     }
+
+    protected function makeApiCall($args = null)
+    {
+        if( str_contains(strtolower($this->model ?? ''), 'qwen3') ) {
+            if (!empty($args['messages'])) {
+                $args['messages'][] = [
+                    'role' => 'assistant',
+                    'content' => "<think>\n\n</think>\n\n",
+                ];
+            }
+        }
+        return parent::makeApiCall($args);
+    }
 }
 
 class ai_test extends ai_claude
