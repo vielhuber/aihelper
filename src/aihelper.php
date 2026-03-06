@@ -1247,6 +1247,34 @@ class ai_chatgpt extends aihelper
             'test' => false
         ],
         [
+            'name' => 'gpt-5.4',
+            'max_tokens' => 128000,
+            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-2026-03-05',
+            'max_tokens' => 128000,
+            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-pro',
+            'max_tokens' => 272000,
+            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-pro-2026-03-05',
+            'max_tokens' => 272000,
+            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
+            'default' => false,
+            'test' => false
+        ],
+        [
             'name' => 'gpt-5.1',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
