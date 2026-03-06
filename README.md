@@ -140,7 +140,7 @@ if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled f
 </VirtualHost>
 ```
 
-## lm studio / runpod
+## lmstudio / runpod
 
 ### helper script
 
