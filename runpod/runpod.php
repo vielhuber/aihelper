@@ -75,7 +75,17 @@ foreach ($pods as $pods__key => $pods__value) {
 
     $average = 0;
 
-    $prompts = ['Hallo! Wie geht es Dir?', 'Was ist 2+2?', 'Erzähl mir eine Geschichte.'];
+    $prompts = [
+        'Hallo! Wie geht es Dir?',
+        'Was ist 2+2?',
+        'Erzähl mir eine Geschichte.',
+        '
+        Liste die 5 neuesten Dateien im Ordner /host/tmp auf.
+        Öffne den Browser und recherchiere auf https://en.wikipedia.org/wiki/List_of_filename_extensions, welche Dateiendungen dort beschrieben sind.
+        Erstelle daraus (Dateiname und Dateiendung mit kurzer Erklärung) ein Word-Dokument.
+        Sende dieses Word-Dokument per E-Mail mit Anhang von noreply@vielhuber.de an david@vielhuber.de.
+        '
+    ];
     echo 'ℹ️ Testing ' . $pods__value['model_id'] . '...' . PHP_EOL;
     foreach ($prompts as $prompts__key => $prompt__value) {
         echo '----------------------------------------' . PHP_EOL;
