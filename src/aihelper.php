@@ -28,6 +28,7 @@ abstract class aihelper
     protected $stream_buffer_data = null;
     protected $stream_current_block_type = null;
     protected $stream_first_text_sent = false;
+    protected $stream_running = false;
 
     protected $session_id = null;
     protected static $sessions = [];
@@ -812,6 +813,7 @@ abstract class aihelper
         $this->stream_buffer_data = '';
         $this->stream_current_block_type = null;
         $this->stream_first_text_sent = false;
+        $this->stream_running = false;
 
         if ($this->name === 'claude' || $this->name === 'test') {
             // mimic non stream result
@@ -867,6 +869,7 @@ abstract class aihelper
 
                         if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
                             $parsed = json_decode($this->stream_buffer_data, true);
+                            $this->stream_running = true;
 
                             // extract stop_reason from message_delta event
                             if (
@@ -898,6 +901,7 @@ abstract class aihelper
                                             @ob_flush();
                                         }
                                         @flush();
+                                        $this->stream_running = false;
                                     }
                                 }
                                 // add the full content block from the API
@@ -946,6 +950,7 @@ abstract class aihelper
                                             @ob_flush();
                                         }
                                         @flush();
+                                        $this->stream_running = false;
                                     }
 
                                     // handle tool_use input delta (partial_json)
@@ -1009,6 +1014,7 @@ abstract class aihelper
                                             @ob_flush();
                                         }
                                         @flush();
+                                        $this->stream_running = false;
                                     }
                                 }
                             }
@@ -1046,7 +1052,18 @@ abstract class aihelper
                                         @ob_flush();
                                     }
                                     @flush();
+                                    $this->stream_running = false;
                                 }
+                            }
+
+                            // send SSE keepalive comment for non-text events (tool calls, thinking, etc.)
+                            // to prevent client/infrastructure timeout during long-running tool use
+                            if ($this->stream_running) {
+                                echo ": keepalive\n\n";
+                                if (ob_get_level() > 0) {
+                                    @ob_flush();
+                                }
+                                @flush();
                             }
                         }
 
@@ -1126,6 +1143,7 @@ abstract class aihelper
 
                         if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
                             $parsed = json_decode($this->stream_buffer_data, true);
+                            $this->stream_running = true;
 
                             if (
                                 isset($parsed['type']) &&
@@ -1166,6 +1184,7 @@ abstract class aihelper
                                         @ob_flush();
                                     }
                                     @flush();
+                                    $this->stream_running = false;
                                 }
                             }
 
@@ -1187,6 +1206,17 @@ abstract class aihelper
                                 // finally sleep to ensure all chunks arrive
                                 sleep(2);
                                 echo "data: [DONE]\n\n";
+                                if (ob_get_level() > 0) {
+                                    @ob_flush();
+                                }
+                                @flush();
+                                $this->stream_running = false;
+                            }
+
+                            // send SSE keepalive comment for non-text events (tool calls, MCP results, etc.)
+                            // to prevent client/infrastructure timeout during long-running agentic runs
+                            if ($this->stream_running) {
+                                echo ": keepalive\n\n";
                                 if (ob_get_level() > 0) {
                                     @ob_flush();
                                 }
