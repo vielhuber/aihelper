@@ -1826,15 +1826,6 @@ class ai_chatgpt extends aihelper
                 $args['tools'][] = $mcp__value;
             }
 
-            if (
-                $this->name === 'lmstudio' &&
-                is_string($this->model) &&
-                str_contains(strtolower($this->model), 'qwen3.5')
-            ) {
-                $args['parallel_tool_calls'] = false;
-                $args['max_tool_calls'] = 14;
-                $args['max_output_tokens'] = 900;
-            }
         }
 
         if ($this->stream === true) {
@@ -2984,13 +2975,13 @@ class ai_lmstudio extends ai_chatgpt
         if (str_contains($model_name, 'qwen3.5') && $uses_tools) {
             // keep agentic qwen runs short and sequential to reduce late-stage drift
             if (!isset($args['max_output_tokens'])) {
-                $args['max_output_tokens'] = 900;
+                $args['max_output_tokens'] = 6000;
             }
             if (!isset($args['parallel_tool_calls'])) {
                 $args['parallel_tool_calls'] = false;
             }
             if (!isset($args['max_tool_calls'])) {
-                $args['max_tool_calls'] = 14;
+                $args['max_tool_calls'] = 30;
             }
         }
 

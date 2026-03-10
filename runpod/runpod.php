@@ -263,6 +263,7 @@ final class RunpodTestRunner
                 Schreibe den Modellnamen "' .
                 $pod['model_id'] .
                 '" in den Inhalt der E-Mail.
+                Warte nach send_mail 10 Sekunden, bevor du fetch_mails aufrufst.
                 Prüfe anschließend den Posteingang von noreply@vielhuber.de, ob wirklich eine E-Mail mit dem Betreff "' .
                 $random_value .
                 '" mit Anhang vorhanden ist.
