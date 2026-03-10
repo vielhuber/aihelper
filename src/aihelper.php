@@ -587,6 +587,32 @@ abstract class aihelper
         return trim(preg_replace('/<think>.*?<\/think>\s*/s', '', $text));
     }
 
+    protected function normalizeStreamTextDelta(
+        string $text,
+        string $existing_text = '',
+        bool $strip_leading_newlines = false
+    ): string {
+        if ($strip_leading_newlines) {
+            $text = ltrim($text, "\n");
+        }
+
+        if ($text === '') {
+            return '';
+        }
+
+        $existing_newline_count = 0;
+        if ($existing_text !== '' && preg_match('/\n+$/', $existing_text, $existing_matches) === 1) {
+            $existing_newline_count = strlen($existing_matches[0]);
+        }
+
+        if ($existing_newline_count > 0 && preg_match('/^\n+/', $text, $leading_matches) === 1) {
+            $allowed_leading_newlines = max(0, 2 - min($existing_newline_count, 2));
+            $text = str_repeat("\n", $allowed_leading_newlines) . substr($text, strlen($leading_matches[0]));
+        }
+
+        return preg_replace('/\n{3,}/', "\n\n", $text);
+    }
+
     protected function parseJson($msg)
     {
         if (strpos(trim($msg), '```json') === 0 || __::string_is_json($msg)) {
@@ -890,17 +916,20 @@ abstract class aihelper
                                     // handle text delta
                                     if (isset($parsed['delta']['text'])) {
                                         $text = $parsed['delta']['text'];
+                                        $existing_text = isset($block->text) ? $block->text : '';
 
-                                        // strip leading newlines from the very first text chunk
-                                        if (!$this->stream_first_text_sent) {
-                                            $text = ltrim($text, "\n");
-                                            if ($text === '') {
-                                                $this->stream_buffer_data = '';
-                                                $this->stream_event = null;
-                                                continue;
-                                            }
-                                            $this->stream_first_text_sent = true;
+                                        // strip leading newlines at the start of each text block
+                                        $text = $this->normalizeStreamTextDelta(
+                                            $text,
+                                            $existing_text,
+                                            $existing_text === ''
+                                        );
+                                        if ($text === '') {
+                                            $this->stream_buffer_data = '';
+                                            $this->stream_event = null;
+                                            continue;
                                         }
+                                        $this->stream_first_text_sent = true;
 
                                         if (!isset($block->text)) {
                                             $block->text = '';
@@ -1098,20 +1127,32 @@ abstract class aihelper
                         if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
                             $parsed = json_decode($this->stream_buffer_data, true);
 
+                            if (
+                                isset($parsed['type']) &&
+                                $parsed['type'] === 'response.output_item.added' &&
+                                isset($parsed['item']['type']) &&
+                                $parsed['item']['type'] === 'message'
+                            ) {
+                                $this->stream_first_text_sent = false;
+                            }
+
                             if (isset($parsed['type']) && $parsed['type'] === 'response.output_text.delta') {
                                 if (isset($parsed['delta'])) {
                                     $text = $parsed['delta'];
+                                    $existing_text = $this->stream_response->result->output[0]->content[0]->text;
 
                                     // strip leading newlines from the very first text chunk
-                                    if (!$this->stream_first_text_sent) {
-                                        $text = ltrim($text, "\n");
-                                        if ($text === '') {
-                                            $this->stream_buffer_data = '';
-                                            $this->stream_event = null;
-                                            continue;
-                                        }
-                                        $this->stream_first_text_sent = true;
+                                    $text = $this->normalizeStreamTextDelta(
+                                        $text,
+                                        $existing_text,
+                                        !$this->stream_first_text_sent
+                                    );
+                                    if ($text === '') {
+                                        $this->stream_buffer_data = '';
+                                        $this->stream_event = null;
+                                        continue;
                                     }
+                                    $this->stream_first_text_sent = true;
 
                                     $this->stream_response->result->output[0]->content[0]->text .= $text;
 
