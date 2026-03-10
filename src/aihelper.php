@@ -521,29 +521,36 @@ abstract class aihelper
                 is_array($content[$i]->content)
             ) {
                 foreach ($content[$i]->content as $content_item__key => $content_item__value) {
-                    // handle both object and array access (API might return either)
                     $type = is_object($content_item__value)
                         ? @$content_item__value->type
                         : @$content_item__value['type'];
                     $text = is_object($content_item__value)
                         ? @$content_item__value->text
                         : @$content_item__value['text'];
-                    if ($type === 'text' && is_string($text) && mb_strlen($text) > $max_length) {
-                        $original_length = mb_strlen($text);
-                        $truncated = mb_substr($text, 0, $max_length);
-                        $truncated .= "\n\n[... content truncated: $original_length chars reduced to $max_length chars ...]";
+                    if ($type !== 'text' || !is_string($text) || mb_strlen($text) <= $max_length) {
+                        continue;
+                    }
 
-                        if (is_object($content_item__value)) {
-                            $content[$i]->content[$content_item__key]->text = $truncated;
-                        } else {
-                            $content[$i]->content[$content_item__key]['text'] = $truncated;
-                        }
+                    $original_length = mb_strlen($text);
+                    $truncated = mb_substr($text, 0, $max_length);
+                    $truncated .= "\n\n[... content truncated: $original_length chars reduced to $max_length chars ...]";
+
+                    if (is_object($content_item__value)) {
+                        $content[$i]->content[$content_item__key]->text = $truncated;
+                    } else {
+                        $content[$i]->content[$content_item__key]['text'] = $truncated;
                     }
                 }
             }
         }
 
         return $content;
+    }
+
+    protected function stripThinkingBlocks(string $text): string
+    {
+        // remove <think>...</think> blocks produced by reasoning models (e.g. QwQ)
+        return trim(preg_replace('/<think>.*?<\/think>\s*/s', '', $text));
     }
 
     protected function parseJson($msg)
@@ -728,6 +735,10 @@ abstract class aihelper
 
         $this->log((float) round($costs, 5) . ' - response with length ' . strlen(json_encode($response)), 'add costs');
         $return['costs'] += (float) round($costs, 5);
+        if (!isset($return['output_tokens'])) {
+            $return['output_tokens'] = 0;
+        }
+        $return['output_tokens'] += $output_tokens;
     }
 
     protected function getStreamCallback()
@@ -1730,6 +1741,13 @@ class ai_chatgpt extends aihelper
                 ) {
                     $content = $output__value->content;
 
+                    // strip <think>...</think> blocks before storing in history (e.g. QwQ)
+                    foreach ($content as $content_item) {
+                        if (is_object($content_item) && isset($content_item->text)) {
+                            $content_item->text = $this->stripThinkingBlocks($content_item->text);
+                        }
+                    }
+
                     $content = $this->truncateMcpToolResultContent($content);
 
                     self::$sessions[$this->session_id][] = [
@@ -1807,6 +1825,16 @@ class ai_chatgpt extends aihelper
                 }
                 $args['tools'][] = $mcp__value;
             }
+
+            if (
+                $this->name === 'lmstudio' &&
+                is_string($this->model) &&
+                str_contains(strtolower($this->model), 'qwen3.5')
+            ) {
+                $args['parallel_tool_calls'] = false;
+                $args['max_tool_calls'] = 14;
+                $args['max_output_tokens'] = 900;
+            }
         }
 
         if ($this->stream === true) {
@@ -1823,12 +1851,7 @@ class ai_chatgpt extends aihelper
         $this->addCosts($response, $return);
 
         $output_text = $prev_output_text !== null ? $prev_output_text : '';
-        if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            __::x(@$response->result->id) &&
-            __::x(@$response->result->output)
-        ) {
+        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->output)) {
             foreach ($response->result->output as $output__value) {
                 if (__::x(@$output__value->type) && $output__value->type === 'message') {
                     if (__::x(@$output__value->content)) {
@@ -1837,7 +1860,7 @@ class ai_chatgpt extends aihelper
                                 if (__::x(@$output_text)) {
                                     $output_text .= PHP_EOL . PHP_EOL;
                                 }
-                                $output_text .= __::trim_whitespace($content__value->text);
+                                $output_text .= __::trim_whitespace($this->stripThinkingBlocks($content__value->text));
                             }
                         }
                     }
@@ -2831,7 +2854,125 @@ class ai_lmstudio extends ai_chatgpt
 
     protected function makeApiCall($args = null)
     {
-        if (str_contains(strtolower($this->model ?? ''), 'qwen3')) {
+        $model_name = strtolower($this->model ?? '');
+        $uses_tools = !empty($args['tools']) && is_array($args['tools']);
+        $profile = 'default';
+
+        if ($uses_tools) {
+            $profile = 'agentic';
+        } else {
+            $prompt_text = '';
+            $input = $args['input'] ?? [];
+            for ($i = count($input) - 1; $i >= 0; $i--) {
+                $input_item = $input[$i] ?? null;
+                if (!is_array($input_item) || ($input_item['role'] ?? null) !== 'user') {
+                    continue;
+                }
+                $content = $input_item['content'] ?? null;
+                if (!is_array($content)) {
+                    continue;
+                }
+                foreach ($content as $content_item) {
+                    if (!is_array($content_item)) {
+                        continue;
+                    }
+                    if (($content_item['type'] ?? null) === 'input_text' && isset($content_item['text'])) {
+                        $prompt_text .= ' ' . $content_item['text'];
+                    }
+                }
+                break;
+            }
+            $prompt_text = mb_strtolower(trim($prompt_text));
+
+            if ($prompt_text !== '') {
+                if (str_contains($prompt_text, 'geschichte')) {
+                    $profile = 'creative';
+                } elseif (preg_match('/\d+\s*[\*\+\-x\/]\s*\d+/', $prompt_text) === 1) {
+                    $profile = 'reasoning';
+                }
+            }
+        }
+
+        if (str_contains($model_name, 'qwq')) {
+            if (!isset($args['top_p'])) {
+                $args['top_p'] = 0.95;
+            }
+            if (!isset($args['top_k'])) {
+                $args['top_k'] = 40;
+            }
+        } elseif (str_contains($model_name, 'qwen3.5')) {
+            if ($profile === 'agentic') {
+                if (!isset($args['top_p'])) {
+                    $args['top_p'] = 0.8;
+                }
+                if (!isset($args['top_k'])) {
+                    $args['top_k'] = 10;
+                }
+            } elseif ($profile === 'reasoning' || $profile === 'creative') {
+                if (!isset($args['top_p'])) {
+                    $args['top_p'] = 0.95;
+                }
+                if (!isset($args['top_k'])) {
+                    $args['top_k'] = 20;
+                }
+            } else {
+                if (!isset($args['top_p'])) {
+                    $args['top_p'] = 0.8;
+                }
+                if (!isset($args['top_k'])) {
+                    $args['top_k'] = 20;
+                }
+            }
+        } elseif (str_contains($model_name, 'qwen3')) {
+            if (!isset($args['top_p'])) {
+                $args['top_p'] = 0.8;
+            }
+            if (!isset($args['top_k'])) {
+                $args['top_k'] = 20;
+            }
+        } elseif (str_contains($model_name, 'gpt-oss') && $uses_tools) {
+            if (!isset($args['top_p'])) {
+                $args['top_p'] = 0.9;
+            }
+            if (!isset($args['top_k'])) {
+                $args['top_k'] = 20;
+            }
+        }
+
+        if (str_contains($model_name, 'qwen3')) {
+            // qwen3.5 variants in lmstudio do not reliably follow /no_think,
+            // so keep the empty <think> priming trick in the responses api input format
+            if (!empty($args['input']) && is_array($args['input'])) {
+                $has_empty_think_priming = false;
+                foreach ($args['input'] as $input_item) {
+                    if (!is_array($input_item) || ($input_item['role'] ?? null) !== 'assistant') {
+                        continue;
+                    }
+                    if (empty($input_item['content']) || !is_array($input_item['content'])) {
+                        continue;
+                    }
+                    foreach ($input_item['content'] as $content_item) {
+                        if (!is_array($content_item) || ($content_item['type'] ?? null) !== 'output_text') {
+                            continue;
+                        }
+                        if (($content_item['text'] ?? '') === "<think>\n\n</think>\n\n") {
+                            $has_empty_think_priming = true;
+                            break 2;
+                        }
+                    }
+                }
+                if ($has_empty_think_priming === false) {
+                    $args['input'][] = [
+                        'role' => 'assistant',
+                        'content' => [
+                            [
+                                'type' => 'output_text',
+                                'text' => "<think>\n\n</think>\n\n"
+                            ]
+                        ]
+                    ];
+                }
+            }
             if (!empty($args['messages'])) {
                 $args['messages'][] = [
                     'role' => 'assistant',
@@ -2839,6 +2980,30 @@ class ai_lmstudio extends ai_chatgpt
                 ];
             }
         }
+
+        if (str_contains($model_name, 'qwen3.5') && $uses_tools) {
+            // keep agentic qwen runs short and sequential to reduce late-stage drift
+            if (!isset($args['max_output_tokens'])) {
+                $args['max_output_tokens'] = 900;
+            }
+            if (!isset($args['parallel_tool_calls'])) {
+                $args['parallel_tool_calls'] = false;
+            }
+            if (!isset($args['max_tool_calls'])) {
+                $args['max_tool_calls'] = 14;
+            }
+        }
+
+        // glm models can produce excessive preserved thinking, so keep the output budget tight
+        if (str_contains($model_name, 'glm')) {
+            $args['max_output_tokens'] = 1500;
+        }
+
+        // do not send explicit reasoning or ttl fields by default;
+        // instruct models tend to behave faster and more predictably without them
+        unset($args['reasoning']);
+        unset($args['ttl']);
+
         return parent::makeApiCall($args);
     }
 }
