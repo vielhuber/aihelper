@@ -422,6 +422,7 @@ abstract class aihelper
                     'name' => $models__value['name'],
                     'max_tokens' => $models__value['max_tokens'],
                     'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+                    'supports_temperature' => $models__value['supports_temperature'] ?? true,
                     'default' => $models__key === 0 ? true : false,
                     'test' => $models__key === 0 ? true : false
                 ];
@@ -497,6 +498,39 @@ abstract class aihelper
     }
 
     abstract protected function makeApiCall($args = null);
+
+    protected function applyTemperatureParameter(array $args, ?string $container_key = null): array
+    {
+        if ($this->temperature === null) {
+            return $args;
+        }
+
+        $supports_temperature = true;
+        foreach ($this->models as $models__value) {
+            if (($models__value['name'] ?? null) !== $this->model) {
+                continue;
+            }
+
+            $supports_temperature = $models__value['supports_temperature'] ?? true;
+            break;
+        }
+
+        if ($supports_temperature === false) {
+            return $args;
+        }
+
+        if ($container_key === null) {
+            $args['temperature'] = $this->temperature;
+            return $args;
+        }
+
+        if (!isset($args[$container_key]) || !is_array($args[$container_key])) {
+            $args[$container_key] = [];
+        }
+        $args[$container_key]['temperature'] = $this->temperature;
+
+        return $args;
+    }
 
     protected function trimPrompt($prompt)
     {
@@ -1177,6 +1211,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
             'default' => true,
             'test' => false
         ],
@@ -1184,6 +1219,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5-mini',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
+            'supports_temperature' => false,
             'default' => false,
             'test' => true
         ],
@@ -1191,6 +1227,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5-nano',
             'max_tokens' => 32768,
             'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1198,6 +1235,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4.1',
             'max_tokens' => 32768,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1205,6 +1243,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4o',
             'max_tokens' => 16384,
             'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1212,6 +1251,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4o-mini',
             'max_tokens' => 16384,
             'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1219,6 +1259,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.2',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1226,6 +1267,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.2-2025-12-11',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1233,6 +1275,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.2-chat-latest',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1240,6 +1283,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.2-pro',
             'max_tokens' => 272000,
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1247,6 +1291,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.2-pro-2025-12-11',
             'max_tokens' => 272000,
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1254,6 +1299,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.2-codex',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1261,6 +1307,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.4',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1268,6 +1315,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.4-2026-03-05',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1275,6 +1323,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.4-pro',
             'max_tokens' => 272000,
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1282,6 +1331,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.4-pro-2026-03-05',
             'max_tokens' => 272000,
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1289,6 +1339,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.1',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1296,6 +1347,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.1-2025-11-13',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1303,6 +1355,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.1-chat-latest',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1310,6 +1363,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.1-codex',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1317,6 +1371,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.1-codex-mini',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1324,6 +1379,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.1-codex-max',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1331,6 +1387,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.3-codex',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1338,6 +1395,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.3-chat-latest',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1345,6 +1403,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5-chat-latest',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1352,6 +1411,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5-2025-08-07',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1359,6 +1419,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5-mini-2025-08-07',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1366,6 +1427,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5-nano-2025-08-07',
             'max_tokens' => 32768,
             'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1373,6 +1435,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5-codex',
             'max_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1380,6 +1443,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5-pro',
             'max_tokens' => 272000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1387,6 +1451,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5-pro-2025-10-06',
             'max_tokens' => 272000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1394,6 +1459,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4.1-2025-04-14',
             'max_tokens' => 32768,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1401,6 +1467,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4.1-mini',
             'max_tokens' => 32768,
             'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1408,6 +1475,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4.1-mini-2025-04-14',
             'max_tokens' => 32768,
             'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1415,6 +1483,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4.1-nano',
             'max_tokens' => 32768,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1422,6 +1491,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4.1-nano-2025-04-14',
             'max_tokens' => 32768,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1429,6 +1499,7 @@ class ai_chatgpt extends aihelper
             'name' => 'o3',
             'max_tokens' => 100000,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1436,6 +1507,7 @@ class ai_chatgpt extends aihelper
             'name' => 'o3-2025-04-16',
             'max_tokens' => 100000,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1443,6 +1515,7 @@ class ai_chatgpt extends aihelper
             'name' => 'o3-pro',
             'max_tokens' => 100000,
             'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1450,6 +1523,7 @@ class ai_chatgpt extends aihelper
             'name' => 'o3-pro-2025-06-10',
             'max_tokens' => 100000,
             'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1457,6 +1531,7 @@ class ai_chatgpt extends aihelper
             'name' => 'o3-mini',
             'max_tokens' => 100000,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1464,6 +1539,7 @@ class ai_chatgpt extends aihelper
             'name' => 'o3-mini-2025-01-31',
             'max_tokens' => 100000,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1471,6 +1547,7 @@ class ai_chatgpt extends aihelper
             'name' => 'o4-mini',
             'max_tokens' => 100000,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1478,6 +1555,7 @@ class ai_chatgpt extends aihelper
             'name' => 'o4-mini-2025-04-16',
             'max_tokens' => 100000,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1485,6 +1563,7 @@ class ai_chatgpt extends aihelper
             'name' => 'o1',
             'max_tokens' => 100000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1492,6 +1571,7 @@ class ai_chatgpt extends aihelper
             'name' => 'o1-2024-12-17',
             'max_tokens' => 100000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1499,6 +1579,7 @@ class ai_chatgpt extends aihelper
             'name' => 'o1-pro',
             'max_tokens' => 100000,
             'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1506,6 +1587,7 @@ class ai_chatgpt extends aihelper
             'name' => 'o1-pro-2025-03-19',
             'max_tokens' => 100000,
             'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
+            'supports_temperature' => false,
             'default' => false,
             'test' => false
         ],
@@ -1513,6 +1595,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4o-2024-05-13',
             'max_tokens' => 4096,
             'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1520,6 +1603,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4o-2024-08-06',
             'max_tokens' => 16384,
             'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1527,6 +1611,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4o-2024-11-20',
             'max_tokens' => 16384,
             'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1534,6 +1619,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4o-mini-2024-07-18',
             'max_tokens' => 16384,
             'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1541,6 +1627,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4-0613',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1548,6 +1635,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1555,6 +1643,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4-turbo',
             'max_tokens' => 4096,
             'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1562,6 +1651,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-4-turbo-2024-04-09',
             'max_tokens' => 4096,
             'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1569,6 +1659,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-3.5-turbo',
             'max_tokens' => 4096,
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1576,6 +1667,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-3.5-turbo-1106',
             'max_tokens' => 4096,
             'costs' => ['input' => 0.000001, 'input_cached' => 0.000001, 'output' => 0.000002],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1583,6 +1675,7 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-3.5-turbo-0125',
             'max_tokens' => 4096,
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ]
@@ -1781,9 +1874,10 @@ class ai_chatgpt extends aihelper
 
         $args = [
             'model' => $this->model,
-            'temperature' => $this->temperature,
             'input' => self::$sessions[$this->session_id]
         ];
+
+        $args = $this->applyTemperatureParameter($args);
 
         if (!empty($this->mcp_servers)) {
             $args['tools'] = [];
@@ -1825,7 +1919,6 @@ class ai_chatgpt extends aihelper
                 }
                 $args['tools'][] = $mcp__value;
             }
-
         }
 
         if ($this->stream === true) {
@@ -1918,6 +2011,7 @@ class ai_claude extends aihelper
             'name' => 'claude-sonnet-4-6',
             'max_tokens' => 64000,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
+            'supports_temperature' => true,
             'default' => true,
             'test' => false
         ],
@@ -1925,6 +2019,7 @@ class ai_claude extends aihelper
             'name' => 'claude-opus-4-6',
             'max_tokens' => 64000,
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1932,6 +2027,7 @@ class ai_claude extends aihelper
             'name' => 'claude-sonnet-4-5',
             'max_tokens' => 64000,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1939,6 +2035,7 @@ class ai_claude extends aihelper
             'name' => 'claude-opus-4-5',
             'max_tokens' => 64000,
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1946,6 +2043,7 @@ class ai_claude extends aihelper
             'name' => 'claude-haiku-4-5',
             'max_tokens' => 64000,
             'costs' => ['input' => 0.000001, 'input_cached' => 0.0000001, 'output' => 0.000005],
+            'supports_temperature' => true,
             'default' => false,
             'test' => true
         ],
@@ -1953,6 +2051,7 @@ class ai_claude extends aihelper
             'name' => 'claude-sonnet-4-0',
             'max_tokens' => 64000,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1960,6 +2059,7 @@ class ai_claude extends aihelper
             'name' => 'claude-opus-4-1',
             'max_tokens' => 32000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1967,6 +2067,7 @@ class ai_claude extends aihelper
             'name' => 'claude-opus-4-0',
             'max_tokens' => 32000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -1974,6 +2075,7 @@ class ai_claude extends aihelper
             'name' => 'claude-3-haiku-20240307',
             'max_tokens' => 4096,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.00000003, 'output' => 0.00000125],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ]
@@ -2136,9 +2238,10 @@ class ai_claude extends aihelper
         $args = [
             'model' => $this->model,
             'max_tokens' => $this->getMaxTokensForModel(),
-            'messages' => self::$sessions[$this->session_id],
-            'temperature' => $this->temperature
+            'messages' => self::$sessions[$this->session_id]
         ];
+
+        $args = $this->applyTemperatureParameter($args);
 
         if (!empty($this->mcp_servers)) {
             $args['mcp_servers'] = [];
@@ -2305,6 +2408,7 @@ class ai_gemini extends aihelper
             'name' => 'gemini-2.5-pro',
             'max_tokens' => 65536,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => true,
             'default' => true,
             'test' => false
         ],
@@ -2312,6 +2416,7 @@ class ai_gemini extends aihelper
             'name' => 'gemini-2.5-flash',
             'max_tokens' => 65536,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
+            'supports_temperature' => true,
             'default' => false,
             'test' => true
         ],
@@ -2319,6 +2424,7 @@ class ai_gemini extends aihelper
             'name' => 'gemini-2.5-flash-lite',
             'max_tokens' => 65536,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2326,6 +2432,7 @@ class ai_gemini extends aihelper
             'name' => 'gemini-2.0-flash',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2333,6 +2440,7 @@ class ai_gemini extends aihelper
             'name' => 'gemini-2.0-flash-lite',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.000000075, 'input_cached' => 0.000000075, 'output' => 0.0000003],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2340,6 +2448,7 @@ class ai_gemini extends aihelper
             'name' => 'gemini-2.5-flash-image',
             'max_tokens' => 65536,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2347,6 +2456,7 @@ class ai_gemini extends aihelper
             'name' => 'gemini-pro-latest',
             'max_tokens' => 65536,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2354,6 +2464,7 @@ class ai_gemini extends aihelper
             'name' => 'gemini-flash-latest',
             'max_tokens' => 65536,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2361,6 +2472,7 @@ class ai_gemini extends aihelper
             'name' => 'gemini-flash-lite-latest',
             'max_tokens' => 65536,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2368,6 +2480,7 @@ class ai_gemini extends aihelper
             'name' => 'gemma-3-1b-it',
             'max_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2375,6 +2488,7 @@ class ai_gemini extends aihelper
             'name' => 'gemma-3-4b-it',
             'max_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2382,6 +2496,7 @@ class ai_gemini extends aihelper
             'name' => 'gemma-3-12b-it',
             'max_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2389,6 +2504,7 @@ class ai_gemini extends aihelper
             'name' => 'gemma-3-27b-it',
             'max_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2396,6 +2512,7 @@ class ai_gemini extends aihelper
             'name' => 'gemma-3n-e4b-it',
             'max_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2403,6 +2520,7 @@ class ai_gemini extends aihelper
             'name' => 'gemma-3n-e2b-it',
             'max_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ]
@@ -2544,11 +2662,9 @@ class ai_gemini extends aihelper
         }
 
         $args = [
-            'contents' => self::$sessions[$this->session_id],
-            'generationConfig' => [
-                'temperature' => $this->temperature
-            ]
+            'contents' => self::$sessions[$this->session_id]
         ];
+        $args = $this->applyTemperatureParameter($args, 'generationConfig');
         $this->log((int) round(strlen(json_encode($args)) / 3.5), 'ask with input token length');
         $this->log($args, 'ask');
         $response = $this->makeApiCall($args);
@@ -2628,6 +2744,7 @@ class ai_grok extends ai_claude
             'name' => 'grok-4-1-fast-reasoning',
             'max_tokens' => 131072,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'supports_temperature' => true,
             'default' => true,
             'test' => true
         ],
@@ -2635,6 +2752,7 @@ class ai_grok extends ai_claude
             'name' => 'grok-4-1-fast-non-reasoning',
             'max_tokens' => 131072,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2642,6 +2760,7 @@ class ai_grok extends ai_claude
             'name' => 'grok-4-fast-reasoning',
             'max_tokens' => 131072,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2649,6 +2768,7 @@ class ai_grok extends ai_claude
             'name' => 'grok-4-fast-non-reasoning',
             'max_tokens' => 131072,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2656,6 +2776,7 @@ class ai_grok extends ai_claude
             'name' => 'grok-code-fast-1',
             'max_tokens' => 131072,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000015],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2663,6 +2784,7 @@ class ai_grok extends ai_claude
             'name' => 'grok-3',
             'max_tokens' => 131072,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ],
@@ -2670,6 +2792,7 @@ class ai_grok extends ai_claude
             'name' => 'grok-3-mini',
             'max_tokens' => 131072,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ]
@@ -2696,6 +2819,7 @@ class ai_deepseek extends ai_claude
             'name' => 'deepseek-chat',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.00000028, 'input_cached' => 0.000000028, 'output' => 0.00000042],
+            'supports_temperature' => true,
             'default' => true,
             'test' => true
         ],
@@ -2703,6 +2827,7 @@ class ai_deepseek extends ai_claude
             'name' => 'deepseek-reasoner',
             'max_tokens' => 8192,
             'costs' => ['input' => 0.00000028, 'input_cached' => 0.000000028, 'output' => 0.00000042],
+            'supports_temperature' => true,
             'default' => false,
             'test' => false
         ]
@@ -3018,6 +3143,7 @@ class ai_test extends ai_claude
             'name' => 'test-model-1',
             'max_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
             'default' => true,
             'test' => true
         ]
