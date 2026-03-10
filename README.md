@@ -160,15 +160,16 @@ if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled f
 - `chmod +x runpodctl`
 - `mv runpodctl /usr/bin/runpodctl`
 - `runpodctl config --apiKey <RUNPOD_API_KEY>`
-- `vi ./runpod/runpod.json`
+- `vi ./runpod/runpod.yaml`
 
 ### recommended models
 
-| GPU      | HDD    | Model                | Context length |
-| -------- | ------ | -------------------- | -------------- |
-| RTX 5090 | 100 GB | Qwen3.5-35B-A3B-GGUF | 65536          |
-| H200 SXM | 200 GB | MiniMax-M2.1-GGUF    | 131072         |
-| B200     | 200 GB | MiniMax-M2.1-GGUF    | 131072         |
+| GPU      | HDD   | Model                       | Context length | Notes                               |
+| -------- | ----- | --------------------------- | -------------- | ----------------------------------- |
+| RTX 5090 | 50 GB | Qwen3.5-27B-GGUF-UD-Q4_K_XL | 32768          | best current MCP/tool-use baseline  |
+| RTX 5090 | 50 GB | Qwen3.5-27B-GGUF-UD-Q5_K_XL | 32768          | viable alternative, slower than Q4  |
+| RTX 5090 | 50 GB | Qwen3.5-27B-GGUF-UD-Q6_K_XL | 32768          | not recommended for MCP workflows   |
+| RTX 5090 | 50 GB | Qwen2.5-32B-Instruct-GGUF   | 32768          | useful instruct baseline for checks |
 
 ### manual deployment
 
