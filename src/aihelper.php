@@ -1898,11 +1898,11 @@ class ai_chatgpt extends aihelper
     {
         if (__::x(($response??null)) && __::x(($response?->result??null)) && __::x(($response?->result?->output??null))) {
             foreach ($response->result->output as $output__value) {
-                if (
-                    __::x(($output__value?->type??null)) &&
-                    $output__value->type === 'message' &&
-                    __::x(($output__value?->content??null))
-                ) {
+                if (!__::x(($output__value?->type??null))) {
+                    continue;
+                }
+
+                if ($output__value->type === 'message' && __::x(($output__value?->content??null))) {
                     $content = $output__value->content;
 
                     // strip <think>...</think> blocks before storing in history (e.g. QwQ)
@@ -1918,6 +1918,11 @@ class ai_chatgpt extends aihelper
                         'role' => 'assistant',
                         'content' => $content
                     ];
+                } elseif ($output__value->type !== 'mcp_list_tools') {
+                    // include all other items (mcp_call, mcp_tool_result, reasoning, etc.) so the model
+                    // has full context for the next turn; mcp_list_tools is intentionally excluded
+                    // (re-discovered fresh on each call)
+                    self::$sessions[$this->session_id][] = json_decode(json_encode($output__value), true);
                 }
             }
         }
