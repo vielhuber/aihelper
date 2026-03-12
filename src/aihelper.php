@@ -2173,6 +2173,9 @@ class ai_claude extends aihelper
                     $name = preg_replace('/([a-zA-Z]+)-([0-9]+)-[0-9]{3,}$/', '$1-$2-0', $name);
                     // replace [a-zA-Z]+-[0-9]-[0-9]-[0-9]+$ with [a-zA-Z]+-[0-9]-[0-9]$
                     $name = preg_replace('/([a-zA-Z]+)-([0-9]+)-([0-9]+)-[0-9]+$/', '$1-$2-$3', $name);
+                    if (strpos($name, '-beta') !== false) {
+                        continue;
+                    }
                     if (
                         in_array($name, [
                             'grok-4-0',
