@@ -557,11 +557,11 @@ abstract class aihelper
             ) {
                 foreach ($content[$i]->content as $content_item__key => $content_item__value) {
                     $type = is_object($content_item__value)
-                        ? @$content_item__value->type
-                        : @$content_item__value['type'];
+                        ? ($content_item__value?->type??null)
+                        : ($content_item__value['type']??null);
                     $text = is_object($content_item__value)
-                        ? @$content_item__value->text
-                        : @$content_item__value['text'];
+                        ? ($content_item__value?->text??null)
+                        : ($content_item__value['text']??null);
                     if ($type !== 'text' || !is_string($text) || mb_strlen($text) <= $max_length) {
                         continue;
                     }
@@ -722,63 +722,63 @@ abstract class aihelper
 
         $input_tokens = 0;
         if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            __::x(@$response->result->usage) &&
-            __::x(@$response->result->usage->input_tokens)
+            __::x(($response??null)) &&
+            __::x(($response?->result??null)) &&
+            __::x(($response?->result?->usage??null)) &&
+            __::x(($response?->result?->usage?->input_tokens??null))
         ) {
             $input_tokens += $response->result->usage->input_tokens;
         }
         if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            __::x(@$response->result->usageMetadata) &&
-            __::x(@$response->result->usageMetadata->promptTokenCount)
+            __::x(($response??null)) &&
+            __::x(($response?->result??null)) &&
+            __::x(($response?->result?->usageMetadata??null)) &&
+            __::x(($response?->result?->usageMetadata?->promptTokenCount??null))
         ) {
             $input_tokens += $response->result->usageMetadata->promptTokenCount;
         }
 
         $input_cached_tokens = 0;
         if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            __::x(@$response->result->usage) &&
-            __::x(@$response->result->usage->input_tokens_details) &&
-            __::x(@$response->result->usage->input_tokens_details->cached_tokens)
+            __::x(($response??null)) &&
+            __::x(($response?->result??null)) &&
+            __::x(($response?->result?->usage??null)) &&
+            __::x(($response?->result?->usage?->input_tokens_details??null)) &&
+            __::x(($response?->result?->usage?->input_tokens_details?->cached_tokens??null))
         ) {
             $input_cached_tokens += $response->result->usage->input_tokens_details->cached_tokens;
         }
         if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            __::x(@$response->result->usage) &&
-            __::x(@$response->result->usage->cache_creation_input_tokens)
+            __::x(($response??null)) &&
+            __::x(($response?->result??null)) &&
+            __::x(($response?->result?->usage??null)) &&
+            __::x(($response?->result?->usage?->cache_creation_input_tokens??null))
         ) {
             $input_cached_tokens += $response->result->usage->cache_creation_input_tokens;
         }
         if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            __::x(@$response->result->usage) &&
-            __::x(@$response->result->usage->cache_read_input_tokens)
+            __::x(($response??null)) &&
+            __::x(($response?->result??null)) &&
+            __::x(($response?->result?->usage??null)) &&
+            __::x(($response?->result?->usage?->cache_read_input_tokens??null))
         ) {
             $input_cached_tokens += $response->result->usage->cache_read_input_tokens;
         }
 
         $output_tokens = 0;
         if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            __::x(@$response->result->usage) &&
-            __::x(@$response->result->usage->output_tokens)
+            __::x(($response??null)) &&
+            __::x(($response?->result??null)) &&
+            __::x(($response?->result?->usage??null)) &&
+            __::x(($response?->result?->usage?->output_tokens??null))
         ) {
             $output_tokens += $response->result->usage->output_tokens;
         }
         if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            __::x(@$response->result->usageMetadata) &&
-            __::x(@$response->result->usageMetadata->candidatesTokenCount)
+            __::x(($response??null)) &&
+            __::x(($response?->result??null)) &&
+            __::x(($response?->result?->usageMetadata??null)) &&
+            __::x(($response?->result?->usageMetadata?->candidatesTokenCount??null))
         ) {
             $output_tokens += $response->result->usageMetadata->candidatesTokenCount;
         }
@@ -843,7 +843,7 @@ abstract class aihelper
                 if (json_decode($chunk, true) !== null) {
                     $parsed = json_decode($chunk, true);
                     if (isset($parsed['error']) && isset($parsed['error']['message'])) {
-                        $this->stream_response->result->error = (object) ['message' => @$parsed['error']['message']];
+                        $this->stream_response->result->error = (object) ['message' => ($parsed['error']['message']??null)];
                     }
                 }
 
@@ -908,7 +908,7 @@ abstract class aihelper
                                 if (isset($parsed['content_block'])) {
                                     $this->stream_response->result->content[] = (object) $parsed['content_block'];
                                 }
-                                $this->stream_current_block_type = @$parsed['content_block']['type'];
+                                $this->stream_current_block_type = ($parsed['content_block']['type']??null);
                             }
 
                             // stream delta content
@@ -1020,18 +1020,18 @@ abstract class aihelper
                             }
 
                             if (isset($parsed['usage'])) {
-                                $this->stream_response->result->usage->input_tokens += @$parsed['usage'][
+                                $this->stream_response->result->usage->input_tokens += ($parsed['usage'][
                                     'input_tokens'
-                                ];
-                                $this->stream_response->result->usage->cache_creation_input_tokens += @$parsed['usage'][
+                                ]??null);
+                                $this->stream_response->result->usage->cache_creation_input_tokens += ($parsed['usage'][
                                     'cache_creation_input_tokens'
-                                ];
-                                $this->stream_response->result->usage->cache_read_input_tokens += @$parsed['usage'][
+                                ]??null);
+                                $this->stream_response->result->usage->cache_read_input_tokens += ($parsed['usage'][
                                     'cache_read_input_tokens'
-                                ];
-                                $this->stream_response->result->usage->output_tokens += @$parsed['usage'][
+                                ]??null);
+                                $this->stream_response->result->usage->output_tokens += ($parsed['usage'][
                                     'output_tokens'
-                                ];
+                                ]??null);
                                 $this->log(
                                     'ADDED USAGE [' .
                                         json_encode($parsed['usage']) .
@@ -1117,7 +1117,7 @@ abstract class aihelper
                 if (json_decode($chunk, true) !== null) {
                     $parsed = json_decode($chunk, true);
                     if (isset($parsed['error']) && isset($parsed['error']['message'])) {
-                        $this->stream_response->result->error = (object) ['message' => @$parsed['error']['message']];
+                        $this->stream_response->result->error = (object) ['message' => ($parsed['error']['message']??null)];
                     }
                 }
 
@@ -1189,20 +1189,20 @@ abstract class aihelper
                             }
 
                             if (isset($parsed['response']) && isset($parsed['response']['usage'])) {
-                                $this->stream_response->result->usage->input_tokens += @$parsed['response']['usage'][
+                                $this->stream_response->result->usage->input_tokens += ($parsed['response']['usage'][
                                     'input_tokens'
-                                ];
-                                $this->stream_response->result->usage->cache_creation_input_tokens += @$parsed[
+                                ]??null);
+                                $this->stream_response->result->usage->cache_creation_input_tokens += ($parsed[
                                     'response'
-                                ]['usage']['input_tokens_details']['cached_tokens'];
+                                ]['usage']['input_tokens_details']['cached_tokens']??null);
                                 $this->stream_response->result->usage->cache_read_input_tokens += 0;
-                                $this->stream_response->result->usage->output_tokens += @$parsed['response']['usage'][
+                                $this->stream_response->result->usage->output_tokens += ($parsed['response']['usage'][
                                     'output_tokens'
-                                ];
+                                ]??null);
                             }
 
                             if (isset($parsed['type']) && $parsed['type'] === 'response.completed') {
-                                $this->stream_response->result->id = @$parsed['response']['id'];
+                                $this->stream_response->result->id = ($parsed['response']['id']??null);
                                 // finally sleep to ensure all chunks arrive
                                 sleep(2);
                                 echo "data: [DONE]\n\n";
@@ -1765,13 +1765,13 @@ class ai_chatgpt extends aihelper
         );
         $this->log($response);
         if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            __::x(@$response->result->data) &&
+            __::x(($response??null)) &&
+            __::x(($response?->result??null)) &&
+            __::x(($response?->result?->data??null)) &&
             is_array($response->result->data)
         ) {
             foreach ($response->result->data as $models__value) {
-                if (__::x(@$models__value->id)) {
+                if (__::x(($models__value?->id??null))) {
                     $name = $models__value->id;
                     if (strpos($name, '-preview') !== false) {
                         continue;
@@ -1856,7 +1856,7 @@ class ai_chatgpt extends aihelper
         ];
 
         // add files
-        if (__::x(@$files)) {
+        if (__::x(($files??null))) {
             if (!is_array($files)) {
                 $files = [$files];
             }
@@ -1896,12 +1896,12 @@ class ai_chatgpt extends aihelper
 
     protected function addResponseToSession($response)
     {
-        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->output)) {
+        if (__::x(($response??null)) && __::x(($response?->result??null)) && __::x(($response?->result?->output??null))) {
             foreach ($response->result->output as $output__value) {
                 if (
-                    __::x(@$output__value->type) &&
+                    __::x(($output__value?->type??null)) &&
                     $output__value->type === 'message' &&
-                    __::x(@$output__value->content)
+                    __::x(($output__value?->content??null))
                 ) {
                     $content = $output__value->content;
 
@@ -2002,17 +2002,17 @@ class ai_chatgpt extends aihelper
         if ($this->stream === true) {
             $response = $this->stream_response;
         }
-        $this->log(@$response->result, 'response');
+        $this->log(($response?->result??null), 'response');
         $this->addCosts($response, $return);
 
         $output_text = $prev_output_text !== null ? $prev_output_text : '';
-        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->output)) {
+        if (__::x(($response??null)) && __::x(($response?->result??null)) && __::x(($response?->result?->output??null))) {
             foreach ($response->result->output as $output__value) {
-                if (__::x(@$output__value->type) && $output__value->type === 'message') {
-                    if (__::x(@$output__value->content)) {
+                if (__::x(($output__value?->type??null)) && $output__value->type === 'message') {
+                    if (__::x(($output__value?->content??null))) {
                         foreach ($output__value->content as $content__value) {
-                            if (__::x(@$content__value->text)) {
-                                if (__::x(@$output_text)) {
+                            if (__::x(($content__value?->text??null))) {
+                                if (__::x(($output_text??null))) {
                                     $output_text .= PHP_EOL . PHP_EOL;
                                 }
                                 $output_text .= __::trim_whitespace($this->stripThinkingBlocks($content__value->text));
@@ -2023,13 +2023,13 @@ class ai_chatgpt extends aihelper
             }
         }
 
-        if (__::nx(@$output_text)) {
+        if (__::nx(($output_text??null))) {
             $this->log($response, 'failed');
             if (
-                __::x(@$response) &&
-                __::x(@$response->result) &&
-                __::x(@$response->result->error) &&
-                __::x(@$response->result->error->message) &&
+                __::x(($response??null)) &&
+                __::x(($response?->result??null)) &&
+                __::x(($response?->result?->error??null)) &&
+                __::x(($response?->result?->error?->message??null)) &&
                 is_string($response->result->error->message)
             ) {
                 $return['response'] = $response->result->error->message;
@@ -2165,9 +2165,9 @@ class ai_claude extends aihelper
             timeout: $this->timeout
         );
         $this->log($response);
-        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->data)) {
+        if (__::x(($response??null)) && __::x(($response?->result??null)) && __::x(($response?->result?->data??null))) {
             foreach ($response->result->data as $data__value) {
-                if (__::x(@$data__value->id)) {
+                if (__::x(($data__value?->id??null))) {
                     $name = $data__value->id;
                     // replace [a-zA-Z]+-[0-9]-[0-9]{3,}$ with [a-zA-Z]+-[0-9]-0
                     $name = preg_replace('/([a-zA-Z]+)-([0-9]+)-[0-9]{3,}$/', '$1-$2-0', $name);
@@ -2213,7 +2213,7 @@ class ai_claude extends aihelper
         ];
 
         // add files
-        if (__::x(@$files)) {
+        if (__::x(($files??null))) {
             if (!is_array($files)) {
                 $files = [$files];
             }
@@ -2244,7 +2244,7 @@ class ai_claude extends aihelper
 
     protected function addResponseToSession($response)
     {
-        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->content)) {
+        if (__::x(($response??null)) && __::x(($response?->result??null)) && __::x(($response?->result?->content??null))) {
             $content = $response->result->content;
 
             // fix mcp_tool_use blocks with empty array or string inputs (should be objects)
@@ -2343,14 +2343,14 @@ class ai_claude extends aihelper
         if ($this->stream === true) {
             $response = $this->stream_response;
         }
-        $this->log(@$response->result, 'response');
+        $this->log(($response?->result??null), 'response');
         $this->addCosts($response, $return);
 
         $output_text = $prev_output_text !== null ? $prev_output_text : '';
-        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->content)) {
+        if (__::x(($response??null)) && __::x(($response?->result??null)) && __::x(($response?->result?->content??null))) {
             foreach ($response->result->content as $content__value) {
-                if (__::x(@$content__value->text)) {
-                    if (__::x(@$output_text)) {
+                if (__::x(($content__value?->text??null))) {
+                    if (__::x(($output_text??null))) {
                         $output_text .= PHP_EOL . PHP_EOL;
                     }
                     $output_text .= __::trim_whitespace($content__value->text);
@@ -2363,16 +2363,16 @@ class ai_claude extends aihelper
         // but sometimes it also sends no stop reason with partial content
         // we detect both cases
         if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            ((__::x(@$response->result->stop_reason) && $response->result->stop_reason === 'pause_turn') ||
-                (__::nx(@$response->result->stop_reason) && __::x(@$response->result->content)))
+            __::x(($response??null)) &&
+            __::x(($response?->result??null)) &&
+            ((__::x(($response?->result?->stop_reason??null)) && $response->result->stop_reason === 'pause_turn') ||
+                (__::nx(($response?->result?->stop_reason??null)) && __::x(($response?->result?->content??null))))
         ) {
             $this->log('pause_turn / empty stop_reason detected');
 
             // throttle
             /*
-            if (__::x(@$response->result->usage) && __::x(@$response->result->usage->input_tokens)) {
+            if (__::x(($response?->result?->usage??null)) && __::x(($response?->result?->usage?->input_tokens??null))) {
                 $pause_turn_input_tokens = $response->result->usage->input_tokens;
                 if ($pause_turn_input_tokens > 400000) {
                     $pause_turn_sleep = (int) (ceil($pause_turn_input_tokens / 400000) * 60);
@@ -2401,33 +2401,33 @@ class ai_claude extends aihelper
             );
         }
 
-        if (__::nx(@$output_text)) {
+        if (__::nx(($output_text??null))) {
             $this->log($response, 'failed');
             if (
-                __::x(@$response) &&
-                __::x(@$response->result) &&
-                __::x(@$response->result->type) &&
-                @$response->result->type === 'error' &&
-                __::x(@$response->result->error) &&
-                __::x(@$response->result->error->type) &&
-                @$response->result->error->type === 'overloaded_error'
+                __::x(($response??null)) &&
+                __::x(($response?->result??null)) &&
+                __::x(($response?->result?->type??null)) &&
+                ($response?->result?->type??null) === 'error' &&
+                __::x(($response?->result?->error??null)) &&
+                __::x(($response?->result?->error?->type??null)) &&
+                ($response?->result?->error?->type??null) === 'overloaded_error'
             ) {
                 $this->log('overload detected. pausing...');
                 sleep(5);
             }
             if (
-                __::x(@$response) &&
-                __::x(@$response->result) &&
-                __::x(@$response->result->error) &&
-                __::x(@$response->result->error->message) &&
+                __::x(($response??null)) &&
+                __::x(($response?->result??null)) &&
+                __::x(($response?->result?->error??null)) &&
+                __::x(($response?->result?->error?->message??null)) &&
                 is_string($response->result->error->message)
             ) {
                 $return['response'] = $response->result->error->message;
             }
             if (
-                __::x(@$response) &&
-                __::x(@$response->result) &&
-                __::x(@$response->result->error) &&
+                __::x(($response??null)) &&
+                __::x(($response?->result??null)) &&
+                __::x(($response?->result?->error??null)) &&
                 is_string($response->result->error)
             ) {
                 $return['response'] = $response->result->error;
@@ -2611,13 +2611,13 @@ class ai_gemini extends aihelper
         );
         $this->log($response);
         if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            __::x(@$response->result->models) &&
+            __::x(($response??null)) &&
+            __::x(($response?->result??null)) &&
+            __::x(($response?->result?->models??null)) &&
             is_array($response->result->models)
         ) {
             foreach ($response->result->models as $models__value) {
-                if (__::x(@$models__value->name)) {
+                if (__::x(($models__value?->name??null))) {
                     $name = $models__value->name;
                     $name = str_replace('models/', '', $name);
                     if (strpos($name, '-exp') !== false) {
@@ -2671,7 +2671,7 @@ class ai_gemini extends aihelper
         ];
 
         // add files
-        if (__::x(@$files)) {
+        if (__::x(($files??null))) {
             if (!is_array($files)) {
                 $files = [$files];
             }
@@ -2699,9 +2699,9 @@ class ai_gemini extends aihelper
 
     protected function addResponseToSession($response)
     {
-        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->candidates)) {
+        if (__::x(($response??null)) && __::x(($response?->result??null)) && __::x(($response?->result?->candidates??null))) {
             foreach ($response->result->candidates as $candidates__value) {
-                if (__::x(@$candidates__value->content) && __::x(@$candidates__value->content->parts)) {
+                if (__::x(($candidates__value?->content??null)) && __::x(($candidates__value?->content?->parts??null))) {
                     $content = $candidates__value->content->parts;
 
                     $content = $this->truncateMcpToolResultContent($content);
@@ -2742,16 +2742,16 @@ class ai_gemini extends aihelper
         $this->log((int) round(strlen(json_encode($args)) / 3.5), 'ask with input token length');
         $this->log($args, 'ask');
         $response = $this->makeApiCall($args);
-        $this->log(@$response->result, 'response');
+        $this->log(($response?->result??null), 'response');
         $this->addCosts($response, $return);
 
         $output_text = $prev_output_text !== null ? $prev_output_text : '';
-        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->candidates)) {
+        if (__::x(($response??null)) && __::x(($response?->result??null)) && __::x(($response?->result?->candidates??null))) {
             foreach ($response->result->candidates as $candidates__value) {
-                if (__::x(@$candidates__value->content) && __::x(@$candidates__value->content->parts)) {
+                if (__::x(($candidates__value?->content??null)) && __::x(($candidates__value?->content?->parts??null))) {
                     foreach ($candidates__value->content->parts as $parts__value) {
-                        if (__::x(@$parts__value->text)) {
-                            if (__::x(@$output_text)) {
+                        if (__::x(($parts__value?->text??null))) {
+                            if (__::x(($output_text??null))) {
                                 $output_text .= PHP_EOL . PHP_EOL;
                             }
                             $output_text .= __::trim_whitespace($parts__value->text);
@@ -2764,10 +2764,10 @@ class ai_gemini extends aihelper
         if (__::nx($output_text)) {
             $this->log($response, 'failed');
             if (
-                __::x(@$response) &&
-                __::x(@$response->result) &&
-                __::x(@$response->result->error) &&
-                __::x(@$response->result->error->message) &&
+                __::x(($response??null)) &&
+                __::x(($response?->result??null)) &&
+                __::x(($response?->result?->error??null)) &&
+                __::x(($response?->result?->error?->message??null)) &&
                 is_string($response->result->error->message)
             ) {
                 $return['response'] = $response->result->error->message;
@@ -2920,9 +2920,9 @@ class ai_deepseek extends ai_claude
             timeout: $this->timeout
         );
         $this->log($response);
-        if (__::x(@$response) && __::x(@$response->result) && __::x(@$response->result->data)) {
+        if (__::x(($response??null)) && __::x(($response?->result??null)) && __::x(($response?->result?->data??null))) {
             foreach ($response->result->data as $data__value) {
-                if (__::x(@$data__value->id)) {
+                if (__::x(($data__value?->id??null))) {
                     $name = $data__value->id;
                     $max_tokens = 8192;
                     foreach ($this->models as $definedModel) {
@@ -2969,9 +2969,9 @@ class ai_lmstudio extends ai_chatgpt
         );
         $this->log($response);
         if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            __::x(@$response->result->models) &&
+            __::x(($response??null)) &&
+            __::x(($response?->result??null)) &&
+            __::x(($response?->result?->models??null)) &&
             is_array($response->result->models)
         ) {
             foreach ($response->result->models as $models__value) {
@@ -2979,7 +2979,7 @@ class ai_lmstudio extends ai_chatgpt
                 if (!isset($models__value->type) || $models__value->type !== 'llm') {
                     continue;
                 }
-                if (__::x(@$models__value->key)) {
+                if (__::x(($models__value?->key??null))) {
                     $max_tokens = 32768;
                     if (!empty($models__value->max_context_length)) {
                         $max_tokens = min((int) $models__value->max_context_length, 65536);
@@ -3009,9 +3009,9 @@ class ai_lmstudio extends ai_chatgpt
         // default context length; overridden by max_context_length from API if available
         $context_length = 32768;
         if (
-            __::x(@$response) &&
-            __::x(@$response->result) &&
-            __::x(@$response->result->models) &&
+            __::x(($response??null)) &&
+            __::x(($response?->result??null)) &&
+            __::x(($response?->result?->models??null)) &&
             is_array($response->result->models)
         ) {
             foreach ($response->result->models as $models__value) {
