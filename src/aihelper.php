@@ -34,19 +34,19 @@ abstract class aihelper
     protected static $sessions = [];
 
     public static function create(
-        $provider,
-        $model = null,
-        $temperature = null,
-        $timeout = null,
-        $api_key = null,
-        $log = null,
-        $max_tries = null,
-        $mcp_servers = null,
-        $session_id = null,
-        $history = null,
-        $stream = null,
-        $url = null
-    ) {
+        string $provider,
+        ?string $model = null,
+        ?float $temperature = null,
+        ?int $timeout = null,
+        ?string $api_key = null,
+        ?string $log = null,
+        ?int $max_tries = null,
+        ?array $mcp_servers = null,
+        ?string $session_id = null,
+        ?array $history = null,
+        ?bool $stream = null,
+        ?string $url = null
+    ): ?self {
         if ($provider === 'chatgpt') {
             return new ai_chatgpt(
                 model: $model,
@@ -155,7 +155,7 @@ abstract class aihelper
         return null;
     }
 
-    public static function getProviders()
+    public static function getProviders(): array
     {
         $data = [];
         foreach (
@@ -180,7 +180,7 @@ abstract class aihelper
         return $data;
     }
 
-    public static function getMcpOnlineStatus($url = null, $authorization_token = null)
+    public static function getMcpOnlineStatus(?string $url = null, ?string $authorization_token = null): bool
     {
         try {
             // add trailing slash to avoid 307 redirect
@@ -223,7 +223,7 @@ abstract class aihelper
         }
     }
 
-    public static function getMcpMetaInfo($url = null, $authorization_token = null)
+    public static function getMcpMetaInfo(?string $url = null, ?string $authorization_token = null): array
     {
         $data = [
             'name' => null,
@@ -327,8 +327,12 @@ abstract class aihelper
         }
     }
 
-    public static function callMcpTool($name = null, $args = [], $url = null, $authorization_token = null)
-    {
+    public static function callMcpTool(
+        ?string $name = null,
+        ?array $args = [],
+        ?string $url = null,
+        ?string $authorization_token = null
+    ): ?array {
         try {
             // add trailing slash to avoid 307 redirect
             if (substr($url, -1) !== '/') {
@@ -382,7 +386,7 @@ abstract class aihelper
         }
     }
 
-    protected function getDefaultModel()
+    protected function getDefaultModel(): ?string
     {
         foreach ($this->models as $models__value) {
             if ($models__value['default'] === true) {
@@ -393,17 +397,17 @@ abstract class aihelper
     }
 
     public function __construct(
-        $model = null,
-        $temperature = null,
-        $timeout = null,
-        $api_key = null,
-        $log = null,
-        $max_tries = null,
-        $mcp_servers = null,
-        $session_id = null,
-        $history = null,
-        $stream = null,
-        $url = null
+        ?string $model = null,
+        ?float $temperature = null,
+        ?int $timeout = null,
+        ?string $api_key = null,
+        ?string $log = null,
+        ?int $max_tries = null,
+        ?array $mcp_servers = null,
+        ?string $session_id = null,
+        ?array $history = null,
+        ?bool $stream = null,
+        ?string $url = null
     ) {
         if ($temperature === null) {
             $temperature = 1.0;
@@ -462,7 +466,7 @@ abstract class aihelper
         }
     }
 
-    public function ask($prompt = null, $files = null)
+    public function ask(?string $prompt = null, mixed $files = null): array
     {
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
         $max_tries = $this->max_tries;
@@ -486,19 +490,19 @@ abstract class aihelper
     abstract public function fetchModels(): array;
 
     abstract protected function askThis(
-        $prompt = null,
-        $files = null,
-        $add_prompt_to_session = true,
-        $prev_output_text = null,
-        $prev_costs = 0.0
-    );
+        ?string $prompt = null,
+        mixed $files = null,
+        bool $add_prompt_to_session = true,
+        ?string $prev_output_text = null,
+        float $prev_costs = 0.0
+    ): array;
 
     public function ping(): bool
     {
         return !empty($this->fetchModels());
     }
 
-    abstract protected function makeApiCall($args = null);
+    abstract protected function makeApiCall(?array $args = null): mixed;
 
     protected function applyTemperatureParameter(array $args, ?string $container_key = null): array
     {
@@ -533,16 +537,16 @@ abstract class aihelper
         return $args;
     }
 
-    protected function trimPrompt($prompt)
+    protected function trimPrompt(string $prompt): string
     {
         return __::trim_whitespace(__::trim_indentation($prompt));
     }
 
-    abstract protected function bringPromptInFormat($prompt, $files = null);
+    abstract protected function bringPromptInFormat(string $prompt, mixed $files = null): array;
 
-    abstract protected function addResponseToSession($response);
+    abstract protected function addResponseToSession(mixed $response): void;
 
-    protected function truncateMcpToolResultContent($content, $max_length = 500)
+    protected function truncateMcpToolResultContent(mixed $content, int $max_length = 500): mixed
     {
         if (!is_array($content)) {
             return $content;
@@ -614,7 +618,7 @@ abstract class aihelper
         return preg_replace('/\n{3,}/', "\n\n", $text);
     }
 
-    protected function parseJson($msg)
+    protected function parseJson(mixed $msg): mixed
     {
         if (strpos(trim($msg), '```json') === 0 || __::string_is_json($msg)) {
             $msg = json_decode(trim(rtrim(ltrim(ltrim(trim($msg), '```json'), '```'), '```')));
@@ -622,39 +626,39 @@ abstract class aihelper
         return $msg;
     }
 
-    public function enable_log($filename)
+    public function enable_log(string $filename): void
     {
         $this->log = $filename;
     }
 
-    public function disable_log()
+    public function disable_log(): void
     {
         $this->log = null;
     }
 
-    public function getSessionId()
+    public function getSessionId(): ?string
     {
         return $this->session_id;
     }
 
-    public function getSessionContent()
+    public function getSessionContent(): array
     {
         return self::$sessions[$this->session_id];
     }
 
-    public function prependPromptToSession($prompt, $files = null)
+    public function prependPromptToSession(string $prompt, mixed $files = null): void
     {
         $prompt = $this->trimPrompt($prompt);
         array_unshift(self::$sessions[$this->session_id], $this->bringPromptInFormat($prompt, $files));
     }
 
-    public function appendPromptToSession($prompt, $files = null)
+    public function appendPromptToSession(string $prompt, mixed $files = null): void
     {
         $prompt = $this->trimPrompt($prompt);
         self::$sessions[$this->session_id][] = $this->bringPromptInFormat($prompt, $files);
     }
 
-    public function log($msg, $prefix = null)
+    public function log(mixed $msg, ?string $prefix = null): void
     {
         if ($this->log !== null) {
             if (!is_string($msg)) {
@@ -691,7 +695,7 @@ abstract class aihelper
         }
     }
 
-    public function getTestModels()
+    public function getTestModels(): array
     {
         return array_map(
             function ($models__value) {
@@ -705,7 +709,7 @@ abstract class aihelper
         );
     }
 
-    protected function getMaxTokensForModel()
+    protected function getMaxTokensForModel(): int
     {
         foreach ($this->models as $models__value) {
             if ($models__value['name'] === $this->model) {
@@ -715,7 +719,7 @@ abstract class aihelper
         return 4096;
     }
 
-    protected function addCosts($response, &$return)
+    protected function addCosts(mixed $response, array &$return): void
     {
         //$this->log($response, 'add costs');
         //$this->log('response with length ' . strlen(json_encode($response)), 'add costs');
@@ -802,7 +806,7 @@ abstract class aihelper
         $return['output_tokens'] += $output_tokens;
     }
 
-    protected function getStreamCallback()
+    protected function getStreamCallback(): ?\Closure
     {
         if ($this->stream === false) {
             return null;
@@ -1842,7 +1846,7 @@ class ai_chatgpt extends aihelper
         return $models;
     }
 
-    protected function bringPromptInFormat($prompt, $files = null)
+    protected function bringPromptInFormat(string $prompt, mixed $files = null): array
     {
         $content = [];
 
@@ -1891,7 +1895,7 @@ class ai_chatgpt extends aihelper
         ];
     }
 
-    protected function addResponseToSession($response)
+    protected function addResponseToSession(mixed $response): void
     {
         if (
             __::x($response ?? null) &&
@@ -1931,12 +1935,12 @@ class ai_chatgpt extends aihelper
     }
 
     protected function askThis(
-        $prompt = null,
-        $files = null,
-        $add_prompt_to_session = true,
-        $prev_output_text = null,
-        $prev_costs = 0.0
-    ) {
+        ?string $prompt = null,
+        mixed $files = null,
+        bool $add_prompt_to_session = true,
+        ?string $prev_output_text = null,
+        float $prev_costs = 0.0
+    ): array {
         $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
         if (__::nx($this->model) || __::nx($this->session_id) || __::nx($prompt)) {
@@ -2059,7 +2063,7 @@ class ai_chatgpt extends aihelper
         return $return;
     }
 
-    protected function makeApiCall($args = null)
+    protected function makeApiCall(?array $args = null): mixed
     {
         return __::curl(
             url: $this->url . '/responses',
@@ -2213,7 +2217,7 @@ class ai_claude extends aihelper
         return $models;
     }
 
-    protected function bringPromptInFormat($prompt, $files = null)
+    protected function bringPromptInFormat(string $prompt, mixed $files = null): array
     {
         $content = [];
 
@@ -2253,7 +2257,7 @@ class ai_claude extends aihelper
         ];
     }
 
-    protected function addResponseToSession($response)
+    protected function addResponseToSession(mixed $response): void
     {
         if (
             __::x($response ?? null) &&
@@ -2305,12 +2309,12 @@ class ai_claude extends aihelper
     }
 
     protected function askThis(
-        $prompt = null,
-        $files = null,
-        $add_prompt_to_session = true,
-        $prev_output_text = null,
-        $prev_costs = 0.0
-    ) {
+        ?string $prompt = null,
+        mixed $files = null,
+        bool $add_prompt_to_session = true,
+        ?string $prev_output_text = null,
+        float $prev_costs = 0.0
+    ): array {
         $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
         if (__::nx($this->model) || __::nx($this->session_id) || __::nx($prompt)) {
@@ -2465,7 +2469,7 @@ class ai_claude extends aihelper
         return $return;
     }
 
-    protected function makeApiCall($args = null)
+    protected function makeApiCall(?array $args = null): mixed
     {
         return __::curl(
             url: $this->url . '/messages',
@@ -2680,7 +2684,7 @@ class ai_gemini extends aihelper
         return $models;
     }
 
-    protected function bringPromptInFormat($prompt, $files = null)
+    protected function bringPromptInFormat(string $prompt, mixed $files = null): array
     {
         $parts = [];
 
@@ -2716,7 +2720,7 @@ class ai_gemini extends aihelper
         ];
     }
 
-    protected function addResponseToSession($response)
+    protected function addResponseToSession(mixed $response): void
     {
         if (
             __::x($response ?? null) &&
@@ -2742,12 +2746,12 @@ class ai_gemini extends aihelper
     }
 
     protected function askThis(
-        $prompt = null,
-        $files = null,
-        $add_prompt_to_session = true,
-        $prev_output_text = null,
-        $prev_costs = 0.0
-    ) {
+        ?string $prompt = null,
+        mixed $files = null,
+        bool $add_prompt_to_session = true,
+        ?string $prev_output_text = null,
+        float $prev_costs = 0.0
+    ): array {
         $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
         if (__::nx($this->model) || __::nx($this->session_id) || __::nx($prompt)) {
@@ -2819,7 +2823,7 @@ class ai_gemini extends aihelper
         return $return;
     }
 
-    protected function makeApiCall($args = null)
+    protected function makeApiCall(?array $args = null): mixed
     {
         return __::curl(
             url: $this->url . '/models/' . $this->model . ':generateContent?key=' . $this->api_key,
@@ -3024,7 +3028,7 @@ class ai_lmstudio extends ai_chatgpt
         return $models;
     }
 
-    protected function loadModel($model): void
+    protected function loadModel(?string $model): void
     {
         if (empty($model)) {
             return;
@@ -3075,7 +3079,7 @@ class ai_lmstudio extends ai_chatgpt
         $this->log($response);
     }
 
-    protected function makeApiCall($args = null)
+    protected function makeApiCall(?array $args = null): mixed
     {
         $model_name = strtolower($this->model ?? '');
         $uses_tools = !empty($args['tools']) && is_array($args['tools']);
@@ -3263,7 +3267,7 @@ class ai_test extends ai_claude
         }, $this->models);
     }
 
-    protected function makeApiCall($args = null)
+    protected function makeApiCall(?array $args = null): mixed
     {
         static $call_count = 0;
         if ($call_count > 0) {
