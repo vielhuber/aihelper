@@ -1919,8 +1919,8 @@ class ai_chatgpt extends aihelper
                         'role' => 'assistant',
                         'content' => $content
                     ];
-                } elseif (!in_array($output__value->type, ['mcp_list_tools', 'reasoning'])) {
-                    // include tool call/result items so the model has full context for the next turn;
+                } elseif (!in_array($output__value->type, ['mcp_call', 'mcp_list_tools', 'reasoning'])) {
+                    // mcp_call is excluded: the API does not accept it as input in follow-up requests;
                     // mcp_list_tools is excluded (re-discovered fresh on each call);
                     // reasoning is excluded because the API requires it to be followed by a message item —
                     // if that message is missing or empty, storing reasoning alone causes an API error

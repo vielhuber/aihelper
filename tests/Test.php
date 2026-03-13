@@ -24,8 +24,8 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function isCi()
     {
-        return ($_SERVER['CI']??'') == 'true' ||
-            ($_ENV['CI']??'') == 'true' ||
+        return ($_SERVER['CI'] ?? '') == 'true' ||
+            ($_ENV['CI'] ?? '') == 'true' ||
             getenv('CI') == 'true' ||
             getenv('ACT_TOOLSDIRECTORY') != '';
     }
@@ -529,15 +529,15 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        if (($_SERVER['MCP_SERVER_TEST']??'') == '1') {
+        if (($_SERVER['MCP_SERVER_TEST'] ?? '') == '1') {
             $supported = in_array($provider, ['claude', 'chatgpt', 'lmstudio']);
             if ($supported === true) {
                 $return = __::curl(
-                    ($_SERVER['MCP_SERVER_TEST_AUTH_URL']??''),
+                    $_SERVER['MCP_SERVER_TEST_AUTH_URL'] ?? '',
                     [
-                        'client_id' => ($_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID']??''),
-                        'client_secret' => ($_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET']??''),
-                        'audience' => ($_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE']??''),
+                        'client_id' => $_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'] ?? '',
+                        'client_secret' => $_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'] ?? '',
+                        'audience' => $_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'] ?? '',
                         'grant_type' => 'client_credentials'
                     ],
                     'POST'
@@ -546,7 +546,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 $i_url = 1;
                 $i_prompt = 1;
                 $mcp_servers = [];
-                while (($_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL']??'') != '') {
+                while (($_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] ?? '') != '') {
                     $mcp_servers[] = [
                         'url' => $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
                         'authorization_token' => $return->result->access_token
@@ -565,8 +565,8 @@ class Test extends \PHPUnit\Framework\TestCase
                     mcp_servers: $mcp_servers
                 );
                 while (
-                    ($_SERVER['MCP_SERVER_TEST_PROMPT_' . $i_prompt]??'') != '' &&
-                    ($_SERVER['MCP_SERVER_TEST_ANSWER_' . $i_prompt]??'') != ''
+                    ($_SERVER['MCP_SERVER_TEST_PROMPT_' . $i_prompt] ?? '') != '' &&
+                    ($_SERVER['MCP_SERVER_TEST_ANSWER_' . $i_prompt] ?? '') != ''
                 ) {
                     $return = $ai_mcp->ask($_SERVER['MCP_SERVER_TEST_PROMPT_' . $i_prompt]);
                     $success_this =
@@ -629,23 +629,23 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__ai_mcp_meta_tools()
     {
-        if (($_SERVER['MCP_SERVER_TEST']??'') != '1') {
+        if (($_SERVER['MCP_SERVER_TEST'] ?? '') != '1') {
             $this->markTestSkipped('Skipped.');
         }
 
         $return = __::curl(
-            ($_SERVER['MCP_SERVER_TEST_AUTH_URL']??''),
+            $_SERVER['MCP_SERVER_TEST_AUTH_URL'] ?? '',
             [
-                'client_id' => ($_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID']??''),
-                'client_secret' => ($_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET']??''),
-                'audience' => ($_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE']??''),
+                'client_id' => $_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'] ?? '',
+                'client_secret' => $_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'] ?? '',
+                'audience' => $_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'] ?? '',
                 'grant_type' => 'client_credentials'
             ],
             'POST'
         );
         //$this->log('token: ' . $return->result->access_token);
         $i_url = 1;
-        while (($_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL']??'') != '') {
+        while (($_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] ?? '') != '') {
             $status = aihelper::getMcpOnlineStatus(
                 $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
                 $return->result->access_token
@@ -670,7 +670,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->assertTrue($meta['instructions'] !== '');
             $this->assertTrue(!empty($meta['tools']) && count($meta['tools']) > 0);
 
-            if (($_SERVER['MCP_SERVER_TEST_' . $i_url . '_TOOL']??'') != '') {
+            if (($_SERVER['MCP_SERVER_TEST_' . $i_url . '_TOOL'] ?? '') != '') {
                 $tool_response = aihelper::callMcpTool(
                     $_SERVER['MCP_SERVER_TEST_' . $i_url . '_TOOL'],
                     null,
@@ -709,16 +709,16 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__ai_mcp_response_times()
     {
-        if (($_SERVER['MCP_SERVER_TEST']??'') != '1') {
+        if (($_SERVER['MCP_SERVER_TEST'] ?? '') != '1') {
             $this->markTestSkipped('Skipped.');
         }
 
         $return = __::curl(
-            ($_SERVER['MCP_SERVER_TEST_AUTH_URL']??''),
+            $_SERVER['MCP_SERVER_TEST_AUTH_URL'] ?? '',
             [
-                'client_id' => ($_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID']??''),
-                'client_secret' => ($_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET']??''),
-                'audience' => ($_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE']??''),
+                'client_id' => $_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'] ?? '',
+                'client_secret' => $_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'] ?? '',
+                'audience' => $_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'] ?? '',
                 'grant_type' => 'client_credentials'
             ],
             'POST'
@@ -728,7 +728,7 @@ class Test extends \PHPUnit\Framework\TestCase
         for ($run = 1; $run <= 2; $run++) {
             $mcp_servers_all = [];
             $i_cur = 1;
-            while (($_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL']??'') != '') {
+            while (($_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'] ?? '') != '') {
                 $mcp_servers_all[] = $_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'];
                 $i_cur++;
             }
@@ -751,7 +751,7 @@ class Test extends \PHPUnit\Framework\TestCase
                     provider: 'claude',
                     model: 'claude-haiku-4-5',
                     temperature: 1.0,
-                    api_key: ($_SERVER['CLAUDE_API_KEY']??''),
+                    api_key: $_SERVER['CLAUDE_API_KEY'] ?? '',
                     session_id: null,
                     log: 'tests/aihelper.log',
                     timeout: 60 * 30,
@@ -782,9 +782,59 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
+    function test__ai_mcp_response_format()
+    {
+        if (($_SERVER['MCP_SERVER_TEST'] ?? '') != '1') {
+            $this->markTestSkipped('Skipped.');
+        }
+
+        $return = __::curl(
+            $_SERVER['MCP_SERVER_TEST_AUTH_URL'] ?? '',
+            [
+                'client_id' => $_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'] ?? '',
+                'client_secret' => $_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'] ?? '',
+                'audience' => $_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'] ?? '',
+                'grant_type' => 'client_credentials'
+            ],
+            'POST'
+        );
+        $access_token = $return->result->access_token;
+
+        $mcp_servers = [];
+        $i_cur = 1;
+        while (($_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'] ?? '') != '') {
+            $url = $_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'];
+            // replace chat id with random number
+            $url = str_replace('[CHAT_ID]', '[' . rand(100000, 999999) . ']', $url);
+            $mcp_servers[] = [
+                'url' => $url,
+                'authorization_token' => $access_token
+            ];
+            $i_cur++;
+        }
+        $ai_mcp = aihelper::create(
+            provider: 'lmstudio',
+            model: 'qwen3.5-27b-ud',
+            temperature: 0.3,
+            api_key: $_SERVER['LMSTUDIO_API_KEY'] ?? '',
+            session_id: null,
+            log: 'tests/aihelper.log',
+            timeout: 60 * 30,
+            max_tries: 1,
+            mcp_servers: $mcp_servers,
+            stream: false,
+            url: $_SERVER['LMSTUDIO_URL'] ?? null
+        );
+        $return = $ai_mcp->ask('Hallo. Welche Dateien liegen in /tmp?');
+        $return = $ai_mcp->ask('Was ist 7+4?');
+        $this->assertTrue(mb_strpos($return['response'], '11') !== false);
+        $return = $ai_mcp->ask('Wie lautete das Ergebnis vorher?');
+        $this->assertTrue(mb_strpos($return['response'], '11') !== false);
+    }
+
     function test__ai_mcp_long_running_task()
     {
-        if (($_SERVER['MCP_SERVER_TEST']??'') != '1') {
+        if (($_SERVER['MCP_SERVER_TEST'] ?? '') != '1') {
             $this->markTestSkipped('Skipped.');
         }
 
@@ -794,11 +844,11 @@ class Test extends \PHPUnit\Framework\TestCase
         }
 
         $return = __::curl(
-            ($_SERVER['MCP_SERVER_TEST_AUTH_URL']??''),
+            $_SERVER['MCP_SERVER_TEST_AUTH_URL'] ?? '',
             [
-                'client_id' => ($_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID']??''),
-                'client_secret' => ($_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET']??''),
-                'audience' => ($_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE']??''),
+                'client_id' => $_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'] ?? '',
+                'client_secret' => $_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'] ?? '',
+                'audience' => $_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'] ?? '',
                 'grant_type' => 'client_credentials'
             ],
             'POST'
@@ -807,7 +857,7 @@ class Test extends \PHPUnit\Framework\TestCase
         //$this->log('token: ' . $return->result->access_token);
         $i_url = 1;
         $mcp_servers = [];
-        while (($_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL']??'') != '') {
+        while (($_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] ?? '') != '') {
             $mcp_servers[] = [
                 'url' => $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
                 'authorization_token' => $return->result->access_token
@@ -831,7 +881,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 //model: 'claude-sonnet-4-5',
                 //model: 'claude-3-haiku-20240307',
                 temperature: 1.0,
-                api_key: ($_SERVER['CLAUDE_API_KEY']??''),
+                api_key: $_SERVER['CLAUDE_API_KEY'] ?? '',
                 session_id: null,
                 log: 'tests/aihelper.log',
                 timeout: 60 * 30,
