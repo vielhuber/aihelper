@@ -421,6 +421,9 @@ abstract class aihelper
         if ($url !== null) {
             $this->url = $url;
         }
+        if ($api_key !== null) {
+            $this->api_key = $api_key;
+        }
         if (empty($this->models) && method_exists($this, 'fetchModels')) {
             foreach ($this->fetchModels() as $models__key => $models__value) {
                 $this->models[] = [
@@ -452,7 +455,6 @@ abstract class aihelper
         $this->model = $model;
         $this->temperature = $temperature;
         $this->timeout = $timeout;
-        $this->api_key = $api_key;
         if (__::nx($session_id)) {
             $this->session_id = md5(uniqid());
         } else {
