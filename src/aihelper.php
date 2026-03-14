@@ -3178,9 +3178,10 @@ class ai_lmstudio extends ai_chatgpt
             }
         }
 
-        if (str_contains($model_name, 'qwen3')) {
+        if (str_contains($model_name, 'qwen3') && $profile !== 'reasoning' && $profile !== 'creative') {
             // qwen3.5 variants in lmstudio do not reliably follow /no_think,
-            // so keep the empty <think> priming trick in the responses api input format
+            // so keep the empty <think> priming trick in the responses api input format;
+            // skip for reasoning and creative profiles where thinking is beneficial
             if (!empty($args['input']) && is_array($args['input'])) {
                 $has_empty_think_priming = false;
                 foreach ($args['input'] as $input_item) {
