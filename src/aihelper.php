@@ -2009,6 +2009,9 @@ class ai_chatgpt extends aihelper
             $args['stream'] = true;
         }
 
+        if (method_exists($this, 'modifyArgs')) {
+            $args = $this->modifyArgs($args);
+        }
         $this->log((int) round(strlen(json_encode($args)) / 3.5), 'ask with input token length');
         $this->log($args, 'ask');
         $response = $this->makeApiCall($args);
@@ -2358,6 +2361,9 @@ class ai_claude extends aihelper
             $args['stream'] = true;
         }
 
+        if (method_exists($this, 'modifyArgs')) {
+            $args = $this->modifyArgs($args);
+        }
         $this->log((int) round(strlen(json_encode($args)) / 3.5), 'ask with input token length');
         $this->log($args, 'ask');
         $response = $this->makeApiCall($args);
@@ -2771,6 +2777,10 @@ class ai_gemini extends aihelper
             'contents' => self::$sessions[$this->session_id]
         ];
         $args = $this->applyTemperatureParameter($args, 'generationConfig');
+
+        if (method_exists($this, 'modifyArgs')) {
+            $args = $this->modifyArgs($args);
+        }
         $this->log((int) round(strlen(json_encode($args)) / 3.5), 'ask with input token length');
         $this->log($args, 'ask');
         $response = $this->makeApiCall($args);
@@ -3081,7 +3091,7 @@ class ai_lmstudio extends ai_chatgpt
         $this->log($response);
     }
 
-    protected function makeApiCall(?array $args = null): mixed
+    protected function modifyArgs(?array $args): ?array
     {
         $model_name = strtolower($this->model ?? '');
         $uses_tools = !empty($args['tools']) && is_array($args['tools']);
@@ -3135,7 +3145,7 @@ class ai_lmstudio extends ai_chatgpt
                     $args['top_p'] = 0.8;
                 }
                 if (!isset($args['top_k'])) {
-                    $args['top_k'] = 10;
+                    $args['top_k'] = 20;
                 }
             } elseif ($profile === 'reasoning' || $profile === 'creative') {
                 if (!isset($args['top_p'])) {
@@ -3233,7 +3243,7 @@ class ai_lmstudio extends ai_chatgpt
         unset($args['reasoning']);
         unset($args['ttl']);
 
-        return parent::makeApiCall($args);
+        return $args;
     }
 }
 
