@@ -19,6 +19,7 @@ $ai = aihelper::create(
     model: $_GET['model'],
     temperature: 1.0,
     api_key: $_SERVER[$_GET['api_key']] ?? '',
+    url: isset($_GET['url']) && $_GET['url'] != '' ? $_SERVER[$_GET['url']] ?? '' : null,
     log: $_GET['log'],
     stream: true
 );
