@@ -982,6 +982,13 @@ abstract class aihelper
                                             $block->thinking = '';
                                         }
                                         $block->thinking .= $parsed['delta']['thinking'];
+                                        echo "event: reasoning\n";
+                                        echo 'data: ' . json_encode(['delta' => $parsed['delta']['thinking']]) . "\n\n";
+                                        if (ob_get_level() > 0) {
+                                            ob_flush();
+                                        }
+                                        flush();
+                                        $this->stream_running = false;
                                     }
                                 }
                             }
@@ -1166,6 +1173,18 @@ abstract class aihelper
                                 $this->stream_first_text_sent = false;
                             }
 
+                            if (isset($parsed['type']) && $parsed['type'] === 'response.reasoning_summary_text.delta') {
+                                if (isset($parsed['delta']) && $parsed['delta'] !== '') {
+                                    echo "event: reasoning\n";
+                                    echo 'data: ' . json_encode(['delta' => $parsed['delta']]) . "\n\n";
+                                    if (ob_get_level() > 0) {
+                                        ob_flush();
+                                    }
+                                    flush();
+                                    $this->stream_running = false;
+                                }
+                            }
+
                             if (isset($parsed['type']) && $parsed['type'] === 'response.output_text.delta') {
                                 if (isset($parsed['delta'])) {
                                     $text = $parsed['delta'];
@@ -1257,9 +1276,18 @@ abstract class aihelper
             ob_end_clean();
         }
         // set php settings
-        try { ini_set('zlib.output_compression', '0'); } catch (\ValueError $e) {}
-        try { ini_set('output_buffering', '0'); } catch (\ValueError $e) {}
-        try { ini_set('implicit_flush', '1'); } catch (\ValueError $e) {}
+        try {
+            ini_set('zlib.output_compression', '0');
+        } catch (\ValueError $e) {
+        }
+        try {
+            ini_set('output_buffering', '0');
+        } catch (\ValueError $e) {
+        }
+        try {
+            ini_set('implicit_flush', '1');
+        } catch (\ValueError $e) {
+        }
         // 2k padding (for browsers)
         ob_implicit_flush(true);
         echo ': pad ' . str_repeat(' ', 2048) . "\n\n";
@@ -2074,6 +2102,18 @@ class ai_chatgpt extends aihelper
         return $return;
     }
 
+    protected function modifyArgs(?array $args): ?array
+    {
+        $model_name = strtolower($this->model ?? '');
+        $is_o_model = preg_match('/^(o1|o3|o4)(-|$)/', $model_name) === 1;
+        if ($is_o_model) {
+            $args['reasoning'] = ['effort' => 'medium', 'summary' => 'detailed'];
+        } else {
+            unset($args['reasoning']);
+        }
+        return $args;
+    }
+
     protected function makeApiCall(?array $args = null): mixed
     {
         return __::curl(
@@ -2483,6 +2523,20 @@ class ai_claude extends aihelper
         return $return;
     }
 
+    protected function modifyArgs(?array $args): ?array
+    {
+        $model_name = strtolower($this->model ?? '');
+        $supports_thinking = str_contains($model_name, 'sonnet') || str_contains($model_name, 'opus');
+
+        if ($supports_thinking) {
+            $args['thinking'] = ['type' => 'enabled', 'budget_tokens' => 10000];
+            // temperature must be 1 when thinking is enabled
+            $args['temperature'] = 1.0;
+        }
+
+        return $args;
+    }
+
     protected function makeApiCall(?array $args = null): mixed
     {
         return __::curl(
@@ -2492,7 +2546,7 @@ class ai_claude extends aihelper
             headers: [
                 'x-api-key' => $this->api_key,
                 'anthropic-version' => '2023-06-01',
-                'anthropic-beta' => 'mcp-client-2025-04-04'
+                'anthropic-beta' => 'mcp-client-2025-04-04,interleaved-thinking-2025-05-14'
             ],
             timeout: $this->timeout,
             stream_callback: $this->getStreamCallback()
