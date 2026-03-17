@@ -912,9 +912,9 @@ abstract class aihelper
                                             ]) .
                                             "\n\n";
                                         if (ob_get_level() > 0) {
-                                            @ob_flush();
+                                            ob_flush();
                                         }
-                                        @flush();
+                                        flush();
                                         $this->stream_running = false;
                                     }
                                 }
@@ -961,9 +961,9 @@ abstract class aihelper
                                             ]) .
                                             "\n\n";
                                         if (ob_get_level() > 0) {
-                                            @ob_flush();
+                                            ob_flush();
                                         }
-                                        @flush();
+                                        flush();
                                         $this->stream_running = false;
                                     }
 
@@ -1025,9 +1025,9 @@ abstract class aihelper
                                             ]) .
                                             "\n\n";
                                         if (ob_get_level() > 0) {
-                                            @ob_flush();
+                                            ob_flush();
                                         }
-                                        @flush();
+                                        flush();
                                         $this->stream_running = false;
                                     }
                                 }
@@ -1059,9 +1059,9 @@ abstract class aihelper
                                     sleep(2);
                                     echo "data: [DONE]\n\n";
                                     if (ob_get_level() > 0) {
-                                        @ob_flush();
+                                        ob_flush();
                                     }
-                                    @flush();
+                                    flush();
                                     $this->stream_running = false;
                                 }
                             }
@@ -1071,9 +1071,9 @@ abstract class aihelper
                             if ($this->stream_running) {
                                 echo ": keepalive\n\n";
                                 if (ob_get_level() > 0) {
-                                    @ob_flush();
+                                    ob_flush();
                                 }
-                                @flush();
+                                flush();
                             }
                         }
 
@@ -1193,9 +1193,9 @@ abstract class aihelper
                                         ]) .
                                         "\n\n";
                                     if (ob_get_level() > 0) {
-                                        @ob_flush();
+                                        ob_flush();
                                     }
-                                    @flush();
+                                    flush();
                                     $this->stream_running = false;
                                 }
                             }
@@ -1216,9 +1216,9 @@ abstract class aihelper
                                 sleep(2);
                                 echo "data: [DONE]\n\n";
                                 if (ob_get_level() > 0) {
-                                    @ob_flush();
+                                    ob_flush();
                                 }
-                                @flush();
+                                flush();
                                 $this->stream_running = false;
                             }
 
@@ -1227,9 +1227,9 @@ abstract class aihelper
                             if ($this->stream_running) {
                                 echo ": keepalive\n\n";
                                 if (ob_get_level() > 0) {
-                                    @ob_flush();
+                                    ob_flush();
                                 }
-                                @flush();
+                                flush();
                             }
                         }
 
@@ -1254,19 +1254,19 @@ abstract class aihelper
         }
         $initial_ob_level = ob_get_level();
         while (ob_get_level() > $initial_ob_level) {
-            @ob_end_clean();
+            ob_end_clean();
         }
         // set php settings
-        @ini_set('zlib.output_compression', '0');
-        @ini_set('output_buffering', '0');
-        @ini_set('implicit_flush', '1');
+        try { ini_set('zlib.output_compression', '0'); } catch (\ValueError $e) {}
+        try { ini_set('output_buffering', '0'); } catch (\ValueError $e) {}
+        try { ini_set('implicit_flush', '1'); } catch (\ValueError $e) {}
         // 2k padding (for browsers)
-        @ob_implicit_flush(true);
+        ob_implicit_flush(true);
         echo ': pad ' . str_repeat(' ', 2048) . "\n\n";
         if (ob_get_level() > 0) {
-            @ob_flush();
+            ob_flush();
         }
-        @flush();
+        flush();
 
         return $stream_callback;
     }

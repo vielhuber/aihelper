@@ -11,7 +11,9 @@ if (!isset($_GET['provider']) || !isset($_GET['model']) || !isset($_GET['api_key
     die();
 }
 
-@unlink($_GET['log']);
+if (file_exists($_GET['log'])) {
+    unlink($_GET['log']);
+}
 $ai = aihelper::create(
     provider: $_GET['provider'],
     model: $_GET['model'],
