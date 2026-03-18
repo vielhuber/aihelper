@@ -994,6 +994,11 @@ abstract class aihelper
                                         flush();
                                         $this->stream_running = false;
                                     }
+
+                                    // handle signature delta (required for multi-turn: thinking blocks must be resent with valid signature)
+                                    if (isset($parsed['delta']['signature'])) {
+                                        $block->signature = $parsed['delta']['signature'];
+                                    }
                                 }
                             }
 
@@ -1506,6 +1511,38 @@ class ai_chatgpt extends aihelper
             'name' => 'gpt-5.4-pro-2026-03-05',
             'max_tokens' => 272000,
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
+            'supports_temperature' => false,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-mini',
+            'max_tokens' => 128000,
+            'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
+            'supports_temperature' => false,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-mini-2026-03-17',
+            'max_tokens' => 128000,
+            'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
+            'supports_temperature' => false,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-nano',
+            'max_tokens' => 32768,
+            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
+            'supports_temperature' => false,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-nano-2026-03-17',
+            'max_tokens' => 32768,
+            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'supports_temperature' => false,
             'default' => false,
             'test' => false
@@ -2173,7 +2210,8 @@ class ai_chatgpt extends aihelper
     {
         $model_name = strtolower($this->model ?? '');
         $is_o_model = preg_match('/^(o1|o3|o4)(-|$)/', $model_name) === 1;
-        if ($is_o_model) {
+        $is_o1_pro = preg_match('/^o1-pro/', $model_name) === 1;
+        if ($is_o_model && !$is_o1_pro) {
             $args['reasoning'] = ['effort' => 'medium', 'summary' => 'detailed'];
         } else {
             unset($args['reasoning']);
