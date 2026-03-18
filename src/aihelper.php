@@ -3398,10 +3398,13 @@ class ai_lmstudio extends ai_chatgpt
             }
         }
 
-        if (str_contains($model_name, 'qwen3') && $profile !== 'reasoning' && $profile !== 'creative') {
-            // qwen3.5 variants in lmstudio do not reliably follow /no_think,
-            // so keep the empty <think> priming trick in the responses api input format;
-            // skip for reasoning and creative profiles — reasoning.effort handles those (requires LM Studio >= 0.4.7)
+        if (str_contains($model_name, 'qwen3')) {
+            // qwen3.5 variants in lmstudio do not reliably follow /no_think;
+            // reasoning.effort (low/medium/high) is only a sampler hint — NOT a hard token budget,
+            // meaning the model burns the full max_output_tokens on thinking regardless;
+            // the only reliable way to prevent runaway thinking is the empty <think> priming trick;
+            // TODO: once lmstudio exposes a hard per-request thinking token limit (budget_tokens or similar),
+            // this can be replaced with selective thinking for reasoning/creative profiles
             if (!empty($args['input']) && is_array($args['input'])) {
                 $has_empty_think_priming = false;
                 foreach ($args['input'] as $input_item) {
@@ -3478,11 +3481,8 @@ class ai_lmstudio extends ai_chatgpt
         unset($args['reasoning']);
         unset($args['ttl']);
 
-        // for creative qwen3.5, use low reasoning effort to keep thinking short;
-        // requires LM Studio >= 0.4.7 Build 1 (reasoning.effort on /v1/responses)
-        if (str_contains($model_name, 'qwen3.5') && !$uses_tools && $profile === 'creative') {
-            $args['reasoning'] = ['effort' => 'low'];
-        }
+        // reasoning.effort is intentionally NOT set here — it is only a sampler hint in LM Studio
+        // and has no measurable effect on how many tokens the model spends thinking
 
         return $args;
     }
