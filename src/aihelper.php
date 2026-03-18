@@ -29,6 +29,8 @@ abstract class aihelper
     protected $stream_current_block_type = null;
     protected $stream_first_text_sent = false;
     protected $stream_running = false;
+    protected $stream_in_think = false;
+    protected $stream_think_tag_buf = '';
 
     protected $session_id = null;
     protected static $sessions = [];
@@ -826,6 +828,8 @@ abstract class aihelper
         $this->stream_current_block_type = null;
         $this->stream_first_text_sent = false;
         $this->stream_running = false;
+        $this->stream_in_think = false;
+        $this->stream_think_tag_buf = '';
 
         if ($this->name === 'claude' || $this->name === 'test') {
             // mimic non stream result
@@ -1173,7 +1177,13 @@ abstract class aihelper
                                 $this->stream_first_text_sent = false;
                             }
 
-                            if (isset($parsed['type']) && $parsed['type'] === 'response.reasoning_summary_text.delta') {
+                            // response.reasoning_summary_text.delta = OpenAI o3 condensed reasoning
+                            // response.reasoning_text.delta = LM Studio native reasoning (e.g. Qwen3.5)
+                            if (
+                                isset($parsed['type']) &&
+                                ($parsed['type'] === 'response.reasoning_summary_text.delta' ||
+                                    $parsed['type'] === 'response.reasoning_text.delta')
+                            ) {
                                 if (isset($parsed['delta']) && $parsed['delta'] !== '') {
                                     echo "event: reasoning\n";
                                     echo 'data: ' . json_encode(['delta' => $parsed['delta']]) . "\n\n";
@@ -1187,28 +1197,85 @@ abstract class aihelper
 
                             if (isset($parsed['type']) && $parsed['type'] === 'response.output_text.delta') {
                                 if (isset($parsed['delta'])) {
-                                    $text = $parsed['delta'];
-                                    $existing_text = $this->stream_response->result->output[0]->content[0]->text;
+                                    $raw = $parsed['delta'];
 
-                                    // strip leading newlines from the very first text chunk
-                                    $text = $this->normalizeStreamTextDelta(
-                                        $text,
-                                        $existing_text,
-                                        !$this->stream_first_text_sent
-                                    );
-                                    if ($text === '') {
+                                    // split delta into normal text and <think>...</think> reasoning parts
+                                    $pending = $this->stream_think_tag_buf . $raw;
+                                    $this->stream_think_tag_buf = '';
+                                    $normal_text = '';
+                                    $reasoning_text = '';
+
+                                    while ($pending !== '') {
+                                        $tag = $this->stream_in_think ? '<\/think>' : '<think>';
+                                        $pos = strpos($pending, $this->stream_in_think ? '</think>' : '<think>');
+                                        if ($pos !== false) {
+                                            if ($this->stream_in_think) {
+                                                $reasoning_text .= substr($pending, 0, $pos);
+                                                $this->stream_in_think = false;
+                                                $pending = substr($pending, $pos + strlen('</think>'));
+                                            } else {
+                                                $normal_text .= substr($pending, 0, $pos);
+                                                $this->stream_in_think = true;
+                                                $pending = substr($pending, $pos + strlen('<think>'));
+                                            }
+                                        } else {
+                                            // no closing/opening tag found; buffer partial tag at end
+                                            $max_len = strlen($this->stream_in_think ? '</think>' : '<think>') - 1;
+                                            $buf_len = 0;
+                                            for ($i = min($max_len, strlen($pending)); $i >= 1; $i--) {
+                                                $tail = substr($pending, -$i);
+                                                if (strpos('<think>', $tail) === 0 || strpos('</think>', $tail) === 0) {
+                                                    $buf_len = $i;
+                                                    break;
+                                                }
+                                            }
+                                            if ($buf_len > 0) {
+                                                $this->stream_think_tag_buf = substr($pending, -$buf_len);
+                                                $pending = substr($pending, 0, strlen($pending) - $buf_len);
+                                            }
+                                            if ($this->stream_in_think) {
+                                                $reasoning_text .= $pending;
+                                            } else {
+                                                $normal_text .= $pending;
+                                            }
+                                            break;
+                                        }
+                                    }
+
+                                    if ($reasoning_text !== '') {
+                                        echo "event: reasoning\n";
+                                        echo 'data: ' . json_encode(['delta' => $reasoning_text]) . "\n\n";
+                                        if (ob_get_level() > 0) {
+                                            ob_flush();
+                                        }
+                                        flush();
+                                        $this->stream_running = false;
+                                    }
+
+                                    if ($normal_text !== '') {
+                                        $existing_text = $this->stream_response->result->output[0]->content[0]->text;
+
+                                        // strip leading newlines from the very first text chunk
+                                        $normal_text = $this->normalizeStreamTextDelta(
+                                            $normal_text,
+                                            $existing_text,
+                                            !$this->stream_first_text_sent
+                                        );
+                                    }
+
+                                    if ($normal_text === '') {
                                         $this->stream_buffer_data = '';
                                         $this->stream_event = null;
                                         continue;
                                     }
                                     $this->stream_first_text_sent = true;
 
-                                    $this->stream_response->result->output[0]->content[0]->text .= $text;
+                                    $this->stream_response->result->output[0]->content[0]->text .= $normal_text;
 
                                     echo 'data: ' .
                                         json_encode([
                                             'id' => uniqid(),
-                                            'choices' => [['delta' => ['content' => $text]]]
+                                            'choices' => [['delta' => ['content' => $normal_text]]]
                                         ]) .
                                         "\n\n";
                                     if (ob_get_level() > 0) {
@@ -3184,9 +3251,51 @@ class ai_lmstudio extends ai_chatgpt
             $prompt_text = mb_strtolower(trim($prompt_text));
 
             if ($prompt_text !== '') {
-                if (str_contains($prompt_text, 'geschichte')) {
+                $creative_keywords = [
+                    'geschichte',
+                    'kreativ',
+                    'gedicht',
+                    'erzähl',
+                    'schreib',
+                    'story',
+                    'märchen',
+                    'roman',
+                    'szene',
+                    'witz',
+                    'witzig',
+                    'lustig',
+                    'ulkig',
+                    'humor',
+                    'komisch'
+                ];
+                $reasoning_keywords = [
+                    'denke',
+                    'überlege',
+                    'analysiere',
+                    'erkläre',
+                    'warum',
+                    'berechne',
+                    'löse',
+                    'beweise',
+                    'vergleiche',
+                    'schlussfolgere'
+                ];
+                $is_creative = array_reduce(
+                    $creative_keywords,
+                    fn($carry, $kw) => $carry || str_contains($prompt_text, $kw),
+                    false
+                );
+                $is_reasoning =
+                    !$is_creative &&
+                    (array_reduce(
+                        $reasoning_keywords,
+                        fn($carry, $kw) => $carry || str_contains($prompt_text, $kw),
+                        false
+                    ) ||
+                        preg_match('/\d+\s*[\*\+\-x\/]\s*\d+/', $prompt_text) === 1);
+                if ($is_creative) {
                     $profile = 'creative';
-                } elseif (preg_match('/\d+\s*[\*\+\-x\/]\s*\d+/', $prompt_text) === 1) {
+                } elseif ($is_reasoning) {
                     $profile = 'reasoning';
                 }
             }
@@ -3207,6 +3316,10 @@ class ai_lmstudio extends ai_chatgpt
                 if (!isset($args['top_k'])) {
                     $args['top_k'] = 20;
                 }
+                // presence_penalty=1.5 per qwen team recommendation (thinking mode, general tasks)
+                if (!isset($args['presence_penalty'])) {
+                    $args['presence_penalty'] = 1.5;
+                }
             } elseif ($profile === 'reasoning' || $profile === 'creative') {
                 if (!isset($args['top_p'])) {
                     $args['top_p'] = 0.95;
@@ -3214,12 +3327,21 @@ class ai_lmstudio extends ai_chatgpt
                 if (!isset($args['top_k'])) {
                     $args['top_k'] = 20;
                 }
+                // presence_penalty=1.5 per qwen team recommendation (thinking mode, general tasks);
+                // this penalises already-seen tokens and is the primary lever against infinite thinking loops
+                if (!isset($args['presence_penalty'])) {
+                    $args['presence_penalty'] = 1.5;
+                }
             } else {
                 if (!isset($args['top_p'])) {
                     $args['top_p'] = 0.8;
                 }
                 if (!isset($args['top_k'])) {
                     $args['top_k'] = 20;
+                }
+                // presence_penalty=1.5 per qwen team recommendation (thinking mode, general tasks)
+                if (!isset($args['presence_penalty'])) {
+                    $args['presence_penalty'] = 1.5;
                 }
             }
         } elseif (str_contains($model_name, 'qwen3')) {
@@ -3291,6 +3413,20 @@ class ai_lmstudio extends ai_chatgpt
             }
             if (!isset($args['max_tool_calls'])) {
                 $args['max_tool_calls'] = 30;
+            }
+        }
+
+        if (str_contains($model_name, 'qwen3.5') && !$uses_tools && $profile === 'creative') {
+            // reasoning + response share the max_output_tokens budget
+            if (!isset($args['max_output_tokens'])) {
+                $args['max_output_tokens'] = 2500;
+            }
+        }
+
+        if (str_contains($model_name, 'qwen3.5') && !$uses_tools && $profile === 'reasoning') {
+            // reasoning tasks allow more thinking but still cap to prevent runaway chains
+            if (!isset($args['max_output_tokens'])) {
+                $args['max_output_tokens'] = 4000;
             }
         }
 

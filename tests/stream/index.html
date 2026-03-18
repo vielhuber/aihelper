@@ -7,12 +7,23 @@
             .container {
                 white-space: pre-wrap;
             }
+            .container .reasoning {
+                font-size: 10px;
+                border-left: 3px solid grey;
+            }
+            .container .content {
+                font-size: 20px;
+            }
         </style>
         <script>
             window.addEventListener('load', e => {
                 if (document.querySelector('.container') !== null) {
                     document.querySelectorAll('.container').forEach($container => {
-                        let prompt = 'Erzähle einen Witz mit ca. 100 Zeichen über das Thema "Computer".',
+                        let $content = document.createElement('div');
+                        $content.classList.add('content');
+                        $container.appendChild($content);
+                        let prompt =
+                                'Denke Dir einen sehr ulkigen, sehr komplexen, sehr persönlichen, aber nicht zu plumpen Witz aus. Er soll ungefähr um die 100 Zeichen umfassen und über das Thema "Kaktus im Ofenrohr" gehen.',
                             url =
                                 'stream.php?prompt=' +
                                 encodeURIComponent(prompt) +
@@ -22,51 +33,57 @@
                                 $container.getAttribute('data-model') +
                                 '&api_key=' +
                                 $container.getAttribute('data-api-key') +
+                                '&url=' +
+                                ($container.getAttribute('data-url') ?? '') +
                                 '&log=' +
                                 $container.getAttribute('data-log'),
                             source = new EventSource(url),
-                            content = '',
-                            curIndex = 0,
-                            isStarted = false,
+                            textMain = '',
+                            textReasoning = '',
                             isLoaded = false,
                             isRendered = false,
-                            typing = () => {
-                                let speed = 100;
-                                // pause on selection
-                                let selection = window.getSelection();
-                                if (
-                                    selection &&
-                                    selection.toString().length > 0 &&
-                                    $container.contains(selection.anchorNode)
-                                ) {
-                                    setTimeout(typing, speed);
-                                    return;
-                                }
-                                if (content === '') {
-                                    if ($container.textContent.length >= 3) {
-                                        $container.textContent = '';
-                                    }
-                                    $container.textContent += '.';
-                                } else {
-                                    if (isStarted === false) {
-                                        isStarted = true;
-                                        $container.textContent = '';
-                                    }
-
-                                    if (curIndex < content.length) {
-                                        speed = Math.max(1, Math.round(500 / (content.length - curIndex)));
-                                        $container.textContent = content.substring(0, curIndex + 1) + '⏳';
-                                        curIndex++;
-                                    } else {
-                                        $container.textContent = content + (!isLoaded ? '⏳' : '');
-                                        if (isLoaded) {
-                                            isRendered = true;
+                            typing = ($el, getContent, onDone) => {
+                                let started = false,
+                                    curIndex = 0,
+                                    fn = () => {
+                                        // pause on selection
+                                        let selection = window.getSelection();
+                                        if (
+                                            selection &&
+                                            selection.toString().length > 0 &&
+                                            $el.contains(selection.anchorNode)
+                                        ) {
+                                            setTimeout(fn, 100);
+                                            return;
                                         }
-                                    }
-                                }
-                                if (isRendered === false) {
-                                    setTimeout(typing, speed);
-                                }
+                                        let text = getContent();
+                                        if (!started) {
+                                            if (text === '') {
+                                                if ($el.textContent.length >= 3) {
+                                                    $el.textContent = '';
+                                                }
+                                                $el.textContent += '.';
+                                                setTimeout(fn, 100);
+                                                return;
+                                            }
+                                            started = true;
+                                            $el.textContent = '';
+                                        }
+                                        if (curIndex < text.length) {
+                                            let speed = Math.max(1, Math.round(500 / (text.length - curIndex)));
+                                            $el.textContent = text.substring(0, curIndex + 1) + '⏳';
+                                            curIndex++;
+                                            setTimeout(fn, speed);
+                                        } else {
+                                            $el.textContent = text + (isLoaded ? '' : '⏳');
+                                            if (isLoaded) {
+                                                if (onDone) onDone();
+                                            } else {
+                                                setTimeout(fn, 100);
+                                            }
+                                        }
+                                    };
+                                return fn;
                             };
                         source.onmessage = event => {
                             if (event.data === '[DONE]') {
@@ -76,9 +93,21 @@
                             }
                             let data = JSON.parse(event.data);
                             if (data.id && data.choices && data.choices.length > 0 && data.choices[0].delta.content) {
-                                content += data.choices[0].delta.content;
+                                textMain += data.choices[0].delta.content;
                             }
                         };
+                        source.addEventListener('reasoning', event => {
+                            let data = JSON.parse(event.data);
+                            if (data.delta) {
+                                if (textReasoning === '') {
+                                    let $reasoning = document.createElement('div');
+                                    $reasoning.classList.add('reasoning');
+                                    $container.insertBefore($reasoning, $content);
+                                    typing($reasoning, () => textReasoning, null)();
+                                }
+                                textReasoning += data.delta;
+                            }
+                        });
                         source.onerror = error => {
                             console.error('Error:', error);
                             source.close();
@@ -88,7 +117,13 @@
                                 $container.innerHTML = '<em style="color: red;">Connection error</em>';
                             }, 1000);
                         };
-                        typing();
+                        typing(
+                            $content,
+                            () => textMain,
+                            () => {
+                                isRendered = true;
+                            }
+                        )();
                     });
                 }
             });
@@ -101,7 +136,15 @@
             data-provider="claude"
             data-model="claude-haiku-4-5"
             data-api-key="CLAUDE_API_KEY"
-            data-log="stream-claude.log"
+            data-log="stream-claude-haiku.log"
+        ></div>
+        <h2>claude-opus-4-6</h2>
+        <div
+            class="container"
+            data-provider="claude"
+            data-model="claude-opus-4-6"
+            data-api-key="CLAUDE_API_KEY"
+            data-log="stream-claude-opus.log"
         ></div>
         <h2>gpt-5-mini</h2>
         <div
@@ -109,7 +152,15 @@
             data-provider="chatgpt"
             data-model="gpt-5-mini"
             data-api-key="CHATGPT_API_KEY"
-            data-log="stream-chatgpt.log"
+            data-log="stream-chatgpt-mini.log"
+        ></div>
+        <h2>o3</h2>
+        <div
+            class="container"
+            data-provider="chatgpt"
+            data-model="o3"
+            data-api-key="CHATGPT_API_KEY"
+            data-log="stream-chatgpt-o3.log"
         ></div>
         <h2>test</h2>
         <div
@@ -118,6 +169,15 @@
             data-model="test-model-1"
             data-api-key=""
             data-log="stream-test.log"
+        ></div>
+        <h2>lmstudio</h2>
+        <div
+            class="container"
+            data-provider="lmstudio"
+            data-model="qwen3.5-27b-ud"
+            data-api-key="LMSTUDIO_API_KEY"
+            data-url="LMSTUDIO_URL"
+            data-log="stream-lmstudio.log"
         ></div>
     </body>
 </html>
