@@ -3440,6 +3440,12 @@ class ai_lmstudio extends ai_chatgpt
         unset($args['reasoning']);
         unset($args['ttl']);
 
+        // for creative qwen3.5, use low reasoning effort to keep thinking short;
+        // requires LM Studio >= 0.4.7 Build 1 (reasoning.effort on /v1/responses)
+        if (str_contains($model_name, 'qwen3.5') && !$uses_tools && $profile === 'creative') {
+            $args['reasoning'] = ['effort' => 'low'];
+        }
+
         return $args;
     }
 }
