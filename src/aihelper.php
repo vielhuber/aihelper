@@ -3329,7 +3329,7 @@ class ai_lmstudio extends ai_chatgpt
             if (!empty($args['input']) && is_array($args['input'])) {
                 $already_primed = false;
                 foreach ($args['input'] as $item) {
-                    if (($item['role'] ?? null) !== 'assistant') {
+                    if (!is_array($item) || ($item['role'] ?? null) !== 'assistant') {
                         continue;
                     }
                     foreach (($item['content'] ?? []) as $part) {
