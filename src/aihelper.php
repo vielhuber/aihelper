@@ -3260,28 +3260,21 @@ class ai_lmstudio extends ai_chatgpt
     {
         $model_name = strtolower($this->model ?? '');
         $uses_tools = !empty($args['tools']) && is_array($args['tools']);
-        $profile = 'default';
 
+        // --- detect profile ---
+
+        $profile = 'default';
         if ($uses_tools) {
             $profile = 'agentic';
         } else {
             $prompt_text = '';
-            $input = $args['input'] ?? [];
-            for ($i = count($input) - 1; $i >= 0; $i--) {
-                $input_item = $input[$i] ?? null;
-                if (!is_array($input_item) || ($input_item['role'] ?? null) !== 'user') {
+            foreach (array_reverse($args['input'] ?? []) as $item) {
+                if (!is_array($item) || ($item['role'] ?? null) !== 'user') {
                     continue;
                 }
-                $content = $input_item['content'] ?? null;
-                if (!is_array($content)) {
-                    continue;
-                }
-                foreach ($content as $content_item) {
-                    if (!is_array($content_item)) {
-                        continue;
-                    }
-                    if (($content_item['type'] ?? null) === 'input_text' && isset($content_item['text'])) {
-                        $prompt_text .= ' ' . $content_item['text'];
+                foreach (($item['content'] ?? []) as $part) {
+                    if (is_array($part) && ($part['type'] ?? null) === 'input_text' && isset($part['text'])) {
+                        $prompt_text .= ' ' . $part['text'];
                     }
                 }
                 break;
@@ -3290,199 +3283,91 @@ class ai_lmstudio extends ai_chatgpt
 
             if ($prompt_text !== '') {
                 $creative_keywords = [
-                    'geschichte',
-                    'kreativ',
-                    'gedicht',
-                    'erzähl',
-                    'schreib',
-                    'story',
-                    'märchen',
-                    'roman',
-                    'szene',
-                    'witz',
-                    'witzig',
-                    'lustig',
-                    'ulkig',
-                    'humor',
-                    'komisch'
+                    'geschichte', 'kreativ', 'gedicht', 'erzähl', 'schreib', 'story',
+                    'märchen', 'roman', 'szene', 'witz', 'witzig', 'lustig', 'ulkig', 'humor', 'komisch',
                 ];
                 $reasoning_keywords = [
-                    'denke',
-                    'überlege',
-                    'analysiere',
-                    'erkläre',
-                    'warum',
-                    'berechne',
-                    'löse',
-                    'beweise',
-                    'vergleiche',
-                    'schlussfolgere'
+                    'denke', 'überlege', 'analysiere', 'erkläre', 'warum',
+                    'berechne', 'löse', 'beweise', 'vergleiche', 'schlussfolgere',
                 ];
-                $is_creative = array_reduce(
-                    $creative_keywords,
+                $matches = fn(array $keywords) => array_reduce(
+                    $keywords,
                     fn($carry, $kw) => $carry || str_contains($prompt_text, $kw),
                     false
                 );
-                $is_reasoning =
-                    !$is_creative &&
-                    (array_reduce(
-                        $reasoning_keywords,
-                        fn($carry, $kw) => $carry || str_contains($prompt_text, $kw),
-                        false
-                    ) ||
-                        preg_match('/\d+\s*[\*\+\-x\/]\s*\d+/', $prompt_text) === 1);
-                if ($is_creative) {
+                if ($matches($creative_keywords)) {
                     $profile = 'creative';
-                } elseif ($is_reasoning) {
+                } elseif ($matches($reasoning_keywords) || preg_match('/\d+\s*[\*\+\-x\/]\s*\d+/', $prompt_text) === 1) {
                     $profile = 'reasoning';
                 }
             }
         }
 
+        // --- sampling parameters per model family ---
+
         if (str_contains($model_name, 'qwq')) {
-            if (!isset($args['top_p'])) {
-                $args['top_p'] = 0.95;
-            }
-            if (!isset($args['top_k'])) {
-                $args['top_k'] = 40;
-            }
+            $args += ['top_p' => 0.95, 'top_k' => 40];
         } elseif (str_contains($model_name, 'qwen3.5')) {
-            if ($profile === 'agentic') {
-                if (!isset($args['top_p'])) {
-                    $args['top_p'] = 0.8;
-                }
-                if (!isset($args['top_k'])) {
-                    $args['top_k'] = 20;
-                }
-                // presence_penalty=1.5 per qwen team recommendation (thinking mode, general tasks)
-                if (!isset($args['presence_penalty'])) {
-                    $args['presence_penalty'] = 1.5;
-                }
-            } elseif ($profile === 'reasoning' || $profile === 'creative') {
-                if (!isset($args['top_p'])) {
-                    $args['top_p'] = 0.95;
-                }
-                if (!isset($args['top_k'])) {
-                    $args['top_k'] = 20;
-                }
-                // presence_penalty=1.5 per qwen team recommendation (thinking mode, general tasks);
-                // this penalises already-seen tokens and is the primary lever against infinite thinking loops
-                if (!isset($args['presence_penalty'])) {
-                    $args['presence_penalty'] = 1.5;
-                }
-            } else {
-                if (!isset($args['top_p'])) {
-                    $args['top_p'] = 0.8;
-                }
-                if (!isset($args['top_k'])) {
-                    $args['top_k'] = 20;
-                }
-                // presence_penalty=1.5 per qwen team recommendation (thinking mode, general tasks)
-                if (!isset($args['presence_penalty'])) {
-                    $args['presence_penalty'] = 1.5;
-                }
-            }
+            $args += [
+                'top_p' => ($profile === 'reasoning' || $profile === 'creative') ? 0.95 : 0.8,
+                'top_k' => 20,
+                'presence_penalty' => ($profile === 'creative') ? 0.4 : 0.0,
+            ];
         } elseif (str_contains($model_name, 'qwen3')) {
-            if (!isset($args['top_p'])) {
-                $args['top_p'] = 0.8;
-            }
-            if (!isset($args['top_k'])) {
-                $args['top_k'] = 20;
-            }
+            $args += ['top_p' => 0.8, 'top_k' => 20];
         } elseif (str_contains($model_name, 'gpt-oss') && $uses_tools) {
-            if (!isset($args['top_p'])) {
-                $args['top_p'] = 0.9;
-            }
-            if (!isset($args['top_k'])) {
-                $args['top_k'] = 20;
-            }
+            $args += ['top_p' => 0.9, 'top_k' => 20];
         }
 
+        // --- qwen3: suppress runaway thinking via empty <think> priming ---
+        // qwen3 variants in lmstudio do not reliably follow /no_think;
+        // the empty <think> priming trick is the only reliable way to prevent it
+
         if (str_contains($model_name, 'qwen3')) {
-            // qwen3.5 variants in lmstudio do not reliably follow /no_think;
-            // reasoning.effort (low/medium/high) is only a sampler hint — NOT a hard token budget,
-            // meaning the model burns the full max_output_tokens on thinking regardless;
-            // the only reliable way to prevent runaway thinking is the empty <think> priming trick;
-            // TODO: once lmstudio exposes a hard per-request thinking token limit (budget_tokens or similar),
-            // this can be replaced with selective thinking for reasoning/creative profiles
+            $think_block = "<think>\n\n</think>\n\n";
+
             if (!empty($args['input']) && is_array($args['input'])) {
-                $has_empty_think_priming = false;
-                foreach ($args['input'] as $input_item) {
-                    if (!is_array($input_item) || ($input_item['role'] ?? null) !== 'assistant') {
+                $already_primed = false;
+                foreach ($args['input'] as $item) {
+                    if (($item['role'] ?? null) !== 'assistant') {
                         continue;
                     }
-                    if (empty($input_item['content']) || !is_array($input_item['content'])) {
-                        continue;
-                    }
-                    foreach ($input_item['content'] as $content_item) {
-                        if (!is_array($content_item) || ($content_item['type'] ?? null) !== 'output_text') {
-                            continue;
-                        }
-                        if (($content_item['text'] ?? '') === "<think>\n\n</think>\n\n") {
-                            $has_empty_think_priming = true;
+                    foreach (($item['content'] ?? []) as $part) {
+                        if (is_array($part) && ($part['text'] ?? '') === $think_block) {
+                            $already_primed = true;
                             break 2;
                         }
                     }
                 }
-                if ($has_empty_think_priming === false) {
+                if (!$already_primed) {
                     $args['input'][] = [
                         'role' => 'assistant',
-                        'content' => [
-                            [
-                                'type' => 'output_text',
-                                'text' => "<think>\n\n</think>\n\n"
-                            ]
-                        ]
+                        'content' => [['type' => 'output_text', 'text' => $think_block]],
                     ];
                 }
             }
             if (!empty($args['messages'])) {
-                $args['messages'][] = [
-                    'role' => 'assistant',
-                    'content' => "<think>\n\n</think>\n\n"
-                ];
+                $args['messages'][] = ['role' => 'assistant', 'content' => $think_block];
             }
         }
 
-        if (str_contains($model_name, 'qwen3.5') && $uses_tools) {
-            // keep agentic qwen runs short and sequential to reduce late-stage drift
-            if (!isset($args['max_output_tokens'])) {
-                $args['max_output_tokens'] = 6000;
-            }
-            if (!isset($args['parallel_tool_calls'])) {
-                $args['parallel_tool_calls'] = false;
-            }
-            if (!isset($args['max_tool_calls'])) {
-                $args['max_tool_calls'] = 30;
+        // --- output limits per profile ---
+
+        if (str_contains($model_name, 'qwen3.5')) {
+            if ($uses_tools) {
+                $args += ['max_output_tokens' => 6000, 'parallel_tool_calls' => false, 'max_tool_calls' => 30];
+            } elseif ($profile === 'creative') {
+                $args += ['max_output_tokens' => 2500];
+            } elseif ($profile === 'reasoning') {
+                $args += ['max_output_tokens' => 4000];
             }
         }
 
-        if (str_contains($model_name, 'qwen3.5') && !$uses_tools && $profile === 'creative') {
-            // reasoning + response share the max_output_tokens budget
-            if (!isset($args['max_output_tokens'])) {
-                $args['max_output_tokens'] = 2500;
-            }
-        }
-
-        if (str_contains($model_name, 'qwen3.5') && !$uses_tools && $profile === 'reasoning') {
-            // reasoning tasks allow more thinking but still cap to prevent runaway chains
-            if (!isset($args['max_output_tokens'])) {
-                $args['max_output_tokens'] = 4000;
-            }
-        }
-
-        // glm models can produce excessive preserved thinking, so keep the output budget tight
         if (str_contains($model_name, 'glm')) {
-            $args['max_output_tokens'] = 1500;
+            $args['max_output_tokens'] = 1500; // glm produces excessive thinking; hard cap
         }
 
-        // do not send explicit reasoning or ttl fields by default;
-        // instruct models tend to behave faster and more predictably without them
-        unset($args['reasoning']);
-        unset($args['ttl']);
-
-        // reasoning.effort is intentionally NOT set here — it is only a sampler hint in LM Studio
-        // and has no measurable effect on how many tokens the model spends thinking
+        unset($args['reasoning'], $args['ttl']);
 
         return $args;
     }
