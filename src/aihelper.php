@@ -3083,6 +3083,30 @@ class ai_grok extends ai_claude
             'supports_temperature' => true,
             'default' => false,
             'test' => false
+        ],
+        [
+            'name' => 'grok-4.2-0329-non-reasoning',
+            'max_tokens' => 131072,
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'supports_temperature' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'grok-4.2-0329-reasoning',
+            'max_tokens' => 131072,
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'supports_temperature' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'grok-4.2-multi-agent-0329',
+            'max_tokens' => 131072,
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'supports_temperature' => true,
+            'default' => false,
+            'test' => false
         ]
     ];
 }
