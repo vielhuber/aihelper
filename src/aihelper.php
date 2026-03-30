@@ -3382,7 +3382,7 @@ class ai_lmstudio extends ai_chatgpt
 
         if (str_contains($model_name, 'qwen3.5')) {
             if ($uses_tools) {
-                $args += ['max_output_tokens' => 6000, 'parallel_tool_calls' => false, 'max_tool_calls' => 30];
+                $args += ['max_output_tokens' => 12000, 'parallel_tool_calls' => false, 'max_tool_calls' => 30];
             } elseif ($profile === 'creative') {
                 $args += ['max_output_tokens' => 2500];
             } elseif ($profile === 'reasoning') {
