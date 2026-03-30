@@ -3336,8 +3336,9 @@ class ai_lmstudio extends ai_chatgpt
                 'top_p' => ($profile === 'reasoning' || $profile === 'creative') ? 0.95 : 0.8,
                 'top_k' => 20,
                 'presence_penalty' => ($profile === 'creative') ? 0.4 : 0.0,
-                'frequency_penalty' => ($profile === 'agentic') ? 0.0 : 1.1,
-                'repetition_penalty' => ($profile === 'agentic') ? 1.0 : 1.1,
+                // lmstudio responses api ignores frequency_penalty; use repeat_penalty instead
+                // (llmster maps repeat_penalty → llama.repeatPenalty; default is 1.1)
+                'repeat_penalty' => ($profile === 'agentic') ? 1.0 : 1.1,
             ];
         } elseif (str_contains($model_name, 'qwen3')) {
             $args += ['top_p' => 0.8, 'top_k' => 20];
