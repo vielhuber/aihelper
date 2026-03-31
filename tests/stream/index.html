@@ -70,9 +70,11 @@
                                             $el.textContent = '';
                                         }
                                         if (curIndex < text.length) {
-                                            let speed = Math.max(1, Math.round(500 / (text.length - curIndex)));
-                                            $el.textContent = text.substring(0, curIndex + 1) + '⏳';
-                                            curIndex++;
+                                            let lag = text.length - curIndex,
+                                                chunkSize = Math.max(1, Math.floor(lag / 10)),
+                                                speed = Math.max(1, Math.round(500 / lag));
+                                            $el.textContent = text.substring(0, curIndex + chunkSize) + '⏳';
+                                            curIndex += chunkSize;
                                             setTimeout(fn, speed);
                                         } else {
                                             $el.textContent = text + (isLoaded ? '' : '⏳');

@@ -1348,17 +1348,19 @@ abstract class aihelper
             ob_end_clean();
         }
         // set php settings
-        try {
-            ini_set('zlib.output_compression', '0');
-        } catch (\ValueError $e) {
-        }
-        try {
-            ini_set('output_buffering', '0');
-        } catch (\ValueError $e) {
-        }
-        try {
-            ini_set('implicit_flush', '1');
-        } catch (\ValueError $e) {
+        if (!headers_sent()) {
+            try {
+                ini_set('zlib.output_compression', '0');
+            } catch (\ValueError $e) {
+            }
+            try {
+                ini_set('output_buffering', '0');
+            } catch (\ValueError $e) {
+            }
+            try {
+                ini_set('implicit_flush', '1');
+            } catch (\ValueError $e) {
+            }
         }
         // 2k padding (for browsers)
         ob_implicit_flush(true);
