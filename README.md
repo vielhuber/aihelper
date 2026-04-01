@@ -5,7 +5,6 @@
 ![Last Commit](https://img.shields.io/github/last-commit/vielhuber/aihelper)
 ![PHP Version Support](https://img.shields.io/packagist/php-v/vielhuber/aihelper)
 ![Packagist Downloads](https://img.shields.io/packagist/dt/vielhuber/aihelper)
-![Packagist Version](https://img.shields.io/packagist/v/vielhuber/aihelper)
 
 # 🤖 aihelper 🤖
 
