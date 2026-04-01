@@ -1,5 +1,5 @@
 [![build status](https://github.com/vielhuber/aihelper/actions/workflows/ci.yml/badge.svg)](https://github.com/vielhuber/aihelper/actions)
-![GitHub release (latest by severity)](https://img.shields.io/github/v/release/vielhuber/aihelper)
+![GitHub Tag](https://img.shields.io/github/v/tag/vielhuber/aihelper)
 ![Code Style](https://img.shields.io/badge/code_style-psr--12-ff69b4.svg)
 ![License](https://img.shields.io/github/license/vielhuber/aihelper)
 ![Last Commit](https://img.shields.io/github/last-commit/vielhuber/aihelper)
