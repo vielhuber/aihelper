@@ -1,10 +1,10 @@
 [![build status](https://github.com/vielhuber/aihelper/actions/workflows/ci.yml/badge.svg)](https://github.com/vielhuber/aihelper/actions)
-![GitHub Tag](https://img.shields.io/github/v/tag/vielhuber/aihelper)
-![Code Style](https://img.shields.io/badge/code_style-psr--12-ff69b4.svg)
-![License](https://img.shields.io/github/license/vielhuber/aihelper)
-![Last Commit](https://img.shields.io/github/last-commit/vielhuber/aihelper)
-![PHP Version Support](https://img.shields.io/packagist/php-v/vielhuber/aihelper)
-![Packagist Downloads](https://img.shields.io/packagist/dt/vielhuber/aihelper)
+[![GitHub Tag](https://img.shields.io/github/v/tag/vielhuber/aihelper)](https://github.com/vielhuber/aihelper/tags)
+[![Code Style](https://img.shields.io/badge/code_style-psr--12-ff69b4.svg)](https://www.php-fig.org/psr/psr-12/)
+[![License](https://img.shields.io/github/license/vielhuber/aihelper)](https://github.com/vielhuber/aihelper/blob/main/LICENSE.md)
+[![Last Commit](https://img.shields.io/github/last-commit/vielhuber/aihelper)](https://github.com/vielhuber/aihelper/commits)
+[![PHP Version Support](https://img.shields.io/packagist/php-v/vielhuber/aihelper)](https://packagist.org/packages/vielhuber/aihelper)
+[![Packagist Downloads](https://img.shields.io/packagist/dt/vielhuber/aihelper)](https://packagist.org/packages/vielhuber/aihelper)
 
 # 🤖 aihelper 🤖
 
