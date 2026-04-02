@@ -21,6 +21,7 @@ abstract class aihelper
     protected $max_tries = null;
     protected $mcp_servers = null;
     protected $mcp_servers_call_type = null;
+    protected $mcp_servers_tools_map = [];
 
     protected $stream = null;
     protected $stream_response = null;
@@ -2118,43 +2119,70 @@ class ai_chatgpt extends aihelper
 
         if (!empty($this->mcp_servers)) {
             $args['tools'] = [];
-            foreach ($this->mcp_servers as $mcp__key => $mcp__value) {
-                if (!isset($mcp__value['type'])) {
-                    $mcp__value['type'] = 'mcp';
-                }
-                if (!isset($mcp__value['require_approval'])) {
-                    $mcp__value['require_approval'] = 'never';
-                }
-                if (isset($mcp__value['name']) && !isset($mcp__value['server_label'])) {
-                    $mcp__value['server_label'] = $mcp__value['name'];
-                    unset($mcp__value['name']);
-                }
-                if (isset($mcp__value['authorization_token']) && !isset($mcp__value['authorization'])) {
-                    $mcp__value['authorization'] = $mcp__value['authorization_token'];
-                    unset($mcp__value['authorization_token']);
-                }
-                // lmstudio needs this
-                if ($this->name === 'lmstudio') {
-                    if (isset($mcp__value['authorization']) && !isset($mcp__value['headers'])) {
-                        $mcp__value['headers'] = [
-                            'Authorization' => 'Bearer ' . $mcp__value['authorization']
+            if ($this->mcp_servers_call_type === 'local') {
+                $this->mcp_servers_tools_map = [];
+                foreach ($this->mcp_servers as $mcp__value) {
+                    $url = $mcp__value['url'] ?? null;
+                    $authorization_token = $mcp__value['authorization_token'] ?? null;
+                    if ($url === null) {
+                        continue;
+                    }
+                    $meta = self::getMcpMetaInfo(url: $url, authorization_token: $authorization_token);
+                    if (empty($meta['tools'])) {
+                        continue;
+                    }
+                    foreach ($meta['tools'] as $tool) {
+                        $args['tools'][] = [
+                            'type' => 'function',
+                            'name' => $tool['name'],
+                            'description' => $tool['description'] ?? '',
+                            'parameters' => $tool['inputSchema'] ?? ['type' => 'object', 'properties' => new \stdClass()]
                         ];
-                        unset($mcp__value['authorization']);
+                        $this->mcp_servers_tools_map[$tool['name']] = [
+                            'url' => $url,
+                            'authorization_token' => $authorization_token
+                        ];
                     }
                 }
-                if (isset($mcp__value['url']) && !isset($mcp__value['server_url'])) {
-                    $mcp__value['server_url'] = $mcp__value['url'];
-                    unset($mcp__value['url']);
+            } else {
+                foreach ($this->mcp_servers as $mcp__key => $mcp__value) {
+                    if (!isset($mcp__value['type'])) {
+                        $mcp__value['type'] = 'mcp';
+                    }
+                    if (!isset($mcp__value['require_approval'])) {
+                        $mcp__value['require_approval'] = 'never';
+                    }
+                    if (isset($mcp__value['name']) && !isset($mcp__value['server_label'])) {
+                        $mcp__value['server_label'] = $mcp__value['name'];
+                        unset($mcp__value['name']);
+                    }
+                    if (isset($mcp__value['authorization_token']) && !isset($mcp__value['authorization'])) {
+                        $mcp__value['authorization'] = $mcp__value['authorization_token'];
+                        unset($mcp__value['authorization_token']);
+                    }
+                    // lmstudio needs this
+                    if ($this->name === 'lmstudio') {
+                        if (isset($mcp__value['authorization']) && !isset($mcp__value['headers'])) {
+                            $mcp__value['headers'] = [
+                                'Authorization' => 'Bearer ' . $mcp__value['authorization']
+                            ];
+                            unset($mcp__value['authorization']);
+                        }
+                    }
+                    if (isset($mcp__value['url']) && !isset($mcp__value['server_url'])) {
+                        $mcp__value['server_url'] = $mcp__value['url'];
+                        unset($mcp__value['url']);
+                    }
+                    if (!isset($mcp__value['server_label'])) {
+                        $mcp__value['server_label'] = 'mcp-server-' . ($mcp__key + 1);
+                    }
+                    // sanitize server_label to match pattern ^[A-Za-z][A-Za-z0-9_-]*$
+                    $mcp__value['server_label'] = preg_replace('/[^A-Za-z0-9_-]/', '_', $mcp__value['server_label']);
+                    if (isset($mcp__value['server_url'])) {
+                        $mcp__value['server_url'] = rtrim($mcp__value['server_url'], '/') . '/';
+                    }
+                    $args['tools'][] = $mcp__value;
                 }
-                if (!isset($mcp__value['server_label'])) {
-                    $mcp__value['server_label'] = 'mcp-server-' . ($mcp__key + 1);
-                }
-                // sanitize server_label to match pattern ^[A-Za-z][A-Za-z0-9_-]*$
-                $mcp__value['server_label'] = preg_replace('/[^A-Za-z0-9_-]/', '_', $mcp__value['server_label']);
-                if (isset($mcp__value['server_url'])) {
-                    $mcp__value['server_url'] = rtrim($mcp__value['server_url'], '/') . '/';
-                }
-                $args['tools'][] = $mcp__value;
             }
         }
 
