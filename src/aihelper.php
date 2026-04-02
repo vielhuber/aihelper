@@ -360,7 +360,7 @@ abstract class aihelper
             $ch = curl_init($url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 300);
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
             curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
@@ -398,8 +398,6 @@ abstract class aihelper
             }
             return null;
         } catch (\Exception $e) {
-            print_r($e->getMessage());
-            die();
             return null;
         }
     }
@@ -470,7 +468,7 @@ abstract class aihelper
             }
         }
         if ($this->support_mcp && $this->mcp_servers !== null) {
-            $this->mcp_servers_call_type = in_array($mcp_servers_call_type, ['remote', 'local'], true) ? $mcp_servers_call_type : 'remote';
+            $this->mcp_servers_call_type = ($mcp_servers_call_type === 'local') ? 'local' : 'remote';
         }
         $this->stream = $this->support_stream && $stream === true ? true : false;
 
@@ -507,6 +505,121 @@ abstract class aihelper
             );
             $this->log($return, 'return');
             $max_tries--;
+        }
+        if ($return['success'] === true && $this->mcp_servers_call_type === 'local' && !empty($this->mcp_servers_tools_map)) {
+            $return = $this->runLocalToolLoop($return);
+        }
+        return $return;
+    }
+
+    protected function runLocalToolLoop(array $return): array
+    {
+        $is_claude = in_array($this->provider, ['claude', 'grok', 'deepseek'], true);
+        $max_tool_rounds = 50;
+        while ($max_tool_rounds > 0) {
+            // extract pending tool calls from session
+            $tool_calls = [];
+            $session = self::$sessions[$this->session_id] ?? [];
+            if ($is_claude) {
+                // claude: tool_use blocks inside last assistant message content
+                $last = end($session);
+                if (isset($last['role']) && $last['role'] === 'assistant' && isset($last['content']) && is_array($last['content'])) {
+                    foreach ($last['content'] as $block) {
+                        $type = is_object($block) ? ($block->type ?? null) : ($block['type'] ?? null);
+                        if ($type === 'tool_use') {
+                            $tool_calls[] = [
+                                'id' => is_object($block) ? $block->id : $block['id'],
+                                'name' => is_object($block) ? $block->name : $block['name'],
+                                'arguments' => is_object($block) ? (array) ($block->input ?? []) : ($block['input'] ?? [])
+                            ];
+                        }
+                    }
+                }
+            } else {
+                // responses api: function_call items as top-level session entries
+                for ($i = count($session) - 1; $i >= 0; $i--) {
+                    if (isset($session[$i]['type']) && $session[$i]['type'] === 'function_call') {
+                        $tool_calls[] = [
+                            'id' => $session[$i]['call_id'],
+                            'name' => $session[$i]['name'],
+                            'arguments' => json_decode($session[$i]['arguments'], true) ?? []
+                        ];
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if (empty($tool_calls)) {
+                break;
+            }
+            $this->log(count($tool_calls) . ' tool call(s)', 'local tool loop');
+            $tool_results = [];
+            foreach ($tool_calls as $tc) {
+                if (!isset($this->mcp_servers_tools_map[$tc['name']])) {
+                    $this->log('unknown tool: ' . $tc['name'], 'local tool loop');
+                    $output = 'Error: unknown tool "' . $tc['name'] . '"';
+                } else {
+                    $server = $this->mcp_servers_tools_map[$tc['name']];
+                    $this->log($tc['name'] . '(' . json_encode($tc['arguments'], JSON_UNESCAPED_UNICODE) . ')', 'local tool call');
+                    if ($this->stream === true) {
+                        echo ": keepalive\n\n";
+                        if (ob_get_level() > 0) {
+                            ob_flush();
+                        }
+                        flush();
+                    }
+                    $result = self::callMcpTool(
+                        name: $tc['name'],
+                        args: $tc['arguments'],
+                        url: $server['url'],
+                        authorization_token: $server['authorization_token']
+                    );
+                    if ($result === null) {
+                        $output = 'Error: tool call failed';
+                    } elseif (isset($result['result']['content']) && is_array($result['result']['content'])) {
+                        $parts = [];
+                        foreach ($result['result']['content'] as $item) {
+                            $parts[] = $item['text'] ?? json_encode($item, JSON_UNESCAPED_UNICODE);
+                        }
+                        $output = implode("\n", $parts);
+                    } else {
+                        $output = json_encode($result, JSON_UNESCAPED_UNICODE);
+                    }
+                    $this->log(mb_substr($output, 0, 200), 'local tool result');
+                }
+                $tool_results[] = ['id' => $tc['id'], 'output' => $output];
+            }
+            // append tool results in provider-specific format
+            if ($is_claude) {
+                $result_blocks = [];
+                foreach ($tool_results as $tr) {
+                    $result_blocks[] = [
+                        'type' => 'tool_result',
+                        'tool_use_id' => $tr['id'],
+                        'content' => $tr['output']
+                    ];
+                }
+                self::$sessions[$this->session_id][] = [
+                    'role' => 'user',
+                    'content' => $result_blocks
+                ];
+            } else {
+                foreach ($tool_results as $tr) {
+                    self::$sessions[$this->session_id][] = [
+                        'type' => 'function_call_output',
+                        'call_id' => $tr['id'],
+                        'output' => $tr['output']
+                    ];
+                }
+            }
+            $return = $this->askThis(
+                prompt: null,
+                files: null,
+                add_prompt_to_session: false,
+                prev_output_text: null,
+                prev_costs: $return['costs']
+            );
+            $max_tool_rounds--;
         }
         return $return;
     }
@@ -2224,6 +2337,30 @@ class ai_chatgpt extends aihelper
             }
         }
 
+        // handle function_call output for local tool loop:
+        // responses api returns function_call items without text — treat as success so the tool loop can take over
+        if (
+            $this->mcp_servers_call_type === 'local' &&
+            __::nx($output_text ?? null) &&
+            __::x($response ?? null) &&
+            __::x($response?->result ?? null) &&
+            __::x($response?->result?->output ?? null)
+        ) {
+            $has_function_calls = false;
+            foreach ($response->result->output as $output__value) {
+                if (isset($output__value->type) && $output__value->type === 'function_call') {
+                    $has_function_calls = true;
+                    break;
+                }
+            }
+            if ($has_function_calls) {
+                $this->addResponseToSession($response);
+                $return['response'] = '';
+                $return['success'] = true;
+                return $return;
+            }
+        }
+
         if (__::nx($output_text ?? null)) {
             $this->log($response, 'failed');
             if (
@@ -2555,18 +2692,45 @@ class ai_claude extends aihelper
         $args = $this->applyTemperatureParameter($args);
 
         if (!empty($this->mcp_servers)) {
-            $args['mcp_servers'] = [];
-            foreach ($this->mcp_servers as $mcp__key => $mcp__value) {
-                if (!isset($mcp__value['type'])) {
-                    $mcp__value['type'] = 'url';
+            if ($this->mcp_servers_call_type === 'local') {
+                $this->mcp_servers_tools_map = [];
+                $args['tools'] = [];
+                foreach ($this->mcp_servers as $mcp__value) {
+                    $url = $mcp__value['url'] ?? null;
+                    $authorization_token = $mcp__value['authorization_token'] ?? null;
+                    if ($url === null) {
+                        continue;
+                    }
+                    $meta = self::getMcpMetaInfo(url: $url, authorization_token: $authorization_token);
+                    if (empty($meta['tools'])) {
+                        continue;
+                    }
+                    foreach ($meta['tools'] as $tool) {
+                        $args['tools'][] = [
+                            'name' => $tool['name'],
+                            'description' => $tool['description'] ?? '',
+                            'input_schema' => $tool['inputSchema'] ?? ['type' => 'object', 'properties' => new \stdClass()]
+                        ];
+                        $this->mcp_servers_tools_map[$tool['name']] = [
+                            'url' => $url,
+                            'authorization_token' => $authorization_token
+                        ];
+                    }
                 }
-                if (!isset($mcp__value['name'])) {
-                    $mcp__value['name'] = 'mcp-server-' . ($mcp__key + 1);
+            } else {
+                $args['mcp_servers'] = [];
+                foreach ($this->mcp_servers as $mcp__key => $mcp__value) {
+                    if (!isset($mcp__value['type'])) {
+                        $mcp__value['type'] = 'url';
+                    }
+                    if (!isset($mcp__value['name'])) {
+                        $mcp__value['name'] = 'mcp-server-' . ($mcp__key + 1);
+                    }
+                    if (isset($mcp__value['url'])) {
+                        $mcp__value['url'] = rtrim($mcp__value['url'], '/') . '/';
+                    }
+                    $args['mcp_servers'][] = $mcp__value;
                 }
-                if (isset($mcp__value['url'])) {
-                    $mcp__value['url'] = rtrim($mcp__value['url'], '/') . '/';
-                }
-                $args['mcp_servers'][] = $mcp__value;
             }
         }
 
@@ -2600,6 +2764,21 @@ class ai_claude extends aihelper
                     $output_text .= __::trim_whitespace($content__value->text);
                 }
             }
+        }
+
+        // handle stop_reason "tool_use" for local tool loop:
+        // claude returns tool_use blocks without text — treat as success so the tool loop can take over
+        if (
+            $this->mcp_servers_call_type === 'local' &&
+            __::x($response ?? null) &&
+            __::x($response?->result ?? null) &&
+            __::x($response?->result?->stop_reason ?? null) &&
+            $response->result->stop_reason === 'tool_use'
+        ) {
+            $this->addResponseToSession($response);
+            $return['response'] = $output_text ?: '';
+            $return['success'] = true;
+            return $return;
         }
 
         // handle stop reason
