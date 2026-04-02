@@ -36,6 +36,7 @@ $ai = aihelper::create(
             'authorization_token' => '...'
         ]
     ],
+    mcp_servers_call_type: 'remote', // remote = provider calls mcp servers directly, local = client-side tool loop via aihelper
     session_id: null, // submit session to continue a conversation (get with $ai->getSessionId())
     history: null, // submit messages (get with $ai->getSessionContent()),
     stream: false,

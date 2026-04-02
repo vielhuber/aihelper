@@ -20,6 +20,7 @@ abstract class aihelper
     protected $log = null;
     protected $max_tries = null;
     protected $mcp_servers = null;
+    protected $mcp_servers_call_type = null;
 
     protected $stream = null;
     protected $stream_response = null;
@@ -44,6 +45,7 @@ abstract class aihelper
         ?string $log = null,
         ?int $max_tries = null,
         ?array $mcp_servers = null,
+        ?string $mcp_servers_call_type = null,
         ?string $session_id = null,
         ?array $history = null,
         ?bool $stream = null,
@@ -58,6 +60,7 @@ abstract class aihelper
                 log: $log,
                 max_tries: $max_tries,
                 mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
@@ -73,6 +76,7 @@ abstract class aihelper
                 log: $log,
                 max_tries: $max_tries,
                 mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
@@ -88,6 +92,7 @@ abstract class aihelper
                 log: $log,
                 max_tries: $max_tries,
                 mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
@@ -103,6 +108,7 @@ abstract class aihelper
                 log: $log,
                 max_tries: $max_tries,
                 mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
@@ -118,6 +124,7 @@ abstract class aihelper
                 log: $log,
                 max_tries: $max_tries,
                 mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
@@ -133,6 +140,7 @@ abstract class aihelper
                 log: $log,
                 max_tries: $max_tries,
                 mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
@@ -148,6 +156,7 @@ abstract class aihelper
                 log: $log,
                 max_tries: $max_tries,
                 mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
@@ -412,6 +421,7 @@ abstract class aihelper
         ?string $log = null,
         ?int $max_tries = null,
         ?array $mcp_servers = null,
+        ?string $mcp_servers_call_type = null,
         ?string $session_id = null,
         ?array $history = null,
         ?bool $stream = null,
@@ -457,6 +467,9 @@ abstract class aihelper
             } else {
                 $this->mcp_servers = [$mcp_servers];
             }
+        }
+        if ($this->support_mcp && $this->mcp_servers !== null) {
+            $this->mcp_servers_call_type = in_array($mcp_servers_call_type, ['remote', 'local'], true) ? $mcp_servers_call_type : 'remote';
         }
         $this->stream = $this->support_stream && $stream === true ? true : false;
 
