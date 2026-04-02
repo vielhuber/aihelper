@@ -522,8 +522,8 @@ abstract class aihelper
             $session = self::$sessions[$this->session_id] ?? [];
             if ($is_claude) {
                 // claude: tool_use blocks inside last assistant message content
-                $last = end($session);
-                if (isset($last['role']) && $last['role'] === 'assistant' && isset($last['content']) && is_array($last['content'])) {
+                $last = !empty($session) ? end($session) : null;
+                if ($last !== null && isset($last['role']) && $last['role'] === 'assistant' && isset($last['content']) && is_array($last['content'])) {
                     foreach ($last['content'] as $block) {
                         $type = is_object($block) ? ($block->type ?? null) : ($block['type'] ?? null);
                         if ($type === 'tool_use') {
@@ -2212,12 +2212,10 @@ class ai_chatgpt extends aihelper
     ): array {
         $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
-        if (__::nx($this->model) || __::nx($this->session_id) || __::nx($prompt)) {
+        if (__::nx($this->model) || __::nx($this->session_id) || ($add_prompt_to_session && __::nx($prompt))) {
             $return['response'] = 'data missing.';
             return $return;
         }
-
-        $prompt = $this->trimPrompt($prompt);
 
         if ($add_prompt_to_session === true) {
             $this->appendPromptToSession($prompt, $files);
@@ -2233,29 +2231,33 @@ class ai_chatgpt extends aihelper
         if (!empty($this->mcp_servers)) {
             $args['tools'] = [];
             if ($this->mcp_servers_call_type === 'local') {
-                $this->mcp_servers_tools_map = [];
-                foreach ($this->mcp_servers as $mcp__value) {
-                    $url = $mcp__value['url'] ?? null;
-                    $authorization_token = $mcp__value['authorization_token'] ?? null;
-                    if ($url === null) {
-                        continue;
+                if (empty($this->mcp_servers_tools_map)) {
+                    foreach ($this->mcp_servers as $mcp__value) {
+                        $url = $mcp__value['url'] ?? null;
+                        $authorization_token = $mcp__value['authorization_token'] ?? null;
+                        if ($url === null) {
+                            continue;
+                        }
+                        $meta = self::getMcpMetaInfo(url: $url, authorization_token: $authorization_token);
+                        if (empty($meta['tools'])) {
+                            continue;
+                        }
+                        foreach ($meta['tools'] as $tool) {
+                            $this->mcp_servers_tools_map[$tool['name']] = [
+                                'url' => $url,
+                                'authorization_token' => $authorization_token,
+                                'schema' => [
+                                    'type' => 'function',
+                                    'name' => $tool['name'],
+                                    'description' => $tool['description'] ?? '',
+                                    'parameters' => $tool['inputSchema'] ?? ['type' => 'object', 'properties' => new \stdClass()]
+                                ]
+                            ];
+                        }
                     }
-                    $meta = self::getMcpMetaInfo(url: $url, authorization_token: $authorization_token);
-                    if (empty($meta['tools'])) {
-                        continue;
-                    }
-                    foreach ($meta['tools'] as $tool) {
-                        $args['tools'][] = [
-                            'type' => 'function',
-                            'name' => $tool['name'],
-                            'description' => $tool['description'] ?? '',
-                            'parameters' => $tool['inputSchema'] ?? ['type' => 'object', 'properties' => new \stdClass()]
-                        ];
-                        $this->mcp_servers_tools_map[$tool['name']] = [
-                            'url' => $url,
-                            'authorization_token' => $authorization_token
-                        ];
-                    }
+                }
+                foreach ($this->mcp_servers_tools_map as $tool_entry) {
+                    $args['tools'][] = $tool_entry['schema'];
                 }
             } else {
                 foreach ($this->mcp_servers as $mcp__key => $mcp__value) {
@@ -2672,12 +2674,10 @@ class ai_claude extends aihelper
     ): array {
         $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
-        if (__::nx($this->model) || __::nx($this->session_id) || __::nx($prompt)) {
+        if (__::nx($this->model) || __::nx($this->session_id) || ($add_prompt_to_session && __::nx($prompt))) {
             $return['response'] = 'data missing.';
             return $return;
         }
-
-        $prompt = $this->trimPrompt($prompt);
 
         if ($add_prompt_to_session === true) {
             $this->appendPromptToSession($prompt, $files);
@@ -2693,29 +2693,33 @@ class ai_claude extends aihelper
 
         if (!empty($this->mcp_servers)) {
             if ($this->mcp_servers_call_type === 'local') {
-                $this->mcp_servers_tools_map = [];
                 $args['tools'] = [];
-                foreach ($this->mcp_servers as $mcp__value) {
-                    $url = $mcp__value['url'] ?? null;
-                    $authorization_token = $mcp__value['authorization_token'] ?? null;
-                    if ($url === null) {
-                        continue;
+                if (empty($this->mcp_servers_tools_map)) {
+                    foreach ($this->mcp_servers as $mcp__value) {
+                        $url = $mcp__value['url'] ?? null;
+                        $authorization_token = $mcp__value['authorization_token'] ?? null;
+                        if ($url === null) {
+                            continue;
+                        }
+                        $meta = self::getMcpMetaInfo(url: $url, authorization_token: $authorization_token);
+                        if (empty($meta['tools'])) {
+                            continue;
+                        }
+                        foreach ($meta['tools'] as $tool) {
+                            $this->mcp_servers_tools_map[$tool['name']] = [
+                                'url' => $url,
+                                'authorization_token' => $authorization_token,
+                                'schema' => [
+                                    'name' => $tool['name'],
+                                    'description' => $tool['description'] ?? '',
+                                    'input_schema' => $tool['inputSchema'] ?? ['type' => 'object', 'properties' => new \stdClass()]
+                                ]
+                            ];
+                        }
                     }
-                    $meta = self::getMcpMetaInfo(url: $url, authorization_token: $authorization_token);
-                    if (empty($meta['tools'])) {
-                        continue;
-                    }
-                    foreach ($meta['tools'] as $tool) {
-                        $args['tools'][] = [
-                            'name' => $tool['name'],
-                            'description' => $tool['description'] ?? '',
-                            'input_schema' => $tool['inputSchema'] ?? ['type' => 'object', 'properties' => new \stdClass()]
-                        ];
-                        $this->mcp_servers_tools_map[$tool['name']] = [
-                            'url' => $url,
-                            'authorization_token' => $authorization_token
-                        ];
-                    }
+                }
+                foreach ($this->mcp_servers_tools_map as $tool_entry) {
+                    $args['tools'][] = $tool_entry['schema'];
                 }
             } else {
                 $args['mcp_servers'] = [];
@@ -3172,8 +3176,6 @@ class ai_gemini extends aihelper
             $return['response'] = 'data missing.';
             return $return;
         }
-
-        $prompt = $this->trimPrompt($prompt);
 
         if ($add_prompt_to_session === true) {
             $this->appendPromptToSession($prompt, $files);
