@@ -2424,6 +2424,25 @@ class ai_claude extends aihelper
         ) {
             $content = $response->result->content;
 
+            // remove orphaned mcp_tool_use assistant messages from the session before appending the new one:
+            // a previous mcp_tool_use block is orphaned when the new response being added is also an assistant message,
+            // meaning the mcp server returned results and the old pending block is no longer needed standalone
+            if (!empty(self::$sessions[$this->session_id])) {
+                $last = end(self::$sessions[$this->session_id]);
+                $lastRole = $last['role'] ?? null;
+                $lastContent = $last['content'] ?? null;
+                if ($lastRole === 'assistant' && is_array($lastContent)) {
+                    foreach ($lastContent as $block) {
+                        $type = is_object($block) ? ($block->type ?? null) : ($block['type'] ?? null);
+                        if ($type === 'mcp_tool_use') {
+                            $this->log('addResponseToSession: removed orphaned mcp_tool_use block before appending new response');
+                            array_pop(self::$sessions[$this->session_id]);
+                            break;
+                        }
+                    }
+                }
+            }
+
             // fix mcp_tool_use blocks with empty array or string inputs (should be objects)
             if (is_array($content)) {
                 for ($i = 0; $i < count($content); $i++) {
