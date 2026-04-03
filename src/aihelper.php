@@ -1683,7 +1683,16 @@ abstract class aihelper
                         // text delta
                         if (isset($parsed['candidates'][0]['content']['parts'])) {
                             foreach ($parsed['candidates'][0]['content']['parts'] as $part) {
-                                if (isset($part['text'])) {
+                                if (isset($part['text']) && !empty($part['thought'])) {
+                                    // thinking/reasoning — send as separate event, don't accumulate
+                                    $this->stream_running = true;
+                                    echo "event: reasoning\n";
+                                    echo 'data: ' . json_encode(['delta' => $part['text']]) . "\n\n";
+                                    if (ob_get_level() > 0) {
+                                        ob_flush();
+                                    }
+                                    flush();
+                                } elseif (isset($part['text'])) {
                                     $text = $part['text'];
                                     // accumulate
                                     $parts = &$this->stream_response->result->candidates[0]->content->parts;
@@ -3434,6 +3443,9 @@ class ai_gemini extends aihelper
             'contents' => self::$sessions[$this->session_id]
         ];
         $args = $this->applyTemperatureParameter($args, 'generationConfig');
+        if (str_starts_with($this->model, 'gemini-')) {
+            $args['generationConfig']['thinkingConfig'] = ['thinkingBudget' => 1024];
+        }
 
         if (!empty($this->mcp_servers) && $this->mcp_servers_call_type === 'local') {
             $tools = $this->buildLocalToolsArgs('parameters', false, ['additionalProperties', '$schema', 'definition', 'default']);
