@@ -546,9 +546,9 @@ class Test extends \PHPUnit\Framework\TestCase
                 $i_url = 1;
                 $i_prompt = 1;
                 $mcp_servers = [];
-                while (($_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] ?? '') != '') {
+                while (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
                     $mcp_servers[] = [
-                        'url' => $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
+                        'url' => $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
                         'authorization_token' => $return->result->access_token
                     ];
                     $i_url++;
@@ -565,14 +565,14 @@ class Test extends \PHPUnit\Framework\TestCase
                     mcp_servers: $mcp_servers
                 );
                 while (
-                    ($_SERVER['MCP_SERVER_TEST_PROMPT_' . $i_prompt] ?? '') != '' &&
-                    ($_SERVER['MCP_SERVER_TEST_ANSWER_' . $i_prompt] ?? '') != ''
+                    ($_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != '' &&
+                    ($_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != ''
                 ) {
-                    $return = $ai_mcp->ask($_SERVER['MCP_SERVER_TEST_PROMPT_' . $i_prompt]);
+                    $return = $ai_mcp->ask($_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)]);
                     $success_this =
                         $return['success'] &&
                         count($ai_mcp->getSessionContent()) === $i_prompt * 2 &&
-                        stripos($return['response'], $_SERVER['MCP_SERVER_TEST_ANSWER_' . $i_prompt]) !== false;
+                        stripos($return['response'], $_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)]) !== false;
                     if ($success_this) {
                         $success_count++;
                     } else {
@@ -645,16 +645,16 @@ class Test extends \PHPUnit\Framework\TestCase
         );
         //$this->log('token: ' . $return->result->access_token);
         $i_url = 1;
-        while (($_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] ?? '') != '') {
+        while (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
             $status = aihelper::getMcpOnlineStatus(
-                $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
+                $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
                 $return->result->access_token
             );
             $this->assertTrue(is_bool($status));
             $this->assertTrue($status);
 
             $meta = aihelper::getMcpMetaInfo(
-                $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
+                $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
                 $return->result->access_token
             );
             $this->assertTrue(array_key_exists('name', $meta));
@@ -670,11 +670,11 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->assertTrue($meta['instructions'] !== '');
             $this->assertTrue(!empty($meta['tools']) && count($meta['tools']) > 0);
 
-            if (($_SERVER['MCP_SERVER_TEST_' . $i_url . '_TOOL'] ?? '') != '') {
+            if (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_TOOL'] ?? '') != '') {
                 $tool_response = aihelper::callMcpTool(
-                    $_SERVER['MCP_SERVER_TEST_' . $i_url . '_TOOL'],
+                    $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_TOOL'],
                     null,
-                    $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
+                    $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
                     $return->result->access_token
                 );
                 $this->assertTrue(is_array($tool_response));
@@ -728,8 +728,8 @@ class Test extends \PHPUnit\Framework\TestCase
         for ($run = 1; $run <= 2; $run++) {
             $mcp_servers_all = [];
             $i_cur = 1;
-            while (($_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'] ?? '') != '') {
-                $mcp_servers_all[] = $_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'];
+            while (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_cur, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
+                $mcp_servers_all[] = $_SERVER['MCP_SERVER_TEST_' . str_pad($i_cur, 2, '0', STR_PAD_LEFT) . '_URL'];
                 $i_cur++;
             }
             // randomize mcp servers
@@ -802,8 +802,8 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $mcp_servers = [];
         $i_cur = 1;
-        while (($_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'] ?? '') != '') {
-            $url = $_SERVER['MCP_SERVER_TEST_' . $i_cur . '_URL'];
+        while (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_cur, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
+            $url = $_SERVER['MCP_SERVER_TEST_' . str_pad($i_cur, 2, '0', STR_PAD_LEFT) . '_URL'];
             // replace chat id with random number
             $url = str_replace('[CHAT_ID]', '[' . rand(100000, 999999) . ']', $url);
             $mcp_servers[] = [
@@ -857,9 +857,9 @@ class Test extends \PHPUnit\Framework\TestCase
         //$this->log('token: ' . $return->result->access_token);
         $i_url = 1;
         $mcp_servers = [];
-        while (($_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'] ?? '') != '') {
+        while (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
             $mcp_servers[] = [
-                'url' => $_SERVER['MCP_SERVER_TEST_' . $i_url . '_URL'],
+                'url' => $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
                 'authorization_token' => $return->result->access_token
             ];
             $i_url++;
@@ -936,6 +936,97 @@ class Test extends \PHPUnit\Framework\TestCase
                 sleep($throttle);
             }
         }
+    }
+
+    function test__ai_mcp_servers_call_type()
+    {
+        if (($_SERVER['MCP_SERVER_TEST'] ?? '') != '1') {
+            $this->markTestSkipped('Skipped.');
+        }
+
+        $return = __::curl(
+            $_SERVER['MCP_SERVER_TEST_AUTH_URL'] ?? '',
+            [
+                'client_id' => $_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_ID'] ?? '',
+                'client_secret' => $_SERVER['MCP_SERVER_TEST_AUTH_CLIENT_SECRET'] ?? '',
+                'audience' => $_SERVER['MCP_SERVER_TEST_AUTH_AUDIENCE'] ?? '',
+                'grant_type' => 'client_credentials'
+            ],
+            'POST'
+        );
+        $access_token = $return->result->access_token;
+
+        // collect all mcp servers
+        $mcp_servers = [];
+        $i_url = 1;
+        while (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
+            $url = $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'];
+            $url = str_replace('[CHAT_ID]', '[' . rand(100000, 999999) . ']', $url);
+            $mcp_servers[] = [
+                'url' => $url,
+                'authorization_token' => $access_token
+            ];
+            $i_url++;
+        }
+
+        // collect all prompts/answers
+        $prompts = [];
+        $i_prompt = 1;
+        while (($_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != '') {
+            $prompts[] = [
+                'prompt' => $_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)],
+                'answer' => $_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)] ?? ''
+            ];
+            $i_prompt++;
+        }
+
+        $providers = [
+            ['provider' => 'claude', 'model' => 'claude-haiku-4-5', 'api_key' => $_SERVER['CLAUDE_API_KEY'] ?? '', 'url' => null, 'call_types' => ['remote', 'local']],
+            ['provider' => 'lmstudio', 'model' => 'qwen3.5-27b-ud', 'api_key' => $_SERVER['LMSTUDIO_API_KEY'] ?? '', 'url' => $_SERVER['LMSTUDIO_URL'] ?? null, 'call_types' => ['remote', 'local']]
+        ];
+
+        $all_passed = true;
+
+        foreach ($providers as $prov) {
+            $this->log('--- ' . $prov['provider'] . ' / ' . $prov['model'] . ' ---');
+            foreach ($prov['call_types'] as $call_type) {
+                foreach ([1, 2, 3, 4, 5, 6] as $mcp_count) {
+                    $mcp_subset = array_slice($mcp_servers, 0, $mcp_count);
+                    foreach ($prompts as $p_index => $p) {
+                        $label = $prov['provider'] . ' / ' . $call_type . ' / ' . $mcp_count . ' mcp(s) / prompt ' . ($p_index + 1);
+                        $ai = aihelper::create(
+                            provider: $prov['provider'],
+                            model: $prov['model'],
+                            temperature: 1.0,
+                            api_key: $prov['api_key'],
+                            session_id: null,
+                            log: 'tests/aihelper.log',
+                            timeout: 60 * 10,
+                            max_tries: 1,
+                            mcp_servers: $mcp_subset,
+                            mcp_servers_call_type: $call_type,
+                            stream: false,
+                            url: $prov['url']
+                        );
+                        $time_start = microtime(true);
+                        $result = $ai->ask($p['prompt']);
+                        $time = microtime(true) - $time_start;
+                        if (!$result['success']) {
+                            $this->log('⛔ ' . $label . ': FAILED (' . number_format($time, 2) . 's) — ' . mb_substr($result['response'] ?? 'no response', 0, 100));
+                            $all_passed = false;
+                        } elseif ($p['answer'] !== '' && mb_stripos($result['response'], $p['answer']) === false) {
+                            $this->log('⛔ ' . $label . ': WRONG ANSWER (' . number_format($time, 2) . 's) — ' . mb_substr($result['response'], 0, 100));
+                            $all_passed = false;
+                        } else {
+                            $this->log('✅ ' . $label . ': OK (' . number_format($result['costs'], 5) . '$ / ' . number_format($time, 2) . 's)');
+                        }
+                        sleep(10);
+                    }
+                }
+            }
+        }
+
+        $this->assertTrue($all_passed, 'Some test combinations failed — see log above');
     }
 
     function test__ai_missing_or_wrong_models()

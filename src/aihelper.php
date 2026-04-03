@@ -374,7 +374,7 @@ abstract class aihelper
                     'method' => 'tools/call',
                     'params' => [
                         'name' => $name,
-                        'input' => (object) $args
+                        'arguments' => (object) $args
                     ]
                 ])
             );
@@ -514,7 +514,7 @@ abstract class aihelper
 
     protected function runLocalToolLoop(array $return): array
     {
-        $is_claude = in_array($this->provider, ['claude', 'grok', 'deepseek'], true);
+        $is_claude = in_array($this->name, ['claude', 'grok', 'deepseek'], true);
         $max_tool_rounds = 50;
         while ($max_tool_rounds > 0) {
             // extract pending tool calls from session
@@ -619,9 +619,113 @@ abstract class aihelper
                 prev_output_text: null,
                 prev_costs: $return['costs']
             );
+            $this->log($return, 'local tool loop return');
             $max_tool_rounds--;
         }
         return $return;
+    }
+
+    protected function buildLocalToolsArgs(string $schema_key = 'parameters', bool $wrap_function_type = false): array
+    {
+        if (empty($this->mcp_servers_tools_map)) {
+            // fetch tools/list from all MCP servers in parallel
+            $mh = curl_multi_init();
+            $handles = [];
+            foreach ($this->mcp_servers as $mcp__value) {
+                $url = $mcp__value['url'] ?? null;
+                if ($url === null) {
+                    continue;
+                }
+                if (substr($url, -1) !== '/') {
+                    $url .= '/';
+                }
+                $ch = curl_init($url);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+                    'jsonrpc' => '2.0',
+                    'id' => 1,
+                    'method' => 'tools/list'
+                ]));
+                $headers = ['Content-Type: application/json', 'Accept: application/json, text/event-stream'];
+                if (!empty($mcp__value['authorization_token'])) {
+                    $headers[] = 'Authorization: Bearer ' . $mcp__value['authorization_token'];
+                }
+                curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+                curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_multi_add_handle($mh, $ch);
+                $handles[] = ['ch' => $ch, 'mcp' => $mcp__value];
+            }
+            // execute all in parallel
+            do {
+                $status = curl_multi_exec($mh, $active);
+                if ($active) {
+                    curl_multi_select($mh);
+                }
+            } while ($active && $status === CURLM_OK);
+            // collect results
+            foreach ($handles as $h) {
+                $response = curl_multi_getcontent($h['ch']);
+                $httpCode = curl_getinfo($h['ch'], CURLINFO_HTTP_CODE);
+                curl_multi_remove_handle($mh, $h['ch']);
+                curl_close($h['ch']);
+                if ($httpCode < 200 || $httpCode >= 300 || !$response) {
+                    continue;
+                }
+                if (strpos($response, 'event: message') !== false) {
+                    preg_match('/data: (.+)/s', $response, $matches);
+                    if (isset($matches[1])) {
+                        $response = trim($matches[1]);
+                    }
+                }
+                $toolsData = json_decode($response, true);
+                if (!isset($toolsData['result']['tools']) || !is_array($toolsData['result']['tools'])) {
+                    continue;
+                }
+                $url = $h['mcp']['url'] ?? null;
+                $authorization_token = $h['mcp']['authorization_token'] ?? null;
+                foreach ($toolsData['result']['tools'] as $tool) {
+                    $schema = self::buildLocalToolsArgsSanitize($tool['inputSchema'] ?? ['type' => 'object']);
+                    $tool_def = [
+                        'name' => $tool['name'],
+                        'description' => $tool['description'] ?? '',
+                        $schema_key => $schema
+                    ];
+                    if ($wrap_function_type) {
+                        $tool_def['type'] = 'function';
+                    }
+                    $this->mcp_servers_tools_map[$tool['name']] = [
+                        'url' => $url,
+                        'authorization_token' => $authorization_token,
+                        'schema' => $tool_def
+                    ];
+                }
+            }
+            curl_multi_close($mh);
+        }
+        $tools = [];
+        foreach ($this->mcp_servers_tools_map as $tool_entry) {
+            $tools[] = $tool_entry['schema'];
+        }
+        return $tools;
+    }
+
+    protected static function buildLocalToolsArgsSanitize(array $schema): array
+    {
+        foreach ($schema as $key => &$value) {
+            if (is_array($value)) {
+                if (empty($value) && in_array($key, ['properties', 'items', 'additionalProperties'], true)) {
+                    $value = new \stdClass();
+                } else {
+                    $value = self::buildLocalToolsArgsSanitize($value);
+                }
+            }
+        }
+        return $schema;
     }
 
     abstract public function fetchModels(): array;
@@ -2231,34 +2335,7 @@ class ai_chatgpt extends aihelper
         if (!empty($this->mcp_servers)) {
             $args['tools'] = [];
             if ($this->mcp_servers_call_type === 'local') {
-                if (empty($this->mcp_servers_tools_map)) {
-                    foreach ($this->mcp_servers as $mcp__value) {
-                        $url = $mcp__value['url'] ?? null;
-                        $authorization_token = $mcp__value['authorization_token'] ?? null;
-                        if ($url === null) {
-                            continue;
-                        }
-                        $meta = self::getMcpMetaInfo(url: $url, authorization_token: $authorization_token);
-                        if (empty($meta['tools'])) {
-                            continue;
-                        }
-                        foreach ($meta['tools'] as $tool) {
-                            $this->mcp_servers_tools_map[$tool['name']] = [
-                                'url' => $url,
-                                'authorization_token' => $authorization_token,
-                                'schema' => [
-                                    'type' => 'function',
-                                    'name' => $tool['name'],
-                                    'description' => $tool['description'] ?? '',
-                                    'parameters' => $tool['inputSchema'] ?? ['type' => 'object', 'properties' => new \stdClass()]
-                                ]
-                            ];
-                        }
-                    }
-                }
-                foreach ($this->mcp_servers_tools_map as $tool_entry) {
-                    $args['tools'][] = $tool_entry['schema'];
-                }
+                $args['tools'] = $this->buildLocalToolsArgs('parameters', true);
             } else {
                 foreach ($this->mcp_servers as $mcp__key => $mcp__value) {
                     if (!isset($mcp__value['type'])) {
@@ -2693,34 +2770,7 @@ class ai_claude extends aihelper
 
         if (!empty($this->mcp_servers)) {
             if ($this->mcp_servers_call_type === 'local') {
-                $args['tools'] = [];
-                if (empty($this->mcp_servers_tools_map)) {
-                    foreach ($this->mcp_servers as $mcp__value) {
-                        $url = $mcp__value['url'] ?? null;
-                        $authorization_token = $mcp__value['authorization_token'] ?? null;
-                        if ($url === null) {
-                            continue;
-                        }
-                        $meta = self::getMcpMetaInfo(url: $url, authorization_token: $authorization_token);
-                        if (empty($meta['tools'])) {
-                            continue;
-                        }
-                        foreach ($meta['tools'] as $tool) {
-                            $this->mcp_servers_tools_map[$tool['name']] = [
-                                'url' => $url,
-                                'authorization_token' => $authorization_token,
-                                'schema' => [
-                                    'name' => $tool['name'],
-                                    'description' => $tool['description'] ?? '',
-                                    'input_schema' => $tool['inputSchema'] ?? ['type' => 'object', 'properties' => new \stdClass()]
-                                ]
-                            ];
-                        }
-                    }
-                }
-                foreach ($this->mcp_servers_tools_map as $tool_entry) {
-                    $args['tools'][] = $tool_entry['schema'];
-                }
+                $args['tools'] = $this->buildLocalToolsArgs('input_schema', false);
             } else {
                 $args['mcp_servers'] = [];
                 foreach ($this->mcp_servers as $mcp__key => $mcp__value) {
