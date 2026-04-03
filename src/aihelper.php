@@ -468,7 +468,7 @@ abstract class aihelper
             }
         }
         if ($this->support_mcp && $this->mcp_servers !== null) {
-            $this->mcp_servers_call_type = ($mcp_servers_call_type === 'local') ? 'local' : 'remote';
+            $this->mcp_servers_call_type = $mcp_servers_call_type === 'local' ? 'local' : 'remote';
         }
         $this->stream = $this->support_stream && $stream === true ? true : false;
 
@@ -506,7 +506,11 @@ abstract class aihelper
             $this->log($return, 'return');
             $max_tries--;
         }
-        if ($return['success'] === true && $this->mcp_servers_call_type === 'local' && !empty($this->mcp_servers_tools_map)) {
+        if (
+            $return['success'] === true &&
+            $this->mcp_servers_call_type === 'local' &&
+            !empty($this->mcp_servers_tools_map)
+        ) {
             $return = $this->runLocalToolLoop($return);
         }
         return $return;
@@ -523,14 +527,20 @@ abstract class aihelper
             if ($is_claude) {
                 // claude: tool_use blocks inside last assistant message content
                 $last = !empty($session) ? end($session) : null;
-                if ($last !== null && isset($last['role']) && $last['role'] === 'assistant' && isset($last['content']) && is_array($last['content'])) {
+                if (
+                    $last !== null &&
+                    isset($last['role']) &&
+                    $last['role'] === 'assistant' &&
+                    isset($last['content']) &&
+                    is_array($last['content'])
+                ) {
                     foreach ($last['content'] as $block) {
-                        $type = is_object($block) ? ($block->type ?? null) : ($block['type'] ?? null);
+                        $type = is_object($block) ? $block->type ?? null : $block['type'] ?? null;
                         if ($type === 'tool_use') {
                             $tool_calls[] = [
                                 'id' => is_object($block) ? $block->id : $block['id'],
                                 'name' => is_object($block) ? $block->name : $block['name'],
-                                'arguments' => is_object($block) ? (array) ($block->input ?? []) : ($block['input'] ?? [])
+                                'arguments' => is_object($block) ? (array) ($block->input ?? []) : $block['input'] ?? []
                             ];
                         }
                     }
@@ -560,7 +570,10 @@ abstract class aihelper
                     $output = 'Error: unknown tool "' . $tc['name'] . '"';
                 } else {
                     $server = $this->mcp_servers_tools_map[$tc['name']];
-                    $this->log($tc['name'] . '(' . json_encode($tc['arguments'], JSON_UNESCAPED_UNICODE) . ')', 'local tool call');
+                    $this->log(
+                        $tc['name'] . '(' . json_encode($tc['arguments'], JSON_UNESCAPED_UNICODE) . ')',
+                        'local tool call'
+                    );
                     if ($this->stream === true) {
                         echo ": keepalive\n\n";
                         if (ob_get_level() > 0) {
@@ -642,11 +655,15 @@ abstract class aihelper
                 $ch = curl_init($url);
                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
                 curl_setopt($ch, CURLOPT_POST, true);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
-                    'jsonrpc' => '2.0',
-                    'id' => 1,
-                    'method' => 'tools/list'
-                ]));
+                curl_setopt(
+                    $ch,
+                    CURLOPT_POSTFIELDS,
+                    json_encode([
+                        'jsonrpc' => '2.0',
+                        'id' => 1,
+                        'method' => 'tools/list'
+                    ])
+                );
                 $headers = ['Content-Type: application/json', 'Accept: application/json, text/event-stream'];
                 if (!empty($mcp__value['authorization_token'])) {
                     $headers[] = 'Authorization: Bearer ' . $mcp__value['authorization_token'];
@@ -2690,9 +2707,11 @@ class ai_claude extends aihelper
                 $lastContent = $last['content'] ?? null;
                 if ($lastRole === 'assistant' && is_array($lastContent)) {
                     foreach ($lastContent as $block) {
-                        $type = is_object($block) ? ($block->type ?? null) : ($block['type'] ?? null);
+                        $type = is_object($block) ? $block->type ?? null : $block['type'] ?? null;
                         if ($type === 'mcp_tool_use') {
-                            $this->log('addResponseToSession: removed orphaned mcp_tool_use block before appending new response');
+                            $this->log(
+                                'addResponseToSession: removed orphaned mcp_tool_use block before appending new response'
+                            );
                             array_pop(self::$sessions[$this->session_id]);
                             break;
                         }
@@ -3075,7 +3094,7 @@ class ai_gemini extends aihelper
         ],
         [
             'name' => 'gemma-3n-e4b-it',
-            'max_tokens' => 8192,
+            'max_tokens' => 32768,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'default' => false,
@@ -3083,7 +3102,23 @@ class ai_gemini extends aihelper
         ],
         [
             'name' => 'gemma-3n-e2b-it',
-            'max_tokens' => 8192,
+            'max_tokens' => 32768,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gemma-4-26b-a4b-it',
+            'max_tokens' => 32768,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gemma-4-31b-it',
+            'max_tokens' => 32768,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'default' => false,
@@ -3589,7 +3624,7 @@ class ai_lmstudio extends ai_chatgpt
                 if (!is_array($item) || ($item['role'] ?? null) !== 'user') {
                     continue;
                 }
-                foreach (($item['content'] ?? []) as $part) {
+                foreach ($item['content'] ?? [] as $part) {
                     if (is_array($part) && ($part['type'] ?? null) === 'input_text' && isset($part['text'])) {
                         $prompt_text .= ' ' . $part['text'];
                     }
@@ -3600,12 +3635,33 @@ class ai_lmstudio extends ai_chatgpt
 
             if ($prompt_text !== '') {
                 $creative_keywords = [
-                    'geschichte', 'kreativ', 'gedicht', 'erzähl', 'schreib', 'story',
-                    'märchen', 'roman', 'szene', 'witz', 'witzig', 'lustig', 'ulkig', 'humor', 'komisch',
+                    'geschichte',
+                    'kreativ',
+                    'gedicht',
+                    'erzähl',
+                    'schreib',
+                    'story',
+                    'märchen',
+                    'roman',
+                    'szene',
+                    'witz',
+                    'witzig',
+                    'lustig',
+                    'ulkig',
+                    'humor',
+                    'komisch'
                 ];
                 $reasoning_keywords = [
-                    'denke', 'überlege', 'analysiere', 'erkläre', 'warum',
-                    'berechne', 'löse', 'beweise', 'vergleiche', 'schlussfolgere',
+                    'denke',
+                    'überlege',
+                    'analysiere',
+                    'erkläre',
+                    'warum',
+                    'berechne',
+                    'löse',
+                    'beweise',
+                    'vergleiche',
+                    'schlussfolgere'
                 ];
                 $matches = fn(array $keywords) => array_reduce(
                     $keywords,
@@ -3614,7 +3670,10 @@ class ai_lmstudio extends ai_chatgpt
                 );
                 if ($matches($creative_keywords)) {
                     $profile = 'creative';
-                } elseif ($matches($reasoning_keywords) || preg_match('/\d+\s*[\*\+\-x\/]\s*\d+/', $prompt_text) === 1) {
+                } elseif (
+                    $matches($reasoning_keywords) ||
+                    preg_match('/\d+\s*[\*\+\-x\/]\s*\d+/', $prompt_text) === 1
+                ) {
                     $profile = 'reasoning';
                 }
             }
@@ -3626,12 +3685,12 @@ class ai_lmstudio extends ai_chatgpt
             $args += ['top_p' => 0.95, 'top_k' => 40];
         } elseif (str_contains($model_name, 'qwen3.5')) {
             $args += [
-                'top_p' => ($profile === 'reasoning' || $profile === 'creative') ? 0.95 : 0.8,
+                'top_p' => $profile === 'reasoning' || $profile === 'creative' ? 0.95 : 0.8,
                 'top_k' => 20,
-                'presence_penalty' => ($profile === 'creative') ? 0.4 : 0.0,
+                'presence_penalty' => $profile === 'creative' ? 0.4 : 0.0,
                 // lmstudio responses api ignores frequency_penalty; use repeat_penalty instead
                 // (llmster maps repeat_penalty → llama.repeatPenalty; default is 1.1)
-                'repeat_penalty' => ($profile === 'agentic') ? 1.0 : 1.1,
+                'repeat_penalty' => $profile === 'agentic' ? 1.0 : 1.1
             ];
         } elseif (str_contains($model_name, 'qwen3')) {
             $args += ['top_p' => 0.8, 'top_k' => 20];
@@ -3652,7 +3711,7 @@ class ai_lmstudio extends ai_chatgpt
                     if (!is_array($item) || ($item['role'] ?? null) !== 'assistant') {
                         continue;
                     }
-                    foreach (($item['content'] ?? []) as $part) {
+                    foreach ($item['content'] ?? [] as $part) {
                         if (is_array($part) && ($part['text'] ?? '') === $think_block) {
                             $already_primed = true;
                             break 2;
@@ -3662,7 +3721,7 @@ class ai_lmstudio extends ai_chatgpt
                 if (!$already_primed) {
                     $args['input'][] = [
                         'role' => 'assistant',
-                        'content' => [['type' => 'output_text', 'text' => $think_block]],
+                        'content' => [['type' => 'output_text', 'text' => $think_block]]
                     ];
                 }
             }
