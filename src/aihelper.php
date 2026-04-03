@@ -10,7 +10,8 @@ abstract class aihelper
     public $name = null;
     protected $url = null;
     public $models = [];
-    public $support_mcp = null;
+    public $support_mcp_remote = null;
+    public $support_mcp_local = null;
     public $support_stream = null;
 
     protected $model = null;
@@ -460,15 +461,22 @@ abstract class aihelper
             $this->loadModel($model);
         }
         $this->max_tries = $max_tries !== null ? $max_tries : 1;
-        if ($this->support_mcp && $mcp_servers !== null && !empty($mcp_servers)) {
+        $supports_mcp = $this->support_mcp_remote || $this->support_mcp_local;
+        if ($supports_mcp && $mcp_servers !== null && !empty($mcp_servers)) {
             if (is_array(current($mcp_servers))) {
                 $this->mcp_servers = $mcp_servers;
             } else {
                 $this->mcp_servers = [$mcp_servers];
             }
         }
-        if ($this->support_mcp && $this->mcp_servers !== null) {
-            $this->mcp_servers_call_type = $mcp_servers_call_type === 'local' ? 'local' : 'remote';
+        if ($supports_mcp && $this->mcp_servers !== null) {
+            if ($mcp_servers_call_type === 'local' && $this->support_mcp_local) {
+                $this->mcp_servers_call_type = 'local';
+            } elseif ($this->support_mcp_remote) {
+                $this->mcp_servers_call_type = 'remote';
+            } else {
+                $this->mcp_servers_call_type = 'local';
+            }
         }
         $this->stream = $this->support_stream && $stream === true ? true : false;
 
@@ -519,12 +527,30 @@ abstract class aihelper
     protected function runLocalToolLoop(array $return): array
     {
         $is_claude = in_array($this->name, ['claude', 'grok', 'deepseek'], true);
+        $is_gemini = $this->name === 'gemini';
         $max_tool_rounds = 50;
         while ($max_tool_rounds > 0) {
             // extract pending tool calls from session
             $tool_calls = [];
             $session = self::$sessions[$this->session_id] ?? [];
-            if ($is_claude) {
+            if ($is_gemini) {
+                // gemini: functionCall parts inside last model message
+                $last = !empty($session) ? end($session) : null;
+                if ($last !== null && isset($last['role']) && $last['role'] === 'model' && isset($last['parts'])) {
+                    foreach ($last['parts'] as $part) {
+                        $fc = is_object($part) ? ($part->functionCall ?? null) : ($part['functionCall'] ?? null);
+                        if ($fc !== null) {
+                            $name = is_object($fc) ? $fc->name : $fc['name'];
+                            $args = is_object($fc) ? (array) ($fc->args ?? []) : ($fc['args'] ?? []);
+                            $tool_calls[] = [
+                                'id' => $name,
+                                'name' => $name,
+                                'arguments' => $args
+                            ];
+                        }
+                    }
+                }
+            } elseif ($is_claude) {
                 // claude: tool_use blocks inside last assistant message content
                 $last = !empty($session) ? end($session) : null;
                 if (
@@ -600,10 +626,24 @@ abstract class aihelper
                     }
                     $this->log(mb_substr($output, 0, 200), 'local tool result');
                 }
-                $tool_results[] = ['id' => $tc['id'], 'output' => $output];
+                $tool_results[] = ['id' => $tc['id'], 'name' => $tc['name'], 'output' => $output];
             }
             // append tool results in provider-specific format
-            if ($is_claude) {
+            if ($is_gemini) {
+                $response_parts = [];
+                foreach ($tool_results as $tr) {
+                    $response_parts[] = [
+                        'functionResponse' => [
+                            'name' => $tr['name'],
+                            'response' => ['result' => $tr['output']]
+                        ]
+                    ];
+                }
+                self::$sessions[$this->session_id][] = [
+                    'role' => 'user',
+                    'parts' => $response_parts
+                ];
+            } elseif ($is_claude) {
                 $result_blocks = [];
                 foreach ($tool_results as $tr) {
                     $result_blocks[] = [
@@ -638,7 +678,7 @@ abstract class aihelper
         return $return;
     }
 
-    protected function buildLocalToolsArgs(string $schema_key = 'parameters', bool $wrap_function_type = false): array
+    protected function buildLocalToolsArgs(string $schema_key = 'parameters', bool $wrap_function_type = false, array $strip_schema_keys = []): array
     {
         if (empty($this->mcp_servers_tools_map)) {
             // fetch tools/list from all MCP servers in parallel
@@ -706,7 +746,7 @@ abstract class aihelper
                 $url = $h['mcp']['url'] ?? null;
                 $authorization_token = $h['mcp']['authorization_token'] ?? null;
                 foreach ($toolsData['result']['tools'] as $tool) {
-                    $schema = self::buildLocalToolsArgsSanitize($tool['inputSchema'] ?? ['type' => 'object']);
+                    $schema = self::buildLocalToolsArgsSanitize($tool['inputSchema'] ?? ['type' => 'object'], $strip_schema_keys);
                     $tool_def = [
                         'name' => $tool['name'],
                         'description' => $tool['description'] ?? '',
@@ -731,16 +771,28 @@ abstract class aihelper
         return $tools;
     }
 
-    protected static function buildLocalToolsArgsSanitize(array $schema): array
+    protected static function buildLocalToolsArgsSanitize(array $schema, array $strip_keys = []): array
     {
+        foreach ($strip_keys as $strip_key) {
+            unset($schema[$strip_key]);
+        }
         foreach ($schema as $key => &$value) {
             if (is_array($value)) {
-                if (empty($value) && in_array($key, ['properties', 'items', 'additionalProperties'], true)) {
+                // "type": ["array", "null"] → "type": "array"
+                if ($key === 'type' && !empty($value) && array_is_list($value)) {
+                    $value = $value[0];
+                } elseif (empty($value) && $key === 'items') {
+                    $value = ['type' => 'string'];
+                } elseif (empty($value) && in_array($key, ['properties', 'additionalProperties'], true)) {
                     $value = new \stdClass();
                 } else {
-                    $value = self::buildLocalToolsArgsSanitize($value);
+                    $value = self::buildLocalToolsArgsSanitize($value, $strip_keys);
                 }
             }
+        }
+        // ensure "items" exists when "type" is "array"
+        if (isset($schema['type']) && $schema['type'] === 'array' && !isset($schema['items'])) {
+            $schema['items'] = ['type' => 'string'];
         }
         return $schema;
     }
@@ -1584,6 +1636,115 @@ abstract class aihelper
             };
         }
 
+        if ($this->name === 'gemini') {
+            // mimic non stream result
+            $this->stream_response = (object) [
+                'result' => (object) [
+                    'candidates' => [
+                        (object) [
+                            'content' => (object) [
+                                'parts' => []
+                            ]
+                        ]
+                    ],
+                    'usageMetadata' => (object) [
+                        'promptTokenCount' => 0,
+                        'candidatesTokenCount' => 0
+                    ]
+                ]
+            ];
+
+            $stream_callback = function ($chunk) {
+                $this->log($chunk, 'chunk');
+                $this->stream_buffer_in .= $chunk;
+
+                while (($pos = strpos($this->stream_buffer_in, "\n")) !== false) {
+                    $line = rtrim(substr($this->stream_buffer_in, 0, $pos), "\r");
+                    $this->stream_buffer_in = substr($this->stream_buffer_in, $pos + 1);
+
+                    if (strpos($line, 'data: ') === 0) {
+                        $dataLine = substr($line, 6);
+                        if ($dataLine === '') {
+                            continue;
+                        }
+                        $parsed = json_decode($dataLine, true);
+                        if ($parsed === null) {
+                            continue;
+                        }
+
+                        // error
+                        if (isset($parsed['error'])) {
+                            $this->stream_response->result->error = (object) [
+                                'message' => $parsed['error']['message'] ?? 'unknown error'
+                            ];
+                            continue;
+                        }
+
+                        // text delta
+                        if (isset($parsed['candidates'][0]['content']['parts'])) {
+                            foreach ($parsed['candidates'][0]['content']['parts'] as $part) {
+                                if (isset($part['text'])) {
+                                    $text = $part['text'];
+                                    // accumulate
+                                    $parts = &$this->stream_response->result->candidates[0]->content->parts;
+                                    if (empty($parts) || !isset(end($parts)->text)) {
+                                        $parts[] = (object) ['text' => $text];
+                                    } else {
+                                        $parts[count($parts) - 1]->text .= $text;
+                                    }
+                                    // echo SSE
+                                    $this->stream_running = true;
+                                    echo 'data: ' .
+                                        json_encode([
+                                            'id' => uniqid(),
+                                            'choices' => [['delta' => ['content' => $text]]]
+                                        ]) .
+                                        "\n\n";
+                                    if (ob_get_level() > 0) {
+                                        ob_flush();
+                                    }
+                                    flush();
+                                }
+                                if (isset($part['functionCall'])) {
+                                    $parts = &$this->stream_response->result->candidates[0]->content->parts;
+                                    $parts[] = (object) [
+                                        'functionCall' => (object) $part['functionCall']
+                                    ];
+                                    if ($this->stream_running) {
+                                        echo ": keepalive\n\n";
+                                        if (ob_get_level() > 0) {
+                                            ob_flush();
+                                        }
+                                        flush();
+                                    }
+                                }
+                            }
+                        }
+
+                        // usage / finish
+                        if (isset($parsed['usageMetadata'])) {
+                            if (isset($parsed['usageMetadata']['promptTokenCount'])) {
+                                $this->stream_response->result->usageMetadata->promptTokenCount = $parsed['usageMetadata']['promptTokenCount'];
+                            }
+                            if (isset($parsed['usageMetadata']['candidatesTokenCount'])) {
+                                $this->stream_response->result->usageMetadata->candidatesTokenCount = $parsed['usageMetadata']['candidatesTokenCount'];
+                            }
+                        }
+                        if (isset($parsed['candidates'][0]['finishReason'])) {
+                            echo "data: [DONE]\n\n";
+                            if (ob_get_level() > 0) {
+                                ob_flush();
+                            }
+                            flush();
+                            $this->stream_running = false;
+                        }
+                    }
+                }
+
+                return strlen($chunk);
+            };
+        }
+
         if (!headers_sent()) {
             header('Content-Type: text/event-stream');
             header('Cache-Control: no-cache');
@@ -1632,7 +1793,8 @@ class ai_chatgpt extends aihelper
 
     protected $url = 'https://api.openai.com/v1';
 
-    public $support_mcp = true;
+    public $support_mcp_remote = true;
+    public $support_mcp_local = true;
 
     public $support_stream = true;
 
@@ -2520,7 +2682,8 @@ class ai_claude extends aihelper
 
     protected $url = 'https://api.anthropic.com/v1';
 
-    public $support_mcp = true;
+    public $support_mcp_remote = true;
+    public $support_mcp_local = true;
 
     public $support_stream = true;
 
@@ -2983,9 +3146,10 @@ class ai_gemini extends aihelper
 
     protected $url = 'https://generativelanguage.googleapis.com/v1beta';
 
-    public $support_mcp = false;
+    public $support_mcp_remote = false;
+    public $support_mcp_local = true;
 
-    public $support_stream = false;
+    public $support_stream = true;
 
     public $models = [
         [
@@ -3257,7 +3421,7 @@ class ai_gemini extends aihelper
     ): array {
         $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
-        if (__::nx($this->model) || __::nx($this->session_id) || __::nx($prompt)) {
+        if (__::nx($this->model) || __::nx($this->session_id) || ($add_prompt_to_session && __::nx($prompt))) {
             $return['response'] = 'data missing.';
             return $return;
         }
@@ -3271,16 +3435,27 @@ class ai_gemini extends aihelper
         ];
         $args = $this->applyTemperatureParameter($args, 'generationConfig');
 
+        if (!empty($this->mcp_servers) && $this->mcp_servers_call_type === 'local') {
+            $tools = $this->buildLocalToolsArgs('parameters', false, ['additionalProperties', '$schema', 'definition', 'default']);
+            if (!empty($tools)) {
+                $args['tools'] = [['functionDeclarations' => $tools]];
+            }
+        }
+
         if (method_exists($this, 'modifyArgs')) {
             $args = $this->modifyArgs($args);
         }
         $this->log((int) round(strlen(json_encode($args)) / 3.5), 'ask with input token length');
         $this->log($args, 'ask');
         $response = $this->makeApiCall($args);
+        if ($this->stream === true) {
+            $response = $this->stream_response;
+        }
         $this->log($response?->result ?? null, 'response');
         $this->addCosts($response, $return);
 
         $output_text = $prev_output_text !== null ? $prev_output_text : '';
+        $has_function_calls = false;
         if (
             __::x($response ?? null) &&
             __::x($response?->result ?? null) &&
@@ -3298,9 +3473,20 @@ class ai_gemini extends aihelper
                             }
                             $output_text .= __::trim_whitespace($parts__value->text);
                         }
+                        if (isset($parts__value->functionCall)) {
+                            $has_function_calls = true;
+                        }
                     }
                 }
             }
+        }
+
+        // handle functionCall for local tool loop
+        if ($this->mcp_servers_call_type === 'local' && $has_function_calls) {
+            $this->addResponseToSession($response);
+            $return['response'] = $output_text ?: '';
+            $return['success'] = true;
+            return $return;
         }
 
         if (__::nx($output_text)) {
@@ -3330,12 +3516,14 @@ class ai_gemini extends aihelper
 
     protected function makeApiCall(?array $args = null): mixed
     {
+        $action = $this->stream ? 'streamGenerateContent?alt=sse&' : 'generateContent?';
         return __::curl(
-            url: $this->url . '/models/' . $this->model . ':generateContent?key=' . $this->api_key,
+            url: $this->url . '/models/' . $this->model . ':' . $action . 'key=' . $this->api_key,
             data: $args,
             method: 'POST',
             headers: null,
-            timeout: $this->timeout
+            timeout: $this->timeout,
+            stream_callback: $this->getStreamCallback()
         );
     }
 }
@@ -3351,7 +3539,8 @@ class ai_grok extends ai_claude
 
     protected $url = 'https://api.x.ai/v1';
 
-    public $support_mcp = false;
+    public $support_mcp_remote = false;
+    public $support_mcp_local = false;
 
     public $support_stream = false;
 
@@ -3450,7 +3639,8 @@ class ai_deepseek extends ai_claude
 
     protected $url = 'https://api.deepseek.com/anthropic';
 
-    public $support_mcp = false;
+    public $support_mcp_remote = false;
+    public $support_mcp_local = false;
 
     public $support_stream = false;
 
@@ -3516,7 +3706,8 @@ class ai_lmstudio extends ai_chatgpt
 
     protected $url = 'http://localhost:1234/v1';
 
-    public $support_mcp = true;
+    public $support_mcp_remote = true;
+    public $support_mcp_local = true;
 
     public $support_stream = true;
 
@@ -3762,7 +3953,8 @@ class ai_test extends ai_claude
 
     protected $url = null;
 
-    public $support_mcp = false;
+    public $support_mcp_remote = false;
+    public $support_mcp_local = false;
 
     public $support_stream = true;
 

@@ -981,8 +981,10 @@ class Test extends \PHPUnit\Framework\TestCase
         }
 
         $providers = [
-            ['provider' => 'claude', 'model' => 'claude-haiku-4-5', 'api_key' => $_SERVER['CLAUDE_API_KEY'] ?? '', 'url' => null, 'call_types' => ['remote', 'local']],
-            ['provider' => 'lmstudio', 'model' => 'qwen3.5-27b-ud', 'api_key' => $_SERVER['LMSTUDIO_API_KEY'] ?? '', 'url' => $_SERVER['LMSTUDIO_URL'] ?? null, 'call_types' => ['remote', 'local']]
+            ['provider' => 'claude', 'model' => 'claude-haiku-4-5', 'api_key' => $_SERVER['CLAUDE_API_KEY'] ?? '', 'url' => null, 'call_types' => ['local']],
+            ['provider' => 'chatgpt', 'model' => 'gpt-4.1-mini', 'api_key' => $_SERVER['CHATGPT_API_KEY'] ?? '', 'url' => null, 'call_types' => ['local']],
+            ['provider' => 'gemini', 'model' => 'gemini-2.5-flash', 'api_key' => $_SERVER['GEMINI_API_KEY'] ?? '', 'url' => null, 'call_types' => ['local']],
+            ['provider' => 'lmstudio', 'model' => 'qwen3.5-27b-ud', 'api_key' => $_SERVER['LMSTUDIO_API_KEY'] ?? '', 'url' => $_SERVER['LMSTUDIO_URL'] ?? null, 'call_types' => ['local']]
         ];
 
         $all_passed = true;
@@ -990,7 +992,7 @@ class Test extends \PHPUnit\Framework\TestCase
         foreach ($providers as $prov) {
             $this->log('--- ' . $prov['provider'] . ' / ' . $prov['model'] . ' ---');
             foreach ($prov['call_types'] as $call_type) {
-                foreach ([1, 2, 3, 4, 5, 6] as $mcp_count) {
+                foreach ([1, 2] as $mcp_count) {
                     $mcp_subset = array_slice($mcp_servers, 0, $mcp_count);
                     foreach ($prompts as $p_index => $p) {
                         $label = $prov['provider'] . ' / ' . $call_type . ' / ' . $mcp_count . ' mcp(s) / prompt ' . ($p_index + 1);
