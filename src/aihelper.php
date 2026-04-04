@@ -1617,6 +1617,18 @@ abstract class aihelper
                                 $this->stream_running = false;
                             }
 
+                            if (isset($parsed['type']) && $parsed['type'] === 'response.failed') {
+                                $this->stream_response->result->error = (object) [
+                                    'message' => $parsed['response']['error']['message'] ?? 'unknown error'
+                                ];
+                                echo "data: [DONE]\n\n";
+                                if (ob_get_level() > 0) {
+                                    ob_flush();
+                                }
+                                flush();
+                                $this->stream_running = false;
+                            }
+
                             // send SSE keepalive comment for non-text events (tool calls, MCP results, etc.)
                             // to prevent client/infrastructure timeout during long-running agentic runs
                             if ($this->stream_running) {
@@ -1720,9 +1732,11 @@ abstract class aihelper
                                 }
                                 if (isset($part['functionCall'])) {
                                     $parts = &$this->stream_response->result->candidates[0]->content->parts;
-                                    $parts[] = (object) [
-                                        'functionCall' => (object) $part['functionCall']
-                                    ];
+                                    $partObj = ['functionCall' => (object) $part['functionCall']];
+                                    if (isset($part['thoughtSignature'])) {
+                                        $partObj['thoughtSignature'] = $part['thoughtSignature'];
+                                    }
+                                    $parts[] = (object) $partObj;
                                     if ($this->stream_running) {
                                         echo ": keepalive\n\n";
                                         if (ob_get_level() > 0) {
@@ -2488,11 +2502,12 @@ class ai_chatgpt extends aihelper
                         'role' => 'assistant',
                         'content' => $content
                     ];
-                } elseif (!in_array($output__value->type, ['mcp_call', 'mcp_list_tools', 'reasoning'])) {
-                    // mcp_call is excluded: the API does not accept it as input in follow-up requests;
-                    // mcp_list_tools is excluded (re-discovered fresh on each call);
-                    // reasoning is excluded because the API requires it to be followed by a message item —
+                } elseif (!in_array($output__value->type, ['mcp_call', 'mcp_list_tools']) &&
+                    // reasoning must be kept for local tool loop (GPT-5 requires it alongside function_call),
+                    // but excluded for remote because the API requires it to be followed by a message item —
                     // if that message is missing or empty, storing reasoning alone causes an API error
+                    !($output__value->type === 'reasoning' && $this->mcp_servers_call_type !== 'local')
+                ) {
                     self::$sessions[$this->session_id][] = json_decode(json_encode($output__value), true);
                 }
             }
