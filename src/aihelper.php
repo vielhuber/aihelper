@@ -3443,7 +3443,7 @@ class ai_gemini extends aihelper
             'contents' => self::$sessions[$this->session_id]
         ];
         $args = $this->applyTemperatureParameter($args, 'generationConfig');
-        if (str_starts_with($this->model, 'gemini-')) {
+        if (in_array($this->model, ['gemini-2.5-pro', 'gemini-2.5-flash'], true)) {
             $args['generationConfig']['thinkingConfig'] = ['thinkingBudget' => 1024];
         }
 
