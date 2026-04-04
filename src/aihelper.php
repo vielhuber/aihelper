@@ -1603,6 +1603,10 @@ abstract class aihelper
 
                             if (isset($parsed['type']) && $parsed['type'] === 'response.completed') {
                                 $this->stream_response->result->id = $parsed['response']['id'] ?? null;
+                                // carry over full output items (incl. function_call) for the tool loop
+                                if (isset($parsed['response']['output']) && is_array($parsed['response']['output'])) {
+                                    $this->stream_response->result->output = json_decode(json_encode($parsed['response']['output']));
+                                }
                                 // finally sleep to ensure all chunks arrive
                                 sleep(2);
                                 echo "data: [DONE]\n\n";
