@@ -580,11 +580,16 @@ class Test extends \PHPUnit\Framework\TestCase
                     ($_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != '' &&
                     ($_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != ''
                 ) {
-                    $return = $ai_mcp->ask($_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)]);
+                    $return = $ai_mcp->ask(
+                        $_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)]
+                    );
                     $success_this =
                         $return['success'] &&
                         count($ai_mcp->getSessionContent()) === $i_prompt * 2 &&
-                        stripos($return['response'], $_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)]) !== false;
+                        stripos(
+                            $return['response'],
+                            $_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)]
+                        ) !== false;
                     if ($success_this) {
                         $success_count++;
                     } else {
@@ -632,7 +637,7 @@ class Test extends \PHPUnit\Framework\TestCase
                         $this->assertSame($return, false);
                         $return = $ai->ask('Test!');
                         $this->assertSame($return['success'], false);
-                        $this->assertMatchesRegularExpression('/^$|api|error/i', $return['response'] ?? '');
+                        $this->assertMatchesRegularExpression('/^$|api|error|missing/i', $return['response'] ?? '');
                     }
                 }
             }
@@ -993,10 +998,34 @@ class Test extends \PHPUnit\Framework\TestCase
         }
 
         $providers = [
-            ['provider' => 'claude', 'model' => 'claude-haiku-4-5', 'api_key' => $_SERVER['CLAUDE_API_KEY'] ?? '', 'url' => null, 'call_types' => ['local']],
-            ['provider' => 'chatgpt', 'model' => 'gpt-4.1-mini', 'api_key' => $_SERVER['CHATGPT_API_KEY'] ?? '', 'url' => null, 'call_types' => ['local']],
-            ['provider' => 'gemini', 'model' => 'gemini-2.5-flash', 'api_key' => $_SERVER['GEMINI_API_KEY'] ?? '', 'url' => null, 'call_types' => ['local']],
-            ['provider' => 'lmstudio', 'model' => 'qwen3.5-27b-ud', 'api_key' => $_SERVER['LMSTUDIO_API_KEY'] ?? '', 'url' => $_SERVER['LMSTUDIO_URL'] ?? null, 'call_types' => ['local']]
+            [
+                'provider' => 'claude',
+                'model' => 'claude-haiku-4-5',
+                'api_key' => $_SERVER['CLAUDE_API_KEY'] ?? '',
+                'url' => null,
+                'call_types' => ['local']
+            ],
+            [
+                'provider' => 'chatgpt',
+                'model' => 'gpt-4.1-mini',
+                'api_key' => $_SERVER['CHATGPT_API_KEY'] ?? '',
+                'url' => null,
+                'call_types' => ['local']
+            ],
+            [
+                'provider' => 'gemini',
+                'model' => 'gemini-2.5-flash',
+                'api_key' => $_SERVER['GEMINI_API_KEY'] ?? '',
+                'url' => null,
+                'call_types' => ['local']
+            ],
+            [
+                'provider' => 'lmstudio',
+                'model' => 'qwen3.5-27b-ud',
+                'api_key' => $_SERVER['LMSTUDIO_API_KEY'] ?? '',
+                'url' => $_SERVER['LMSTUDIO_URL'] ?? null,
+                'call_types' => ['local']
+            ]
         ];
 
         $all_passed = true;
@@ -1007,7 +1036,14 @@ class Test extends \PHPUnit\Framework\TestCase
                 foreach ([1, 2] as $mcp_count) {
                     $mcp_subset = array_slice($mcp_servers, 0, $mcp_count);
                     foreach ($prompts as $p_index => $p) {
-                        $label = $prov['provider'] . ' / ' . $call_type . ' / ' . $mcp_count . ' mcp(s) / prompt ' . ($p_index + 1);
+                        $label =
+                            $prov['provider'] .
+                            ' / ' .
+                            $call_type .
+                            ' / ' .
+                            $mcp_count .
+                            ' mcp(s) / prompt ' .
+                            ($p_index + 1);
                         $ai = aihelper::create(
                             provider: $prov['provider'],
                             model: $prov['model'],
@@ -1026,13 +1062,35 @@ class Test extends \PHPUnit\Framework\TestCase
                         $result = $ai->ask($p['prompt']);
                         $time = microtime(true) - $time_start;
                         if (!$result['success']) {
-                            $this->log('⛔ ' . $label . ': FAILED (' . number_format($time, 2) . 's) — ' . mb_substr($result['response'] ?? 'no response', 0, 100));
+                            $this->log(
+                                '⛔ ' .
+                                    $label .
+                                    ': FAILED (' .
+                                    number_format($time, 2) .
+                                    's) — ' .
+                                    mb_substr($result['response'] ?? 'no response', 0, 100)
+                            );
                             $all_passed = false;
                         } elseif ($p['answer'] !== '' && mb_stripos($result['response'], $p['answer']) === false) {
-                            $this->log('⛔ ' . $label . ': WRONG ANSWER (' . number_format($time, 2) . 's) — ' . mb_substr($result['response'], 0, 100));
+                            $this->log(
+                                '⛔ ' .
+                                    $label .
+                                    ': WRONG ANSWER (' .
+                                    number_format($time, 2) .
+                                    's) — ' .
+                                    mb_substr($result['response'], 0, 100)
+                            );
                             $all_passed = false;
                         } else {
-                            $this->log('✅ ' . $label . ': OK (' . number_format($result['costs'], 5) . '$ / ' . number_format($time, 2) . 's)');
+                            $this->log(
+                                '✅ ' .
+                                    $label .
+                                    ': OK (' .
+                                    number_format($result['costs'], 5) .
+                                    '$ / ' .
+                                    number_format($time, 2) .
+                                    's)'
+                            );
                         }
                         sleep(10);
                     }

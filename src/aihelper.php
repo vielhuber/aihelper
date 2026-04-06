@@ -952,6 +952,38 @@ abstract class aihelper
         return trim(preg_replace('/<think>.*?<\/think>\s*/s', '', $text));
     }
 
+    protected static function extractErrorMessage(mixed $input): ?string
+    {
+        // accepts either a parsed error array (from stream callbacks)
+        // or a full response object (from askThis)
+        if (is_array($input)) {
+            $error = $input;
+        } elseif (is_object($input)) {
+            $error = $input->result->error ?? null;
+            if ($error === null && ($input->result->type ?? null) === 'error') {
+                $error = $input->result->error ?? null;
+            }
+            if ($error === null) {
+                return null;
+            }
+        } else {
+            return null;
+        }
+        if (is_string($error)) {
+            return $error;
+        }
+        // normalize object to array
+        if (is_object($error)) {
+            $error = json_decode(json_encode($error), true);
+        }
+        if (!is_array($error)) {
+            return null;
+        }
+        return $error['metadata']['raw']
+            ?? $error['message']
+            ?? json_encode($error, JSON_UNESCAPED_UNICODE);
+    }
+
     protected function normalizeStreamTextDelta(
         string $text,
         string $existing_text = '',
@@ -1228,7 +1260,7 @@ abstract class aihelper
                     $parsed = json_decode($chunk, true);
                     if (isset($parsed['error']) && isset($parsed['error']['message'])) {
                         $this->stream_response->result->error = (object) [
-                            'message' => $parsed['error']['message'] ?? null
+                            'message' => self::extractErrorMessage($parsed['error'])
                         ];
                     }
                 }
@@ -1512,7 +1544,7 @@ abstract class aihelper
                     $parsed = json_decode($chunk, true);
                     if (isset($parsed['error']) && isset($parsed['error']['message'])) {
                         $this->stream_response->result->error = (object) [
-                            'message' => $parsed['error']['message'] ?? null
+                            'message' => self::extractErrorMessage($parsed['error'])
                         ];
                     }
                 }
@@ -1689,7 +1721,7 @@ abstract class aihelper
 
                             if (isset($parsed['type']) && $parsed['type'] === 'response.failed') {
                                 $this->stream_response->result->error = (object) [
-                                    'message' => $parsed['response']['error']['message'] ?? 'unknown error'
+                                    'message' => isset($parsed['response']['error']) ? self::extractErrorMessage($parsed['response']['error']) : 'unknown error'
                                 ];
                                 echo "data: [DONE]\n\n";
                                 if (ob_get_level() > 0) {
@@ -1752,7 +1784,7 @@ abstract class aihelper
                     $parsed = json_decode($chunk, true);
                     if (isset($parsed['error']) && isset($parsed['error']['message'])) {
                         $this->stream_response->result->error = (object) [
-                            'message' => $parsed['error']['message'] ?? null
+                            'message' => self::extractErrorMessage($parsed['error'])
                         ];
                     }
                 }
@@ -1785,7 +1817,7 @@ abstract class aihelper
 
                         if (isset($parsed['error'])) {
                             $this->stream_response->result->error = (object) [
-                                'message' => $parsed['error']['message'] ?? 'unknown error'
+                                'message' => self::extractErrorMessage($parsed['error'])
                             ];
                             continue;
                         }
@@ -1970,7 +2002,7 @@ abstract class aihelper
                         // error
                         if (isset($parsed['error'])) {
                             $this->stream_response->result->error = (object) [
-                                'message' => $parsed['error']['message'] ?? 'unknown error'
+                                'message' => self::extractErrorMessage($parsed['error'])
                             ];
                             continue;
                         }
@@ -2948,14 +2980,9 @@ class ai_chatgpt extends aihelper
 
         if (__::nx($output_text ?? null)) {
             $this->log($response, 'failed');
-            if (
-                __::x($response ?? null) &&
-                __::x($response?->result ?? null) &&
-                __::x($response?->result?->error ?? null) &&
-                __::x($response?->result?->error?->message ?? null) &&
-                is_string($response->result->error->message)
-            ) {
-                $return['response'] = $response->result->error->message;
+            $error_msg = $this->extractErrorMessage($response);
+            if ($error_msg !== null) {
+                $return['response'] = $error_msg;
             }
             return $return;
         }
@@ -3401,22 +3428,9 @@ class ai_claude extends aihelper
                 $this->log('overload detected. pausing...');
                 sleep(5);
             }
-            if (
-                __::x($response ?? null) &&
-                __::x($response?->result ?? null) &&
-                __::x($response?->result?->error ?? null) &&
-                __::x($response?->result?->error?->message ?? null) &&
-                is_string($response->result->error->message)
-            ) {
-                $return['response'] = $response->result->error->message;
-            }
-            if (
-                __::x($response ?? null) &&
-                __::x($response?->result ?? null) &&
-                __::x($response?->result?->error ?? null) &&
-                is_string($response->result->error)
-            ) {
-                $return['response'] = $response->result->error;
+            $error_msg = $this->extractErrorMessage($response);
+            if ($error_msg !== null) {
+                $return['response'] = $error_msg;
             }
             return $return;
         }
@@ -3826,14 +3840,9 @@ class ai_gemini extends aihelper
 
         if (__::nx($output_text)) {
             $this->log($response, 'failed');
-            if (
-                __::x($response ?? null) &&
-                __::x($response?->result ?? null) &&
-                __::x($response?->result?->error ?? null) &&
-                __::x($response?->result?->error?->message ?? null) &&
-                is_string($response->result->error->message)
-            ) {
-                $return['response'] = $response->result->error->message;
+            $error_msg = $this->extractErrorMessage($response);
+            if ($error_msg !== null) {
+                $return['response'] = $error_msg;
             }
             return $return;
         }
@@ -4098,6 +4107,21 @@ class ai_openrouter extends aihelper
         return $models;
     }
 
+    public function ping(): bool
+    {
+        try {
+            $response = __::curl(
+                url: $this->url . '/auth/key',
+                method: 'GET',
+                headers: ['Authorization' => 'Bearer ' . $this->api_key],
+                timeout: 30
+            );
+            return ($response->status ?? 0) >= 200 && ($response->status ?? 0) < 300;
+        } catch (\Exception) {
+            return false;
+        }
+    }
+
     protected function bringPromptInFormat(string $prompt, mixed $files = null): array
     {
         if (!__::x($files ?? null)) {
@@ -4243,14 +4267,9 @@ class ai_openrouter extends aihelper
 
         if (__::nx($output_text ?? null)) {
             $this->log($response, 'failed');
-            if (
-                __::x($response ?? null) &&
-                __::x($response?->result ?? null) &&
-                __::x($response?->result?->error ?? null) &&
-                __::x($response?->result?->error?->message ?? null) &&
-                is_string($response->result->error->message)
-            ) {
-                $return['response'] = $response->result->error->message;
+            $error_msg = $this->extractErrorMessage($response);
+            if ($error_msg !== null) {
+                $return['response'] = $error_msg;
             }
             return $return;
         }
