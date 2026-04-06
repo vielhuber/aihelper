@@ -1732,7 +1732,12 @@ abstract class aihelper
                                 }
                                 if (isset($part['functionCall'])) {
                                     $parts = &$this->stream_response->result->candidates[0]->content->parts;
-                                    $partObj = ['functionCall' => (object) $part['functionCall']];
+                                    $fc = $part['functionCall'];
+                                    // ensure args is always an object (empty args would serialize as [] otherwise)
+                                    if (!isset($fc['args']) || (is_array($fc['args']) && empty($fc['args']))) {
+                                        $fc['args'] = new \stdClass();
+                                    }
+                                    $partObj = ['functionCall' => (object) $fc];
                                     if (isset($part['thoughtSignature'])) {
                                         $partObj['thoughtSignature'] = $part['thoughtSignature'];
                                     }
