@@ -53,8 +53,8 @@ abstract class aihelper
         ?bool $stream = null,
         ?string $url = null
     ): ?self {
-        if ($provider === 'chatgpt') {
-            return new ai_chatgpt(
+        if ($provider === 'openai') {
+            return new ai_openai(
                 model: $model,
                 temperature: $temperature,
                 timeout: $timeout,
@@ -69,8 +69,8 @@ abstract class aihelper
                 url: $url
             );
         }
-        if ($provider === 'claude') {
-            return new ai_claude(
+        if ($provider === 'anthropic') {
+            return new ai_anthropic(
                 model: $model,
                 temperature: $temperature,
                 timeout: $timeout,
@@ -85,8 +85,8 @@ abstract class aihelper
                 url: $url
             );
         }
-        if ($provider === 'gemini') {
-            return new ai_gemini(
+        if ($provider === 'google') {
+            return new ai_google(
                 model: $model,
                 temperature: $temperature,
                 timeout: $timeout,
@@ -101,8 +101,8 @@ abstract class aihelper
                 url: $url
             );
         }
-        if ($provider === 'grok') {
-            return new ai_grok(
+        if ($provider === 'xai') {
+            return new ai_xai(
                 model: $model,
                 temperature: $temperature,
                 timeout: $timeout,
@@ -189,10 +189,10 @@ abstract class aihelper
         $data = [];
         foreach (
             [
-                new ai_claude(),
-                new ai_gemini(),
-                new ai_chatgpt(),
-                new ai_grok(),
+                new ai_anthropic(),
+                new ai_google(),
+                new ai_openai(),
+                new ai_xai(),
                 new ai_deepseek(),
                 new ai_openrouter(),
                 new ai_lmstudio(),
@@ -543,16 +543,16 @@ abstract class aihelper
 
     protected function runLocalToolLoop(array $return): array
     {
-        $is_claude = in_array($this->name, ['claude', 'grok', 'deepseek'], true);
-        $is_gemini = $this->name === 'gemini';
+        $is_anthropic = in_array($this->name, ['anthropic', 'xai', 'deepseek'], true);
+        $is_google = $this->name === 'google';
         $is_chat_completions = $this->name === 'openrouter';
         $max_tool_rounds = 50;
         while ($max_tool_rounds > 0) {
             // extract pending tool calls from session
             $tool_calls = [];
             $session = self::$sessions[$this->session_id] ?? [];
-            if ($is_gemini) {
-                // gemini: functionCall parts inside last model message
+            if ($is_google) {
+                // google: functionCall parts inside last model message
                 $last = !empty($session) ? end($session) : null;
                 if ($last !== null && isset($last['role']) && $last['role'] === 'model' && isset($last['parts'])) {
                     foreach ($last['parts'] as $part) {
@@ -568,8 +568,8 @@ abstract class aihelper
                         }
                     }
                 }
-            } elseif ($is_claude) {
-                // claude: tool_use blocks inside last assistant message content
+            } elseif ($is_anthropic) {
+                // anthropic: tool_use blocks inside last assistant message content
                 $last = !empty($session) ? end($session) : null;
                 if (
                     $last !== null &&
@@ -665,7 +665,7 @@ abstract class aihelper
                 $tool_results[] = ['id' => $tc['id'], 'name' => $tc['name'], 'output' => $output];
             }
             // append tool results in provider-specific format
-            if ($is_gemini) {
+            if ($is_google) {
                 $response_parts = [];
                 foreach ($tool_results as $tr) {
                     $response_parts[] = [
@@ -679,7 +679,7 @@ abstract class aihelper
                     'role' => 'user',
                     'parts' => $response_parts
                 ];
-            } elseif ($is_claude) {
+            } elseif ($is_anthropic) {
                 $result_blocks = [];
                 foreach ($tool_results as $tr) {
                     $result_blocks[] = [
@@ -1231,7 +1231,7 @@ abstract class aihelper
         $this->stream_in_think = false;
         $this->stream_think_tag_buf = '';
 
-        if ($this->name === 'claude' || $this->name === 'test') {
+        if ($this->name === 'anthropic' || $this->name === 'test') {
             // mimic non stream result
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -1505,7 +1505,7 @@ abstract class aihelper
             };
         }
 
-        if ($this->name === 'chatgpt' || $this->name === 'lmstudio') {
+        if ($this->name === 'openai' || $this->name === 'lmstudio') {
             // mimic non stream result
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -1963,7 +1963,7 @@ abstract class aihelper
             };
         }
 
-        if ($this->name === 'gemini') {
+        if ($this->name === 'google') {
             // mimic non stream result
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -2140,13 +2140,13 @@ abstract class aihelper
     }
 }
 
-class ai_chatgpt extends aihelper
+class ai_openai extends aihelper
 {
     public $provider = 'OpenAI';
 
-    public $title = 'ChatGPT';
+    public $title = 'OpenAI';
 
-    public $name = 'chatgpt';
+    public $name = 'openai';
 
     protected $url = 'https://api.openai.com/v1';
 
@@ -3026,13 +3026,13 @@ class ai_chatgpt extends aihelper
     }
 }
 
-class ai_claude extends aihelper
+class ai_anthropic extends aihelper
 {
     public $provider = 'Anthropic';
 
-    public $title = 'Claude';
+    public $title = 'Anthropic';
 
-    public $name = 'claude';
+    public $name = 'anthropic';
 
     protected $url = 'https://api.anthropic.com/v1';
 
@@ -3357,7 +3357,7 @@ class ai_claude extends aihelper
         }
 
         // handle stop_reason "tool_use" for local tool loop:
-        // claude returns tool_use blocks without text — treat as success so the tool loop can take over
+        // anthropic returns tool_use blocks without text — treat as success so the tool loop can take over
         if (
             $this->mcp_servers_call_type === 'local' &&
             __::x($response ?? null) &&
@@ -3372,7 +3372,7 @@ class ai_claude extends aihelper
         }
 
         // handle stop reason
-        // normally claude sends pause_turn as a stop reason
+        // normally anthropic sends pause_turn as a stop reason
         // but sometimes it also sends no stop reason with partial content
         // we detect both cases
         if (
@@ -3477,13 +3477,13 @@ class ai_claude extends aihelper
     }
 }
 
-class ai_gemini extends aihelper
+class ai_google extends aihelper
 {
     public $provider = 'Google';
 
-    public $title = 'Gemini';
+    public $title = 'Google';
 
-    public $name = 'gemini';
+    public $name = 'google';
 
     protected $url = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -3873,13 +3873,13 @@ class ai_gemini extends aihelper
 }
 
 /* compatible with the anthropic api */
-class ai_grok extends ai_claude
+class ai_xai extends ai_anthropic
 {
     public $provider = 'xAI';
 
-    public $title = 'Grok';
+    public $title = 'xAI';
 
-    public $name = 'grok';
+    public $name = 'xai';
 
     protected $url = 'https://api.x.ai/v1';
 
@@ -3973,7 +3973,7 @@ class ai_grok extends ai_claude
 }
 
 /* compatible with the anthropic api */
-class ai_deepseek extends ai_claude
+class ai_deepseek extends ai_anthropic
 {
     public $provider = 'DeepSeek';
 
@@ -4300,7 +4300,7 @@ class ai_openrouter extends aihelper
 }
 
 /* compatible with the openai api */
-class ai_lmstudio extends ai_chatgpt
+class ai_lmstudio extends ai_openai
 {
     public $provider = 'Element Labs';
 
@@ -4547,7 +4547,7 @@ class ai_lmstudio extends ai_chatgpt
     }
 }
 
-class ai_test extends ai_claude
+class ai_test extends ai_anthropic
 {
     public $provider = 'aihelper';
 

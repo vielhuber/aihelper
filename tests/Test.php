@@ -36,19 +36,19 @@ class Test extends \PHPUnit\Framework\TestCase
         file_put_contents('tests/aihelper.log', '');
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
-            $this->test__ai_claude($stats, true);
+            $this->test__ai_anthropic($stats, true);
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
-            $this->test__ai_gemini($stats, true);
+            $this->test__ai_google($stats, true);
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
-            $this->test__ai_chatgpt($stats, true);
+            $this->test__ai_openai($stats, true);
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
-            $this->test__ai_grok($stats, true);
+            $this->test__ai_xai($stats, true);
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
@@ -99,36 +99,36 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function test__ai_claude(&$stats = [], $force = false)
+    function test__ai_anthropic(&$stats = [], $force = false)
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
-        $this->ai_test_prepare('claude', $_SERVER['CLAUDE_API_KEY'] ?? null, null, $stats);
+        $this->ai_test_prepare('anthropic', $_SERVER['ANTHROPIC_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_gemini(&$stats = [], $force = false)
+    function test__ai_google(&$stats = [], $force = false)
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
-        $this->ai_test_prepare('gemini', $_SERVER['GEMINI_API_KEY'] ?? null, null, $stats);
+        $this->ai_test_prepare('google', $_SERVER['GOOGLE_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_chatgpt(&$stats = [], $force = false)
+    function test__ai_openai(&$stats = [], $force = false)
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
-        $this->ai_test_prepare('chatgpt', $_SERVER['CHATGPT_API_KEY'] ?? null, null, $stats);
+        $this->ai_test_prepare('openai', $_SERVER['OPENAI_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_grok(&$stats = [], $force = false)
+    function test__ai_xai(&$stats = [], $force = false)
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
-        $this->ai_test_prepare('grok', $_SERVER['GROK_API_KEY'] ?? null, null, $stats);
+        $this->ai_test_prepare('xai', $_SERVER['XAI_API_KEY'] ?? null, null, $stats);
     }
 
     function test__ai_deepseek(&$stats = [], $force = false)
@@ -216,7 +216,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $fail_count = 0;
         $success_count = 0;
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'openrouter', 'lmstudio']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'deepseek', 'openrouter', 'lmstudio']);
         if ($supported === true) {
             $return = $ai->ping();
             //$this->log($return);
@@ -229,7 +229,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->log(($success_this ? '✅' : '⛔') . ' #1 (ping)');
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'openrouter', 'lmstudio']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'deepseek', 'openrouter', 'lmstudio']);
         if ($supported === true) {
             $return = $ai->ask('Wer wurde 2018 Fußball-Weltmeister? Antworte bitte kurz.');
             //$this->log($return);
@@ -250,7 +250,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'openrouter', 'lmstudio']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'deepseek', 'openrouter', 'lmstudio']);
         if ($supported === true) {
             $return = $ai->ask('Was habe ich vorher gefragt?');
             //$this->log($return);
@@ -273,7 +273,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'openrouter', 'lmstudio']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'deepseek', 'openrouter', 'lmstudio']);
         if ($supported === true) {
             $return = $ai->ask('Welchen Satz hast Du exakt zuvor geschrieben?');
             //$this->log($return);
@@ -296,7 +296,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'openrouter', 'lmstudio']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'deepseek', 'openrouter', 'lmstudio']);
         if ($supported === true) {
             $return = $ai->ask('Ich heiße David mit Vornamen. Bitte merk Dir das!');
             //$this->log($return);
@@ -327,7 +327,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'deepseek', 'openrouter', 'lmstudio']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'deepseek', 'openrouter', 'lmstudio']);
         if ($supported === true) {
             $ai = aihelper::create(
                 provider: $provider,
@@ -356,7 +356,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'openrouter']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'openrouter']);
         if ($supported === true) {
             $return = $ai->ask('Was ist auf dem Bild zu sehen?', 'tests/assets/iptc_write.jpg');
 
@@ -380,7 +380,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'grok', 'openrouter']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'openrouter']);
         if ($supported === true) {
             $return = $ai->ask('Welches Bild habe ich im Gesprächsverlauf hochgeladen?');
 
@@ -404,7 +404,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'openrouter']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'openrouter']);
         if ($supported === true) {
             $return = $ai->ask(
                 'Wie lautet die Kundennummer (Key: customer_nr)? Wann wurde der Brief verfasst (Key: date)? Von wem wurde der Brief verfasst (Key: author)? Bitte antworte nur im JSON-Format. Wenn Du unsicher bist, gib den wahrscheinlichsten Wert zurück. Wenn Du einen Wert gar nicht findest, gib einen leeren String zurück.',
@@ -435,7 +435,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'gemini', 'chatgpt', 'openrouter']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'openrouter']);
         if ($supported === true) {
             $return = $ai->ask(
                 'Wie lautet die Kundennummer (Key: customer_nr)? Wie lautet die Zählernummer (Key: meter_number)? Welche Blume ist auf dem Bild zu sehen (Key: flower)? Bitte antworte nur im JSON-Format. Wenn Du unsicher bist, gib den wahrscheinlichsten Wert zurück. Wenn Du einen Wert gar nicht findest, gib einen leeren String zurück.',
@@ -478,7 +478,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'chatgpt', 'openrouter', 'lmstudio', 'test']);
+        $supported = in_array($provider, ['anthropic', 'openai', 'openrouter', 'lmstudio', 'test']);
         if ($supported === true) {
             $ai_stream = aihelper::create(
                 provider: $provider,
@@ -508,7 +508,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['claude', 'chatgpt', 'openrouter', 'lmstudio']);
+        $supported = in_array($provider, ['anthropic', 'openai', 'openrouter', 'lmstudio']);
         if ($supported === true) {
             $ai_stream = aihelper::create(
                 provider: $provider,
@@ -542,7 +542,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
 
         if (($_SERVER['MCP_SERVER_TEST'] ?? '') == '1') {
-            $supported = in_array($provider, ['claude', 'chatgpt', 'lmstudio']);
+            $supported = in_array($provider, ['anthropic', 'openai', 'lmstudio']);
             if ($supported === true) {
                 $return = __::curl(
                     $_SERVER['MCP_SERVER_TEST_AUTH_URL'] ?? '',
@@ -765,10 +765,10 @@ class Test extends \PHPUnit\Framework\TestCase
                     $i_url++;
                 }
                 $ai_mcp = aihelper::create(
-                    provider: 'claude',
+                    provider: 'anthropic',
                     model: 'claude-haiku-4-5',
                     temperature: 1.0,
-                    api_key: $_SERVER['CLAUDE_API_KEY'] ?? '',
+                    api_key: $_SERVER['ANTHROPIC_API_KEY'] ?? '',
                     session_id: null,
                     log: 'tests/aihelper.log',
                     timeout: 60 * 30,
@@ -893,12 +893,12 @@ class Test extends \PHPUnit\Framework\TestCase
             }
 
             $ai_mcp = aihelper::create(
-                provider: 'claude',
+                provider: 'anthropic',
                 model: 'claude-haiku-4-5',
                 //model: 'claude-sonnet-4-5',
                 //model: 'claude-3-haiku-20240307',
                 temperature: 1.0,
-                api_key: $_SERVER['CLAUDE_API_KEY'] ?? '',
+                api_key: $_SERVER['ANTHROPIC_API_KEY'] ?? '',
                 session_id: null,
                 log: 'tests/aihelper.log',
                 timeout: 60 * 30,
@@ -999,23 +999,23 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $providers = [
             [
-                'provider' => 'claude',
+                'provider' => 'anthropic',
                 'model' => 'claude-haiku-4-5',
-                'api_key' => $_SERVER['CLAUDE_API_KEY'] ?? '',
+                'api_key' => $_SERVER['ANTHROPIC_API_KEY'] ?? '',
                 'url' => null,
                 'call_types' => ['local']
             ],
             [
-                'provider' => 'chatgpt',
+                'provider' => 'openai',
                 'model' => 'gpt-4.1-mini',
-                'api_key' => $_SERVER['CHATGPT_API_KEY'] ?? '',
+                'api_key' => $_SERVER['OPENAI_API_KEY'] ?? '',
                 'url' => null,
                 'call_types' => ['local']
             ],
             [
-                'provider' => 'gemini',
+                'provider' => 'google',
                 'model' => 'gemini-2.5-flash',
-                'api_key' => $_SERVER['GEMINI_API_KEY'] ?? '',
+                'api_key' => $_SERVER['GOOGLE_API_KEY'] ?? '',
                 'url' => null,
                 'call_types' => ['local']
             ],
