@@ -22,7 +22,7 @@ composer require vielhuber/aihelper
 use vielhuber\aihelper\aihelper;
 
 $ai = aihelper::create(
-    provider: 'claude', // claude|gemini|chatgpt|grok|deepseek|lmstudio
+    provider: 'claude', // claude|gemini|chatgpt|grok|deepseek|openrouter|lmstudio
     model: 'claude-opus-4-1', // claude-opus-4-1|gemini-2.5-pro|gpt-5|grok-4|deepseek-chat|qwen/qwen3-coder-next|...
     temperature: 1.0, // controls the randomness of the text generated
     api_key: '**API Key**',
@@ -91,7 +91,7 @@ aihelper::callMcpTool(
     url: 'https://modelcontextprotocol.io/mcp',
     authorization_token: '...'
 );
-// ['name' => '...', 'online' => true, 'instructions' => '...', 'tools' => ['...']]
+// ['jsonrpc' => '2.0', 'id' => 123, 'result' => ['content' => [['type' => 'text', 'text' => '...']]]]
 ```
 
 ### streaming

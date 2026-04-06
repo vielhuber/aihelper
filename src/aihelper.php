@@ -133,6 +133,22 @@ abstract class aihelper
                 url: $url
             );
         }
+        if ($provider === 'openrouter') {
+            return new ai_openrouter(
+                model: $model,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream,
+                url: $url
+            );
+        }
         if ($provider === 'lmstudio') {
             return new ai_lmstudio(
                 model: $model,
@@ -178,6 +194,7 @@ abstract class aihelper
                 new ai_chatgpt(),
                 new ai_grok(),
                 new ai_deepseek(),
+                new ai_openrouter(),
                 new ai_lmstudio(),
                 new ai_test()
             ]
@@ -287,7 +304,7 @@ abstract class aihelper
             if ($initResponse) {
                 // parse sse response if needed
                 if (strpos($initResponse, 'event: message') !== false) {
-                    preg_match('/data: (.+)/s', $initResponse, $matches);
+                    preg_match('/^data: (.+)$/m', $initResponse, $matches);
                     if (isset($matches[1])) {
                         $initResponse = trim($matches[1]);
                     }
@@ -330,7 +347,7 @@ abstract class aihelper
             if ($httpCode >= 200 && $httpCode < 300 && $toolsResponse) {
                 // parse sse response if needed
                 if (strpos($toolsResponse, 'event: message') !== false) {
-                    preg_match('/data: (.+)/s', $toolsResponse, $matches);
+                    preg_match('/^data: (.+)$/m', $toolsResponse, $matches);
                     if (isset($matches[1])) {
                         $toolsResponse = trim($matches[1]);
                     }
@@ -389,7 +406,7 @@ abstract class aihelper
             if ($httpCode >= 200 && $httpCode < 300 && $response) {
                 // parse sse response if needed
                 if (strpos($response, 'event: message') !== false) {
-                    preg_match('/data: (.+)/s', $response, $matches);
+                    preg_match('/^data: (.+)$/m', $response, $matches);
                     if (isset($matches[1])) {
                         $response = trim($matches[1]);
                     }
@@ -447,7 +464,7 @@ abstract class aihelper
                 $this->models[] = [
                     'name' => $models__value['name'],
                     'max_tokens' => $models__value['max_tokens'],
-                    'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+                    'costs' => $models__value['costs'] ?? ['input' => 0, 'input_cached' => 0, 'output' => 0],
                     'supports_temperature' => $models__value['supports_temperature'] ?? true,
                     'default' => $models__key === 0 ? true : false,
                     'test' => $models__key === 0 ? true : false
@@ -528,6 +545,7 @@ abstract class aihelper
     {
         $is_claude = in_array($this->name, ['claude', 'grok', 'deepseek'], true);
         $is_gemini = $this->name === 'gemini';
+        $is_chat_completions = $this->name === 'openrouter';
         $max_tool_rounds = 50;
         while ($max_tool_rounds > 0) {
             // extract pending tool calls from session
@@ -538,10 +556,10 @@ abstract class aihelper
                 $last = !empty($session) ? end($session) : null;
                 if ($last !== null && isset($last['role']) && $last['role'] === 'model' && isset($last['parts'])) {
                     foreach ($last['parts'] as $part) {
-                        $fc = is_object($part) ? ($part->functionCall ?? null) : ($part['functionCall'] ?? null);
+                        $fc = is_object($part) ? $part->functionCall ?? null : $part['functionCall'] ?? null;
                         if ($fc !== null) {
                             $name = is_object($fc) ? $fc->name : $fc['name'];
-                            $args = is_object($fc) ? (array) ($fc->args ?? []) : ($fc['args'] ?? []);
+                            $args = is_object($fc) ? (array) ($fc->args ?? []) : $fc['args'] ?? [];
                             $tool_calls[] = [
                                 'id' => $name,
                                 'name' => $name,
@@ -569,6 +587,24 @@ abstract class aihelper
                                 'arguments' => is_object($block) ? (array) ($block->input ?? []) : $block['input'] ?? []
                             ];
                         }
+                    }
+                }
+            } elseif ($is_chat_completions) {
+                // chat completions: tool_calls inside last assistant message
+                $last = !empty($session) ? end($session) : null;
+                if (
+                    $last !== null &&
+                    isset($last['role']) &&
+                    $last['role'] === 'assistant' &&
+                    isset($last['tool_calls']) &&
+                    is_array($last['tool_calls'])
+                ) {
+                    foreach ($last['tool_calls'] as $tc) {
+                        $tool_calls[] = [
+                            'id' => $tc['id'] ?? '',
+                            'name' => $tc['function']['name'] ?? '',
+                            'arguments' => json_decode($tc['function']['arguments'] ?? '{}', true) ?? []
+                        ];
                     }
                 }
             } else {
@@ -656,6 +692,14 @@ abstract class aihelper
                     'role' => 'user',
                     'content' => $result_blocks
                 ];
+            } elseif ($is_chat_completions) {
+                foreach ($tool_results as $tr) {
+                    self::$sessions[$this->session_id][] = [
+                        'role' => 'tool',
+                        'tool_call_id' => $tr['id'],
+                        'content' => $tr['output']
+                    ];
+                }
             } else {
                 foreach ($tool_results as $tr) {
                     self::$sessions[$this->session_id][] = [
@@ -678,8 +722,11 @@ abstract class aihelper
         return $return;
     }
 
-    protected function buildLocalToolsArgs(string $schema_key = 'parameters', bool $wrap_function_type = false, array $strip_schema_keys = []): array
-    {
+    protected function buildLocalToolsArgs(
+        string $schema_key = 'parameters',
+        bool $wrap_function_type = false,
+        array $strip_schema_keys = []
+    ): array {
         if (empty($this->mcp_servers_tools_map)) {
             // fetch tools/list from all MCP servers in parallel
             $mh = curl_multi_init();
@@ -734,7 +781,7 @@ abstract class aihelper
                     continue;
                 }
                 if (strpos($response, 'event: message') !== false) {
-                    preg_match('/data: (.+)/s', $response, $matches);
+                    preg_match('/^data: (.+)$/m', $response, $matches);
                     if (isset($matches[1])) {
                         $response = trim($matches[1]);
                     }
@@ -746,7 +793,10 @@ abstract class aihelper
                 $url = $h['mcp']['url'] ?? null;
                 $authorization_token = $h['mcp']['authorization_token'] ?? null;
                 foreach ($toolsData['result']['tools'] as $tool) {
-                    $schema = self::buildLocalToolsArgsSanitize($tool['inputSchema'] ?? ['type' => 'object'], $strip_schema_keys);
+                    $schema = self::buildLocalToolsArgsSanitize(
+                        $tool['inputSchema'] ?? ['type' => 'object'],
+                        $strip_schema_keys
+                    );
                     $tool_def = [
                         'name' => $tool['name'],
                         'description' => $tool['description'] ?? '',
@@ -1051,6 +1101,15 @@ abstract class aihelper
         ) {
             $input_tokens += $response->result->usageMetadata->promptTokenCount;
         }
+        // chat completions format (openrouter)
+        if (
+            __::x($response ?? null) &&
+            __::x($response?->result ?? null) &&
+            __::x($response?->result?->usage ?? null) &&
+            __::x($response?->result?->usage?->prompt_tokens ?? null)
+        ) {
+            $input_tokens += $response->result->usage->prompt_tokens;
+        }
 
         $input_cached_tokens = 0;
         if (
@@ -1095,6 +1154,15 @@ abstract class aihelper
             __::x($response?->result?->usageMetadata?->candidatesTokenCount ?? null)
         ) {
             $output_tokens += $response->result->usageMetadata->candidatesTokenCount;
+        }
+        // chat completions format (openrouter)
+        if (
+            __::x($response ?? null) &&
+            __::x($response?->result ?? null) &&
+            __::x($response?->result?->usage ?? null) &&
+            __::x($response?->result?->usage?->completion_tokens ?? null)
+        ) {
+            $output_tokens += $response->result->usage->completion_tokens;
         }
 
         $costs = 0;
@@ -1351,13 +1419,13 @@ abstract class aihelper
 
                             if (isset($parsed['usage'])) {
                                 $this->stream_response->result->usage->input_tokens +=
-                                    $parsed['usage']['input_tokens'] ?? null;
+                                    $parsed['usage']['input_tokens'] ?? 0;
                                 $this->stream_response->result->usage->cache_creation_input_tokens +=
-                                    $parsed['usage']['cache_creation_input_tokens'] ?? null;
+                                    $parsed['usage']['cache_creation_input_tokens'] ?? 0;
                                 $this->stream_response->result->usage->cache_read_input_tokens +=
-                                    $parsed['usage']['cache_read_input_tokens'] ?? null;
+                                    $parsed['usage']['cache_read_input_tokens'] ?? 0;
                                 $this->stream_response->result->usage->output_tokens +=
-                                    $parsed['usage']['output_tokens'] ?? null;
+                                    $parsed['usage']['output_tokens'] ?? 0;
                                 $this->log(
                                     'ADDED USAGE [' .
                                         json_encode($parsed['usage']) .
@@ -1605,7 +1673,9 @@ abstract class aihelper
                                 $this->stream_response->result->id = $parsed['response']['id'] ?? null;
                                 // carry over full output items (incl. function_call) for the tool loop
                                 if (isset($parsed['response']['output']) && is_array($parsed['response']['output'])) {
-                                    $this->stream_response->result->output = json_decode(json_encode($parsed['response']['output']));
+                                    $this->stream_response->result->output = json_decode(
+                                        json_encode($parsed['response']['output'])
+                                    );
                                 }
                                 // finally sleep to ensure all chunks arrive
                                 sleep(2);
@@ -1645,6 +1715,215 @@ abstract class aihelper
                             $this->stream_buffer_data = '';
                             continue;
                         }
+                    }
+                }
+
+                return strlen($chunk);
+            };
+        }
+
+        if ($this->name === 'openrouter') {
+            // mimic non-stream result (chat completions format)
+            $this->stream_response = (object) [
+                'result' => (object) [
+                    'choices' => [
+                        (object) [
+                            'finish_reason' => null,
+                            'message' => (object) [
+                                'role' => 'assistant',
+                                'content' => '',
+                                'tool_calls' => []
+                            ]
+                        ]
+                    ],
+                    'usage' => (object) [
+                        'prompt_tokens' => 0,
+                        'completion_tokens' => 0
+                    ]
+                ]
+            ];
+
+            $stream_callback = function ($chunk) {
+                $this->log($chunk, 'chunk');
+                $this->stream_buffer_in .= $chunk;
+
+                // check if chunk is full json (error)
+                if (json_decode($chunk, true) !== null) {
+                    $parsed = json_decode($chunk, true);
+                    if (isset($parsed['error']) && isset($parsed['error']['message'])) {
+                        $this->stream_response->result->error = (object) [
+                            'message' => $parsed['error']['message'] ?? null
+                        ];
+                    }
+                }
+
+                if (strpos($this->stream_buffer_in, "\n") !== false) {
+                    while (($pos = strpos($this->stream_buffer_in, "\n")) !== false) {
+                        $line = rtrim(substr($this->stream_buffer_in, 0, $pos), "\r");
+                        $this->stream_buffer_in = substr($this->stream_buffer_in, $pos + 1);
+
+                        if (strpos($line, 'data: ') !== 0) {
+                            continue;
+                        }
+
+                        $dataLine = substr($line, 6);
+
+                        if ($dataLine === '[DONE]') {
+                            sleep(2);
+                            echo "data: [DONE]\n\n";
+                            if (ob_get_level() > 0) {
+                                ob_flush();
+                            }
+                            flush();
+                            continue;
+                        }
+
+                        $parsed = json_decode($dataLine, true);
+                        if ($parsed === null) {
+                            continue;
+                        }
+
+                        if (isset($parsed['error'])) {
+                            $this->stream_response->result->error = (object) [
+                                'message' => $parsed['error']['message'] ?? 'unknown error'
+                            ];
+                            continue;
+                        }
+
+                        if (isset($parsed['usage'])) {
+                            $this->stream_response->result->usage->prompt_tokens +=
+                                $parsed['usage']['prompt_tokens'] ?? 0;
+                            $this->stream_response->result->usage->completion_tokens +=
+                                $parsed['usage']['completion_tokens'] ?? 0;
+                        }
+
+                        // capture finish_reason
+                        if (
+                            isset($parsed['choices'][0]['finish_reason']) &&
+                            $parsed['choices'][0]['finish_reason'] !== null
+                        ) {
+                            $this->stream_response->result->choices[0]->finish_reason =
+                                $parsed['choices'][0]['finish_reason'];
+                        }
+
+                        if (!isset($parsed['choices'][0]['delta'])) {
+                            continue;
+                        }
+
+                        $delta = $parsed['choices'][0]['delta'];
+
+                        // tool_calls delta
+                        if (isset($delta['tool_calls'])) {
+                            foreach ($delta['tool_calls'] as $tc_delta) {
+                                $idx = $tc_delta['index'] ?? 0;
+                                $tool_calls = &$this->stream_response->result->choices[0]->message->tool_calls;
+                                while (count($tool_calls) <= $idx) {
+                                    $tool_calls[] = [
+                                        'id' => '',
+                                        'type' => 'function',
+                                        'function' => ['name' => '', 'arguments' => '']
+                                    ];
+                                }
+                                if (isset($tc_delta['id'])) {
+                                    $tool_calls[$idx]['id'] .= $tc_delta['id'];
+                                }
+                                if (isset($tc_delta['function']['name'])) {
+                                    $tool_calls[$idx]['function']['name'] .= $tc_delta['function']['name'];
+                                }
+                                if (isset($tc_delta['function']['arguments'])) {
+                                    $tool_calls[$idx]['function']['arguments'] .= $tc_delta['function']['arguments'];
+                                }
+                            }
+                            echo ": keepalive\n\n";
+                            if (ob_get_level() > 0) {
+                                ob_flush();
+                            }
+                            flush();
+                            continue;
+                        }
+
+                        $raw = $delta['content'] ?? null;
+                        if ($raw === null || $raw === '') {
+                            continue;
+                        }
+
+                        // handle think tags
+                        $pending = $this->stream_think_tag_buf . $raw;
+                        $this->stream_think_tag_buf = '';
+                        $normal_text = '';
+                        $reasoning_text = '';
+
+                        while ($pending !== '') {
+                            $pos = strpos($pending, $this->stream_in_think ? '</think>' : '<think>');
+                            if ($pos !== false) {
+                                if ($this->stream_in_think) {
+                                    $reasoning_text .= substr($pending, 0, $pos);
+                                    $this->stream_in_think = false;
+                                    $pending = substr($pending, $pos + strlen('</think>'));
+                                } else {
+                                    $normal_text .= substr($pending, 0, $pos);
+                                    $this->stream_in_think = true;
+                                    $pending = substr($pending, $pos + strlen('<think>'));
+                                }
+                            } else {
+                                $max_len = strlen($this->stream_in_think ? '</think>' : '<think>') - 1;
+                                $buf_len = 0;
+                                for ($i = min($max_len, strlen($pending)); $i >= 1; $i--) {
+                                    $tail = substr($pending, -$i);
+                                    if (strpos('<think>', $tail) === 0 || strpos('</think>', $tail) === 0) {
+                                        $buf_len = $i;
+                                        break;
+                                    }
+                                }
+                                if ($buf_len > 0) {
+                                    $this->stream_think_tag_buf = substr($pending, -$buf_len);
+                                    $pending = substr($pending, 0, strlen($pending) - $buf_len);
+                                }
+                                if ($this->stream_in_think) {
+                                    $reasoning_text .= $pending;
+                                } else {
+                                    $normal_text .= $pending;
+                                }
+                                break;
+                            }
+                        }
+
+                        if ($reasoning_text !== '') {
+                            echo "event: reasoning\n";
+                            echo 'data: ' . json_encode(['delta' => $reasoning_text]) . "\n\n";
+                            if (ob_get_level() > 0) {
+                                ob_flush();
+                            }
+                            flush();
+                        }
+
+                        if ($normal_text !== '') {
+                            $existing_text = $this->stream_response->result->choices[0]->message->content;
+                            $normal_text = $this->normalizeStreamTextDelta(
+                                $normal_text,
+                                $existing_text,
+                                !$this->stream_first_text_sent
+                            );
+                        }
+
+                        if ($normal_text === '') {
+                            continue;
+                        }
+
+                        $this->stream_first_text_sent = true;
+                        $this->stream_response->result->choices[0]->message->content .= $normal_text;
+                        $this->stream_running = true;
+
+                        echo 'data: ' .
+                            json_encode([
+                                'id' => uniqid(),
+                                'choices' => [['delta' => ['content' => $normal_text]]]
+                            ]) .
+                            "\n\n";
+                        if (ob_get_level() > 0) {
+                            ob_flush();
+                        }
+                        flush();
                     }
                 }
 
@@ -1710,13 +1989,24 @@ abstract class aihelper
                                     flush();
                                 } elseif (isset($part['text'])) {
                                     $text = $part['text'];
-                                    // accumulate
+                                    // accumulate (raw, before normalization)
                                     $parts = &$this->stream_response->result->candidates[0]->content->parts;
                                     if (empty($parts) || !isset(end($parts)->text)) {
                                         $parts[] = (object) ['text' => $text];
                                     } else {
                                         $parts[count($parts) - 1]->text .= $text;
                                     }
+                                    // normalize
+                                    $existing_text = $parts[count($parts) - 1]->text;
+                                    $text = $this->normalizeStreamTextDelta(
+                                        $text,
+                                        substr($existing_text, 0, -strlen($text)),
+                                        !$this->stream_first_text_sent
+                                    );
+                                    if ($text === '') {
+                                        continue;
+                                    }
+                                    $this->stream_first_text_sent = true;
                                     // echo SSE
                                     $this->stream_running = true;
                                     echo 'data: ' .
@@ -1756,13 +2046,16 @@ abstract class aihelper
                         // usage / finish
                         if (isset($parsed['usageMetadata'])) {
                             if (isset($parsed['usageMetadata']['promptTokenCount'])) {
-                                $this->stream_response->result->usageMetadata->promptTokenCount = $parsed['usageMetadata']['promptTokenCount'];
+                                $this->stream_response->result->usageMetadata->promptTokenCount =
+                                    $parsed['usageMetadata']['promptTokenCount'];
                             }
                             if (isset($parsed['usageMetadata']['candidatesTokenCount'])) {
-                                $this->stream_response->result->usageMetadata->candidatesTokenCount = $parsed['usageMetadata']['candidatesTokenCount'];
+                                $this->stream_response->result->usageMetadata->candidatesTokenCount =
+                                    $parsed['usageMetadata']['candidatesTokenCount'];
                             }
                         }
                         if (isset($parsed['candidates'][0]['finishReason'])) {
+                            sleep(2);
                             echo "data: [DONE]\n\n";
                             if (ob_get_level() > 0) {
                                 ob_flush();
@@ -2507,7 +2800,8 @@ class ai_chatgpt extends aihelper
                         'role' => 'assistant',
                         'content' => $content
                     ];
-                } elseif (!in_array($output__value->type, ['mcp_call', 'mcp_list_tools']) &&
+                } elseif (
+                    !in_array($output__value->type, ['mcp_call', 'mcp_list_tools']) &&
                     // reasoning must be kept for local tool loop (GPT-5 requires it alongside function_call),
                     // but excluded for remote because the API requires it to be followed by a message item —
                     // if that message is missing or empty, storing reasoning alone causes an API error
@@ -3472,7 +3766,12 @@ class ai_gemini extends aihelper
         }
 
         if (!empty($this->mcp_servers) && $this->mcp_servers_call_type === 'local') {
-            $tools = $this->buildLocalToolsArgs('parameters', false, ['additionalProperties', '$schema', 'definition', 'default']);
+            $tools = $this->buildLocalToolsArgs('parameters', false, [
+                'additionalProperties',
+                '$schema',
+                'definition',
+                'default'
+            ]);
             if (!empty($tools)) {
                 $args['tools'] = [['functionDeclarations' => $tools]];
             }
@@ -3728,6 +4027,256 @@ class ai_deepseek extends ai_claude
             }
         }
         return $models;
+    }
+}
+
+/* compatible with the openai api */
+class ai_openrouter extends aihelper
+{
+    public $provider = 'OpenRouter';
+
+    public $title = 'OpenRouter';
+
+    public $name = 'openrouter';
+
+    protected $url = 'https://openrouter.ai/api/v1';
+
+    public $support_mcp_remote = false;
+    public $support_mcp_local = true;
+
+    public $support_stream = true;
+
+    public $models = [];
+
+    public function fetchModels(): array
+    {
+        $models = [];
+        $response = __::curl(
+            url: $this->url . '/models',
+            method: 'GET',
+            headers: [
+                'Authorization' => 'Bearer ' . $this->api_key
+            ],
+            timeout: $this->timeout
+        );
+        $this->log($response);
+        if (
+            __::x($response ?? null) &&
+            __::x($response?->result ?? null) &&
+            __::x($response?->result?->data ?? null) &&
+            is_array($response->result->data)
+        ) {
+            foreach ($response->result->data as $models__value) {
+                if (__::x($models__value?->id ?? null)) {
+                    $context_length = $models__value->context_length ?? 8192;
+                    $max_tokens = min((int) $context_length, 65536);
+                    $input_cost = (float) ($models__value->pricing->prompt ?? 0);
+                    $output_cost = (float) ($models__value->pricing->completion ?? 0);
+                    $supported_params = isset($models__value->supported_parameters) && is_array($models__value->supported_parameters)
+                        ? $models__value->supported_parameters
+                        : [];
+                    $models[] = [
+                        'name' => $models__value->id,
+                        'max_tokens' => $max_tokens,
+                        'costs' => ['input' => $input_cost, 'input_cached' => $input_cost, 'output' => $output_cost],
+                        'supports_temperature' => in_array('temperature', $supported_params, true)
+                    ];
+                }
+            }
+        }
+        // sort by name and highlight special model (test)
+        $test_model = 'anthropic/claude-haiku-4.5';
+        usort($models, function ($a, $b) use($test_model) {
+            if ($a['name'] === $test_model) {
+                return -1;
+            }
+            if ($b['name'] === $test_model) {
+                return 1;
+            }
+            return $a['name'] <=> $b['name'];
+        });
+        return $models;
+    }
+
+    protected function bringPromptInFormat(string $prompt, mixed $files = null): array
+    {
+        if (!__::x($files ?? null)) {
+            return ['role' => 'user', 'content' => $prompt];
+        }
+        $content = [['type' => 'text', 'text' => $prompt]];
+        if (!is_array($files)) {
+            $files = [$files];
+        }
+        foreach ($files as $files__value) {
+            if (!file_exists($files__value)) {
+                continue;
+            }
+            $mime = mime_content_type($files__value);
+            $b64 = base64_encode(file_get_contents($files__value));
+            if (stripos($mime, 'pdf') !== false || $mime === 'application/pdf') {
+                $content[] = [
+                    'type' => 'file',
+                    'file' => [
+                        'filename' => basename($files__value),
+                        'file_data' => 'data:' . $mime . ';base64,' . $b64
+                    ]
+                ];
+            } elseif (strpos($mime, 'image/') === 0) {
+                $content[] = [
+                    'type' => 'image_url',
+                    'image_url' => ['url' => 'data:' . $mime . ';base64,' . $b64]
+                ];
+            }
+        }
+        return ['role' => 'user', 'content' => $content];
+    }
+
+    protected function addResponseToSession(mixed $response): void
+    {
+        if (
+            !__::x($response ?? null) ||
+            !__::x($response?->result ?? null) ||
+            !__::x($response?->result?->choices ?? null) ||
+            !is_array($response->result->choices) ||
+            empty($response->result->choices)
+        ) {
+            return;
+        }
+        $message = $response->result->choices[0]->message ?? null;
+        if ($message === null) {
+            return;
+        }
+        $entry = ['role' => 'assistant', 'content' => $message->content ?? ''];
+        $tool_calls = isset($message->tool_calls) ? json_decode(json_encode($message->tool_calls), true) : null;
+        if (!empty($tool_calls)) {
+            $entry['tool_calls'] = $tool_calls;
+        }
+        self::$sessions[$this->session_id][] = $entry;
+    }
+
+    protected function askThis(
+        ?string $prompt = null,
+        mixed $files = null,
+        bool $add_prompt_to_session = true,
+        ?string $prev_output_text = null,
+        float $prev_costs = 0.0
+    ): array {
+        $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
+
+        if (__::nx($this->model) || __::nx($this->session_id) || ($add_prompt_to_session && __::nx($prompt))) {
+            $return['response'] = 'data missing.';
+            return $return;
+        }
+
+        if ($add_prompt_to_session === true) {
+            $this->appendPromptToSession($prompt, $files);
+        }
+
+        $args = [
+            'model' => $this->model,
+            'messages' => self::$sessions[$this->session_id]
+        ];
+
+        $args = $this->applyTemperatureParameter($args);
+
+        if (!empty($this->mcp_servers) && $this->mcp_servers_call_type === 'local') {
+            $raw_tools = $this->buildLocalToolsArgs('parameters', false);
+            $args['tools'] = [];
+            foreach ($raw_tools as $tool) {
+                $args['tools'][] = [
+                    'type' => 'function',
+                    'function' => $tool
+                ];
+            }
+        }
+
+        if ($this->stream === true) {
+            $args['stream'] = true;
+        }
+
+        $this->log((int) round(strlen(json_encode($args)) / 3.5), 'ask with input token length');
+        $this->log($args, 'ask');
+        $response = $this->makeApiCall($args);
+        if ($this->stream === true) {
+            $response = $this->stream_response;
+        }
+        $this->log($response?->result ?? null, 'response');
+        $this->addCosts($response, $return);
+
+        $output_text = $prev_output_text !== null ? $prev_output_text : '';
+        if (
+            __::x($response ?? null) &&
+            __::x($response?->result ?? null) &&
+            __::x($response?->result?->choices ?? null) &&
+            is_array($response->result->choices) &&
+            !empty($response->result->choices)
+        ) {
+            $message = $response->result->choices[0]->message ?? null;
+            if ($message !== null && __::x($message->content ?? null)) {
+                $content_text = $message->content;
+                if (is_string($content_text)) {
+                    if (__::x($output_text ?? null)) {
+                        $output_text .= PHP_EOL . PHP_EOL;
+                    }
+                    $output_text .= __::trim_whitespace($this->stripThinkingBlocks($content_text));
+                }
+            }
+        }
+
+        // handle finish_reason tool_calls for local tool loop
+        if (
+            $this->mcp_servers_call_type === 'local' &&
+            __::x($response ?? null) &&
+            __::x($response?->result ?? null) &&
+            __::x($response?->result?->choices ?? null) &&
+            is_array($response->result->choices) &&
+            !empty($response->result->choices)
+        ) {
+            $finish_reason = $response->result->choices[0]->finish_reason ?? null;
+            if ($finish_reason === 'tool_calls') {
+                $this->addResponseToSession($response);
+                $return['response'] = $output_text ?: '';
+                $return['success'] = true;
+                return $return;
+            }
+        }
+
+        if (__::nx($output_text ?? null)) {
+            $this->log($response, 'failed');
+            if (
+                __::x($response ?? null) &&
+                __::x($response?->result ?? null) &&
+                __::x($response?->result?->error ?? null) &&
+                __::x($response?->result?->error?->message ?? null) &&
+                is_string($response->result->error->message)
+            ) {
+                $return['response'] = $response->result->error->message;
+            }
+            return $return;
+        }
+
+        $return['response'] = $output_text;
+        $return['success'] = true;
+
+        $this->addResponseToSession($response);
+
+        $return['response'] = $this->parseJson($return['response']);
+
+        return $return;
+    }
+
+    protected function makeApiCall(?array $args = null): mixed
+    {
+        return __::curl(
+            url: $this->url . '/chat/completions',
+            data: $args,
+            method: 'POST',
+            headers: [
+                'Authorization' => 'Bearer ' . $this->api_key
+            ],
+            timeout: $this->timeout,
+            stream_callback: $this->getStreamCallback()
+        );
     }
 }
 
