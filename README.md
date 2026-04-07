@@ -58,7 +58,7 @@ $ai->ask(prompt: 'Fasse die folgenden Dokumente zusammen.', files: ['1.pdf', '2.
 $ai->ask(prompt: 'Was habe ich vorher gefragt?');
 // ['response' => 'Du hast gefragt: "Wie lautet das erste Wort in der PDF?"', 'success' => true, 'costs' => 0.001]
 
-aihelper::getProviders() // gets overview of providers and models with costs
+aihelper::getProviders() // gets overview of providers and models with costs and additional infos
 
 aihelper::create(provider: '...', api_key: '...')->fetchModels() // dynamically get models of provider via api
 
