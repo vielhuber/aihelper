@@ -459,15 +459,15 @@ abstract class aihelper
             $this->api_key = $api_key;
         }
         if (empty($this->models) && method_exists($this, 'fetchModels')) {
-            foreach ($this->fetchModels() as $models__key => $models__value) {
+            foreach ($this->fetchModels() as $models__value) {
                 $this->models[] = [
                     'name' => $models__value['name'],
-                    'max_tokens' => $models__value['max_tokens'],
+                    'context_length' => $models__value['context_length'] ?? 128000,
                     'costs' => $models__value['costs'] ?? ['input' => 0, 'input_cached' => 0, 'output' => 0],
                     'supports_temperature' => $models__value['supports_temperature'] ?? true,
                     'supports_tools' => $models__value['supports_tools'] ?? true,
-                    'default' => $models__key === 0 ? true : false,
-                    'test' => $models__key === 0 ? true : false
+                    'default' => isset($models__value['default']) ? $models__value['default'] : false,
+                    'test' => isset($models__value['test']) ? $models__value['test'] : false
                 ];
             }
         }
@@ -987,9 +987,7 @@ abstract class aihelper
         if (!is_array($error)) {
             return null;
         }
-        return $error['metadata']['raw']
-            ?? $error['message']
-            ?? json_encode($error, JSON_UNESCAPED_UNICODE);
+        return $error['metadata']['raw'] ?? ($error['message'] ?? json_encode($error, JSON_UNESCAPED_UNICODE));
     }
 
     protected function normalizeStreamTextDelta(
@@ -1109,14 +1107,14 @@ abstract class aihelper
         );
     }
 
-    protected function getMaxTokensForModel(): int
+    protected function getContextLengthForModel(): int
     {
         foreach ($this->models as $models__value) {
             if ($models__value['name'] === $this->model) {
-                return $models__value['max_tokens'];
+                return $models__value['context_length'] ?? 128000;
             }
         }
-        return 4096;
+        return 128000;
     }
 
     protected function addCosts(mixed $response, array &$return): void
@@ -1729,7 +1727,9 @@ abstract class aihelper
 
                             if (isset($parsed['type']) && $parsed['type'] === 'response.failed') {
                                 $this->stream_response->result->error = (object) [
-                                    'message' => isset($parsed['response']['error']) ? self::extractErrorMessage($parsed['response']['error']) : 'unknown error'
+                                    'message' => isset($parsed['response']['error'])
+                                        ? self::extractErrorMessage($parsed['response']['error'])
+                                        : 'unknown error'
                                 ];
                                 echo "data: [DONE]\n\n";
                                 if (ob_get_level() > 0) {
@@ -2164,548 +2164,17 @@ class ai_openai extends aihelper
 
     public $models = [
         [
-            'name' => 'gpt-5',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => true,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-mini',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => true
-        ],
-        [
-            'name' => 'gpt-5-nano',
-            'max_tokens' => 32768,
-            'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4.1',
-            'max_tokens' => 32768,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o',
-            'max_tokens' => 16384,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini',
-            'max_tokens' => 16384,
-            'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.2',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.2-2025-12-11',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.2-chat-latest',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.2-pro',
-            'max_tokens' => 272000,
-            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.2-pro-2025-12-11',
-            'max_tokens' => 272000,
-            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.2-codex',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-2026-03-05',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-pro',
-            'max_tokens' => 272000,
-            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-pro-2026-03-05',
-            'max_tokens' => 272000,
-            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-mini',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-mini-2026-03-17',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-nano',
-            'max_tokens' => 32768,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-nano-2026-03-17',
-            'max_tokens' => 32768,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.1',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.1-2025-11-13',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.1-chat-latest',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.1-codex',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.1-codex-mini',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.1-codex-max',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.3-codex',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.3-chat-latest',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-chat-latest',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-2025-08-07',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-mini-2025-08-07',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-nano-2025-08-07',
-            'max_tokens' => 32768,
-            'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-codex',
-            'max_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-pro',
-            'max_tokens' => 272000,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-pro-2025-10-06',
-            'max_tokens' => 272000,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4.1-2025-04-14',
-            'max_tokens' => 32768,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4.1-mini',
-            'max_tokens' => 32768,
-            'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4.1-mini-2025-04-14',
-            'max_tokens' => 32768,
-            'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4.1-nano',
-            'max_tokens' => 32768,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4.1-nano-2025-04-14',
-            'max_tokens' => 32768,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3',
-            'max_tokens' => 100000,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3-2025-04-16',
-            'max_tokens' => 100000,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3-pro',
-            'max_tokens' => 100000,
-            'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3-pro-2025-06-10',
-            'max_tokens' => 100000,
-            'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3-mini',
-            'max_tokens' => 100000,
-            'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3-mini-2025-01-31',
-            'max_tokens' => 100000,
-            'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o4-mini',
-            'max_tokens' => 100000,
-            'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o4-mini-2025-04-16',
-            'max_tokens' => 100000,
-            'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o1',
-            'max_tokens' => 100000,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o1-2024-12-17',
-            'max_tokens' => 100000,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o1-pro',
-            'max_tokens' => 100000,
-            'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o1-pro-2025-03-19',
-            'max_tokens' => 100000,
-            'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-2024-05-13',
-            'max_tokens' => 4096,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-2024-08-06',
-            'max_tokens' => 16384,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-2024-11-20',
-            'max_tokens' => 16384,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-2024-07-18',
-            'max_tokens' => 16384,
-            'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4-0613',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4-turbo',
-            'max_tokens' => 4096,
-            'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4-turbo-2024-04-09',
-            'max_tokens' => 4096,
-            'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'gpt-3.5-turbo',
-            'max_tokens' => 4096,
+            'context_length' => 16384,
+            'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-3.5-turbo-0125',
+            'context_length' => 16384,
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2714,7 +2183,7 @@ class ai_openai extends aihelper
         ],
         [
             'name' => 'gpt-3.5-turbo-1106',
-            'max_tokens' => 4096,
+            'context_length' => 16384,
             'costs' => ['input' => 0.000001, 'input_cached' => 0.000001, 'output' => 0.000002],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2722,10 +2191,541 @@ class ai_openai extends aihelper
             'test' => false
         ],
         [
-            'name' => 'gpt-3.5-turbo-0125',
-            'max_tokens' => 4096,
-            'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
+            'name' => 'gpt-4',
+            'context_length' => 8192,
+            'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
             'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4-0613',
+            'context_length' => 8192,
+            'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4-turbo',
+            'context_length' => 128000,
+            'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4-turbo-2024-04-09',
+            'context_length' => 128000,
+            'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4.1',
+            'context_length' => 1047576,
+            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4.1-2025-04-14',
+            'context_length' => 1047576,
+            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4.1-mini',
+            'context_length' => 1047576,
+            'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4.1-mini-2025-04-14',
+            'context_length' => 1047576,
+            'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4.1-nano',
+            'context_length' => 1047576,
+            'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4.1-nano-2025-04-14',
+            'context_length' => 1047576,
+            'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4o',
+            'context_length' => 128000,
+            'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4o-2024-05-13',
+            'context_length' => 128000,
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4o-2024-08-06',
+            'context_length' => 128000,
+            'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4o-2024-11-20',
+            'context_length' => 128000,
+            'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4o-mini',
+            'context_length' => 128000,
+            'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4o-mini-2024-07-18',
+            'context_length' => 128000,
+            'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => true,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5-2025-08-07',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5-chat-latest',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5-codex',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5-mini',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => true
+        ],
+        [
+            'name' => 'gpt-5-mini-2025-08-07',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5-nano',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5-nano-2025-08-07',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5-pro',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5-pro-2025-10-06',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.1',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.1-2025-11-13',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.1-chat-latest',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.1-codex',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.1-codex-max',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.1-codex-mini',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.2',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.2-2025-12-11',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.2-chat-latest',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.2-codex',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.2-pro',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.2-pro-2025-12-11',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.3-chat-latest',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.3-codex',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4',
+            'context_length' => 1050000,
+            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-2026-03-05',
+            'context_length' => 1050000,
+            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-mini',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-mini-2026-03-17',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-nano',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-nano-2026-03-17',
+            'context_length' => 400000,
+            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-pro',
+            'context_length' => 1050000,
+            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.4-pro-2026-03-05',
+            'context_length' => 1050000,
+            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'o1',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'o1-2024-12-17',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'o1-pro',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'o1-pro-2025-03-19',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'o3',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'o3-2025-04-16',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'o3-mini',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'o3-mini-2025-01-31',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'o3-pro',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'o3-pro-2025-06-10',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'o4-mini',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'o4-mini-2025-04-16',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
+            'supports_temperature' => false,
             'supports_tools' => true,
             'default' => false,
             'test' => false
@@ -2811,14 +2811,14 @@ class ai_openai extends aihelper
                     ) {
                         continue;
                     }
-                    $max_tokens = 8192;
+                    $context_length = 128000;
                     foreach ($this->models as $definedModel) {
                         if ($definedModel['name'] === $name) {
-                            $max_tokens = $definedModel['max_tokens'];
+                            $context_length = $definedModel['context_length'];
                             break;
                         }
                     }
-                    $models[] = ['name' => $name, 'max_tokens' => $max_tokens];
+                    $models[] = ['name' => $name, 'context_length' => $context_length];
                 }
             }
         }
@@ -3112,36 +3112,9 @@ class ai_anthropic extends aihelper
 
     public $models = [
         [
-            'name' => 'claude-sonnet-4-6',
-            'max_tokens' => 64000,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => true,
-            'test' => false
-        ],
-        [
-            'name' => 'claude-opus-4-6',
-            'max_tokens' => 64000,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'claude-sonnet-4-5',
-            'max_tokens' => 64000,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'claude-opus-4-5',
-            'max_tokens' => 64000,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
+            'name' => 'claude-3-haiku-20240307',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.00000025, 'input_cached' => 0.00000003, 'output' => 0.00000125],
             'supports_temperature' => true,
             'supports_tools' => true,
             'default' => false,
@@ -3149,7 +3122,7 @@ class ai_anthropic extends aihelper
         ],
         [
             'name' => 'claude-haiku-4-5',
-            'max_tokens' => 64000,
+            'context_length' => 200000,
             'costs' => ['input' => 0.000001, 'input_cached' => 0.0000001, 'output' => 0.000005],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3157,9 +3130,9 @@ class ai_anthropic extends aihelper
             'test' => true
         ],
         [
-            'name' => 'claude-sonnet-4-0',
-            'max_tokens' => 64000,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
+            'name' => 'claude-opus-4-0',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
             'supports_temperature' => true,
             'supports_tools' => true,
             'default' => false,
@@ -3167,7 +3140,7 @@ class ai_anthropic extends aihelper
         ],
         [
             'name' => 'claude-opus-4-1',
-            'max_tokens' => 32000,
+            'context_length' => 200000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3175,21 +3148,48 @@ class ai_anthropic extends aihelper
             'test' => false
         ],
         [
-            'name' => 'claude-opus-4-0',
-            'max_tokens' => 32000,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
+            'name' => 'claude-opus-4-5',
+            'context_length' => 64000,
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
             'supports_temperature' => true,
             'supports_tools' => true,
             'default' => false,
             'test' => false
         ],
         [
-            'name' => 'claude-3-haiku-20240307',
-            'max_tokens' => 4096,
-            'costs' => ['input' => 0.00000025, 'input_cached' => 0.00000003, 'output' => 0.00000125],
+            'name' => 'claude-opus-4-6',
+            'context_length' => 1000000,
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
             'supports_temperature' => true,
             'supports_tools' => true,
             'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'claude-sonnet-4-0',
+            'context_length' => 64000,
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'claude-sonnet-4-5',
+            'context_length' => 200000,
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'claude-sonnet-4-6',
+            'context_length' => 1000000,
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => true,
             'test' => false
         ]
     ];
@@ -3230,14 +3230,14 @@ class ai_anthropic extends aihelper
                     ) {
                         continue;
                     }
-                    $max_tokens = 8192;
+                    $context_length = 128000;
                     foreach ($this->models as $definedModel) {
                         if ($definedModel['name'] === $name) {
-                            $max_tokens = $definedModel['max_tokens'];
+                            $context_length = $definedModel['context_length'];
                             break;
                         }
                     }
-                    $models[] = ['name' => $name, 'max_tokens' => $max_tokens];
+                    $models[] = ['name' => $name, 'context_length' => $context_length];
                 }
             }
         }
@@ -3376,7 +3376,7 @@ class ai_anthropic extends aihelper
 
         $args = [
             'model' => $this->model,
-            'max_tokens' => $this->getMaxTokensForModel(),
+            'context_length' => (int) ($this->getContextLengthForModel() * 0.5),
             'messages' => self::$sessions[$this->session_id]
         ];
 
@@ -3571,35 +3571,8 @@ class ai_google extends aihelper
 
     public $models = [
         [
-            'name' => 'gemini-2.5-pro',
-            'max_tokens' => 65536,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => true,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-2.5-flash',
-            'max_tokens' => 65536,
-            'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => true
-        ],
-        [
-            'name' => 'gemini-2.5-flash-lite',
-            'max_tokens' => 65536,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'gemini-2.0-flash',
-            'max_tokens' => 8192,
+            'context_length' => 1048576,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3608,7 +3581,7 @@ class ai_google extends aihelper
         ],
         [
             'name' => 'gemini-2.0-flash-lite',
-            'max_tokens' => 8192,
+            'context_length' => 1048576,
             'costs' => ['input' => 0.000000075, 'input_cached' => 0.000000075, 'output' => 0.0000003],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3616,8 +3589,17 @@ class ai_google extends aihelper
             'test' => false
         ],
         [
+            'name' => 'gemini-2.5-flash',
+            'context_length' => 1048576,
+            'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => true
+        ],
+        [
             'name' => 'gemini-2.5-flash-image',
-            'max_tokens' => 65536,
+            'context_length' => 1048576,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3625,17 +3607,26 @@ class ai_google extends aihelper
             'test' => false
         ],
         [
-            'name' => 'gemini-pro-latest',
-            'max_tokens' => 65536,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'name' => 'gemini-2.5-flash-lite',
+            'context_length' => 1048576,
+            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'supports_temperature' => true,
             'supports_tools' => true,
             'default' => false,
             'test' => false
         ],
         [
+            'name' => 'gemini-2.5-pro',
+            'context_length' => 1048576,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => true,
+            'test' => false
+        ],
+        [
             'name' => 'gemini-flash-latest',
-            'max_tokens' => 65536,
+            'context_length' => 1048576,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3644,7 +3635,7 @@ class ai_google extends aihelper
         ],
         [
             'name' => 'gemini-flash-lite-latest',
-            'max_tokens' => 65536,
+            'context_length' => 1048576,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3652,18 +3643,9 @@ class ai_google extends aihelper
             'test' => false
         ],
         [
-            'name' => 'gemma-3-1b-it',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemma-3-4b-it',
-            'max_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'name' => 'gemini-pro-latest',
+            'context_length' => 1048576,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => true,
             'supports_tools' => true,
             'default' => false,
@@ -3671,7 +3653,16 @@ class ai_google extends aihelper
         ],
         [
             'name' => 'gemma-3-12b-it',
-            'max_tokens' => 8192,
+            'context_length' => 131072,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gemma-3-1b-it',
+            'context_length' => 32768,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3680,7 +3671,7 @@ class ai_google extends aihelper
         ],
         [
             'name' => 'gemma-3-27b-it',
-            'max_tokens' => 8192,
+            'context_length' => 131072,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3688,8 +3679,8 @@ class ai_google extends aihelper
             'test' => false
         ],
         [
-            'name' => 'gemma-3n-e4b-it',
-            'max_tokens' => 32768,
+            'name' => 'gemma-3-4b-it',
+            'context_length' => 131072,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3698,7 +3689,16 @@ class ai_google extends aihelper
         ],
         [
             'name' => 'gemma-3n-e2b-it',
-            'max_tokens' => 32768,
+            'context_length' => 128000,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gemma-3n-e4b-it',
+            'context_length' => 128000,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3707,7 +3707,7 @@ class ai_google extends aihelper
         ],
         [
             'name' => 'gemma-4-26b-a4b-it',
-            'max_tokens' => 32768,
+            'context_length' => 256000,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3716,7 +3716,7 @@ class ai_google extends aihelper
         ],
         [
             'name' => 'gemma-4-31b-it',
-            'max_tokens' => 32768,
+            'context_length' => 256000,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3768,18 +3768,18 @@ class ai_google extends aihelper
                     ) {
                         continue;
                     }
-                    $max_tokens = 8192;
-                    if (!empty($models__value->outputTokenLimit)) {
-                        $max_tokens = (int) $models__value->outputTokenLimit;
+                    $context_length = 128000;
+                    if (!empty($models__value->inputTokenLimit)) {
+                        $context_length = (int) $models__value->inputTokenLimit;
                     } else {
                         foreach ($this->models as $definedModel) {
                             if ($definedModel['name'] === $name) {
-                                $max_tokens = $definedModel['max_tokens'];
+                                $context_length = $definedModel['context_length'];
                                 break;
                             }
                         }
                     }
-                    $models[] = ['name' => $name, 'max_tokens' => $max_tokens];
+                    $models[] = ['name' => $name, 'context_length' => $context_length];
                 }
             }
         }
@@ -3983,53 +3983,8 @@ class ai_xai extends ai_anthropic
 
     public $models = [
         [
-            'name' => 'grok-4-1-fast-reasoning',
-            'max_tokens' => 131072,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => true,
-            'test' => true
-        ],
-        [
-            'name' => 'grok-4-1-fast-non-reasoning',
-            'max_tokens' => 131072,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-4-fast-reasoning',
-            'max_tokens' => 131072,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-4-fast-non-reasoning',
-            'max_tokens' => 131072,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-code-fast-1',
-            'max_tokens' => 131072,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000015],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'grok-3',
-            'max_tokens' => 131072,
+            'context_length' => 131072,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4038,7 +3993,43 @@ class ai_xai extends ai_anthropic
         ],
         [
             'name' => 'grok-3-mini',
-            'max_tokens' => 131072,
+            'context_length' => 131072,
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'supports_temperature' => true,
+            'supports_tools' => false,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'grok-4-1-fast-non-reasoning',
+            'context_length' => 2000000,
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'supports_temperature' => true,
+            'supports_tools' => false,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'grok-4-1-fast-reasoning',
+            'context_length' => 2000000,
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'supports_temperature' => true,
+            'supports_tools' => false,
+            'default' => true,
+            'test' => true
+        ],
+        [
+            'name' => 'grok-4-fast-non-reasoning',
+            'context_length' => 256000,
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
+            'supports_temperature' => true,
+            'supports_tools' => false,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'grok-4-fast-reasoning',
+            'context_length' => 256000,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4047,7 +4038,7 @@ class ai_xai extends ai_anthropic
         ],
         [
             'name' => 'grok-4.20-0309-non-reasoning',
-            'max_tokens' => 131072,
+            'context_length' => 256000,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000006],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4056,7 +4047,7 @@ class ai_xai extends ai_anthropic
         ],
         [
             'name' => 'grok-4.20-0309-reasoning',
-            'max_tokens' => 131072,
+            'context_length' => 256000,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000006],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4065,8 +4056,17 @@ class ai_xai extends ai_anthropic
         ],
         [
             'name' => 'grok-4.20-multi-agent-0309',
-            'max_tokens' => 131072,
+            'context_length' => 256000,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000006],
+            'supports_temperature' => true,
+            'supports_tools' => false,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'grok-code-fast-1',
+            'context_length' => 131072,
+            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000015],
             'supports_temperature' => true,
             'supports_tools' => false,
             'default' => false,
@@ -4093,7 +4093,7 @@ class ai_deepseek extends ai_anthropic
     public $models = [
         [
             'name' => 'deepseek-chat',
-            'max_tokens' => 8192,
+            'context_length' => 65536,
             'costs' => ['input' => 0.00000028, 'input_cached' => 0.000000028, 'output' => 0.00000042],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4102,7 +4102,7 @@ class ai_deepseek extends ai_anthropic
         ],
         [
             'name' => 'deepseek-reasoner',
-            'max_tokens' => 8192,
+            'context_length' => 65536,
             'costs' => ['input' => 0.00000028, 'input_cached' => 0.000000028, 'output' => 0.00000042],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4128,14 +4128,14 @@ class ai_deepseek extends ai_anthropic
             foreach ($response->result->data as $data__value) {
                 if (__::x($data__value?->id ?? null)) {
                     $name = $data__value->id;
-                    $max_tokens = 8192;
+                    $context_length = 128000;
                     foreach ($this->models as $definedModel) {
                         if ($definedModel['name'] === $name) {
-                            $max_tokens = $definedModel['max_tokens'];
+                            $context_length = $definedModel['context_length'];
                             break;
                         }
                     }
-                    $models[] = ['name' => $name, 'max_tokens' => $max_tokens];
+                    $models[] = ['name' => $name, 'context_length' => $context_length];
                 }
             }
         }
@@ -4180,32 +4180,26 @@ class ai_openrouter extends aihelper
         ) {
             foreach ($response->result->data as $models__value) {
                 if (__::x($models__value?->id ?? null)) {
-                    $context_length = $models__value->context_length ?? 8192;
-                    $max_tokens = min((int) $context_length, 65536);
                     $input_cost = (float) ($models__value->pricing->prompt ?? 0);
                     $output_cost = (float) ($models__value->pricing->completion ?? 0);
-                    $supported_params = isset($models__value->supported_parameters) && is_array($models__value->supported_parameters)
-                        ? $models__value->supported_parameters
-                        : [];
+                    $supported_params =
+                        isset($models__value->supported_parameters) && is_array($models__value->supported_parameters)
+                            ? $models__value->supported_parameters
+                            : [];
                     $models[] = [
                         'name' => $models__value->id,
-                        'max_tokens' => $max_tokens,
+                        'context_length' => (int) ($models__value->context_length ?? 128000),
                         'costs' => ['input' => $input_cost, 'input_cached' => $input_cost, 'output' => $output_cost],
                         'supports_temperature' => in_array('temperature', $supported_params, true),
-                        'supports_tools' => in_array('tools', $supported_params, true)
+                        'supports_tools' => in_array('tools', $supported_params, true),
+                        'default' => $models__value->id === 'anthropic/claude-haiku-4.5',
+                        'test' => $models__value->id === 'anthropic/claude-haiku-4.5'
                     ];
                 }
             }
         }
-        // sort by name and highlight special model (test)
-        $test_model = 'anthropic/claude-haiku-4.5';
-        usort($models, function ($a, $b) use($test_model) {
-            if ($a['name'] === $test_model) {
-                return -1;
-            }
-            if ($b['name'] === $test_model) {
-                return 1;
-            }
+        // sort by name
+        usort($models, function ($a, $b) {
             return $a['name'] <=> $b['name'];
         });
         return $models;
@@ -4444,14 +4438,17 @@ class ai_lmstudio extends ai_openai
                     continue;
                 }
                 if (__::x($models__value?->key ?? null)) {
-                    $max_tokens = 32768;
-                    if (!empty($models__value->max_context_length)) {
-                        $max_tokens = min((int) $models__value->max_context_length, 65536);
-                    }
-                    $models[] = ['name' => $models__value->key, 'max_tokens' => $max_tokens, 'supports_tools' => true];
+                    $context_length = (int) ($models__value->max_context_length ?? 32768);
+                    $models[] = ['name' => $models__value->key, 'context_length' => $context_length, 'supports_tools' => true];
                 }
             }
         }
+        // sort by name
+        usort($models, function ($a, $b) {
+            return $a['name'] <=> $b['name'];
+        });
+        $models[0]['default'] = true;
+        $models[0]['test'] = true;
         return $models;
     }
 
@@ -4667,7 +4664,7 @@ class ai_test extends ai_anthropic
     public $models = [
         [
             'name' => 'test-model-1',
-            'max_tokens' => 8192,
+            'context_length' => 128000,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4679,7 +4676,7 @@ class ai_test extends ai_anthropic
     public function fetchModels(): array
     {
         return array_map(function ($model) {
-            return ['name' => $model['name'], 'max_tokens' => $model['max_tokens']];
+            return ['name' => $model['name'], 'context_length' => $model['context_length']];
         }, $this->models);
     }
 
