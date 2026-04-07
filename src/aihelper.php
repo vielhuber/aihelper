@@ -4310,10 +4310,12 @@ class ai_openrouter extends aihelper
                 }
             }
         }
-        // sort by name
-        usort($models, function ($a, $b) {
-            return $a['name'] <=> $b['name'];
-        });
+        if (!empty($models)) {
+            // sort by name
+            usort($models, function ($a, $b) {
+                return $a['name'] <=> $b['name'];
+            });
+        }
         return $models;
     }
 
@@ -4551,16 +4553,22 @@ class ai_lmstudio extends ai_openai
                 }
                 if (__::x($models__value?->key ?? null)) {
                     $context_length = (int) ($models__value->max_context_length ?? 32768);
-                    $models[] = ['name' => $models__value->key, 'context_length' => $context_length, 'supports_tools' => true];
+                    $models[] = [
+                        'name' => $models__value->key,
+                        'context_length' => $context_length,
+                        'supports_tools' => true
+                    ];
                 }
             }
         }
-        // sort by name
-        usort($models, function ($a, $b) {
-            return $a['name'] <=> $b['name'];
-        });
-        $models[0]['default'] = true;
-        $models[0]['test'] = true;
+        if (!empty($models)) {
+            // sort by name
+            usort($models, function ($a, $b) {
+                return $a['name'] <=> $b['name'];
+            });
+            $models[0]['default'] = true;
+            $models[0]['test'] = true;
+        }
         return $models;
     }
 
