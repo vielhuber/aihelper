@@ -988,7 +988,18 @@ abstract class aihelper
         if (!is_array($error)) {
             return null;
         }
-        return $error['metadata']['raw'] ?? ($error['message'] ?? json_encode($error, JSON_UNESCAPED_UNICODE));
+        if (!empty($error['metadata']['raw'])) {
+            return $error['metadata']['raw'];
+        }
+        $msg = $error['message'] ?? json_encode($error, JSON_UNESCAPED_UNICODE);
+        // enrich with metadata details (e.g. openrouter error_type, provider_name)
+        if (!empty($error['metadata']) && is_array($error['metadata'])) {
+            $details = array_filter($error['metadata'], fn($v) => is_string($v));
+            if (!empty($details)) {
+                $msg .= ' (' . implode(', ', array_map(fn($k, $v) => "$k: $v", array_keys($details), $details)) . ')';
+            }
+        }
+        return $msg;
     }
 
     protected function normalizeStreamTextDelta(
