@@ -3376,7 +3376,7 @@ class ai_anthropic extends aihelper
 
         $args = [
             'model' => $this->model,
-            'context_length' => (int) ($this->getContextLengthForModel() * 0.5),
+            'max_tokens' => (int) ($this->getContextLengthForModel() * 0.5),
             'messages' => self::$sessions[$this->session_id]
         ];
 
