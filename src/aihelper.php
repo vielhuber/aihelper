@@ -463,6 +463,7 @@ abstract class aihelper
                 $this->models[] = [
                     'name' => $models__value['name'],
                     'context_length' => $models__value['context_length'] ?? 128000,
+                    'max_output_tokens' => $models__value['max_output_tokens'] ?? 16384,
                     'costs' => $models__value['costs'] ?? ['input' => 0, 'input_cached' => 0, 'output' => 0],
                     'supports_temperature' => $models__value['supports_temperature'] ?? true,
                     'supports_tools' => $models__value['supports_tools'] ?? true,
@@ -1115,6 +1116,16 @@ abstract class aihelper
             }
         }
         return 128000;
+    }
+
+    protected function getMaxOutputTokensForModel(): int
+    {
+        foreach ($this->models as $models__value) {
+            if ($models__value['name'] === $this->model) {
+                return $models__value['max_output_tokens'] ?? 16384;
+            }
+        }
+        return 16384;
     }
 
     protected function addCosts(mixed $response, array &$return): void
@@ -2166,6 +2177,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-3.5-turbo',
             'context_length' => 16384,
+            'max_output_tokens' => 4096,
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2175,6 +2187,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-3.5-turbo-0125',
             'context_length' => 16384,
+            'max_output_tokens' => 4096,
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2184,6 +2197,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-3.5-turbo-1106',
             'context_length' => 16384,
+            'max_output_tokens' => 4096,
             'costs' => ['input' => 0.000001, 'input_cached' => 0.000001, 'output' => 0.000002],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2193,6 +2207,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4',
             'context_length' => 8192,
+            'max_output_tokens' => 4096,
             'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2202,6 +2217,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4-0613',
             'context_length' => 8192,
+            'max_output_tokens' => 4096,
             'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2211,6 +2227,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4-turbo',
             'context_length' => 128000,
+            'max_output_tokens' => 4096,
             'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2220,6 +2237,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4-turbo-2024-04-09',
             'context_length' => 128000,
+            'max_output_tokens' => 4096,
             'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2229,6 +2247,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4.1',
             'context_length' => 1047576,
+            'max_output_tokens' => 32768,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2238,6 +2257,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4.1-2025-04-14',
             'context_length' => 1047576,
+            'max_output_tokens' => 32768,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2247,6 +2267,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4.1-mini',
             'context_length' => 1047576,
+            'max_output_tokens' => 32768,
             'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2256,6 +2277,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4.1-mini-2025-04-14',
             'context_length' => 1047576,
+            'max_output_tokens' => 32768,
             'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2265,6 +2287,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4.1-nano',
             'context_length' => 1047576,
+            'max_output_tokens' => 32768,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2274,6 +2297,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4.1-nano-2025-04-14',
             'context_length' => 1047576,
+            'max_output_tokens' => 32768,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2283,6 +2307,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4o',
             'context_length' => 128000,
+            'max_output_tokens' => 16384,
             'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2292,6 +2317,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4o-2024-05-13',
             'context_length' => 128000,
+            'max_output_tokens' => 16384,
             'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2301,6 +2327,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4o-2024-08-06',
             'context_length' => 128000,
+            'max_output_tokens' => 16384,
             'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2310,6 +2337,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4o-2024-11-20',
             'context_length' => 128000,
+            'max_output_tokens' => 16384,
             'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2319,6 +2347,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4o-mini',
             'context_length' => 128000,
+            'max_output_tokens' => 16384,
             'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2328,6 +2357,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-4o-mini-2024-07-18',
             'context_length' => 128000,
+            'max_output_tokens' => 16384,
             'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -2337,6 +2367,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2346,6 +2377,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5-2025-08-07',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2355,6 +2387,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5-chat-latest',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2364,6 +2397,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5-codex',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2373,6 +2407,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5-mini',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2382,6 +2417,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5-mini-2025-08-07',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2391,6 +2427,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5-nano',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2400,6 +2437,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5-nano-2025-08-07',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2409,6 +2447,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5-pro',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2418,6 +2457,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5-pro-2025-10-06',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2427,6 +2467,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.1',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2436,6 +2477,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.1-2025-11-13',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2445,6 +2487,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.1-chat-latest',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2454,6 +2497,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.1-codex',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2463,6 +2507,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.1-codex-max',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2472,6 +2517,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.1-codex-mini',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2481,6 +2527,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.2',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2490,6 +2537,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.2-2025-12-11',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2499,6 +2547,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.2-chat-latest',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2508,6 +2557,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.2-codex',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2517,6 +2567,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.2-pro',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2526,6 +2577,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.2-pro-2025-12-11',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2535,6 +2587,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.3-chat-latest',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2544,6 +2597,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.3-codex',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2553,6 +2607,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.4',
             'context_length' => 1050000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2562,6 +2617,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.4-2026-03-05',
             'context_length' => 1050000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2571,6 +2627,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.4-mini',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2580,6 +2637,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.4-mini-2026-03-17',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2589,6 +2647,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.4-nano',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2598,6 +2657,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.4-nano-2026-03-17',
             'context_length' => 400000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2607,6 +2667,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.4-pro',
             'context_length' => 1050000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2616,6 +2677,7 @@ class ai_openai extends aihelper
         [
             'name' => 'gpt-5.4-pro-2026-03-05',
             'context_length' => 1050000,
+            'max_output_tokens' => 128000,
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2625,6 +2687,7 @@ class ai_openai extends aihelper
         [
             'name' => 'o1',
             'context_length' => 200000,
+            'max_output_tokens' => 65536,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2634,6 +2697,7 @@ class ai_openai extends aihelper
         [
             'name' => 'o1-2024-12-17',
             'context_length' => 200000,
+            'max_output_tokens' => 65536,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2643,6 +2707,7 @@ class ai_openai extends aihelper
         [
             'name' => 'o1-pro',
             'context_length' => 200000,
+            'max_output_tokens' => 65536,
             'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2652,6 +2717,7 @@ class ai_openai extends aihelper
         [
             'name' => 'o1-pro-2025-03-19',
             'context_length' => 200000,
+            'max_output_tokens' => 65536,
             'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2661,6 +2727,7 @@ class ai_openai extends aihelper
         [
             'name' => 'o3',
             'context_length' => 200000,
+            'max_output_tokens' => 100000,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2670,6 +2737,7 @@ class ai_openai extends aihelper
         [
             'name' => 'o3-2025-04-16',
             'context_length' => 200000,
+            'max_output_tokens' => 100000,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2679,6 +2747,7 @@ class ai_openai extends aihelper
         [
             'name' => 'o3-mini',
             'context_length' => 200000,
+            'max_output_tokens' => 100000,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2688,6 +2757,7 @@ class ai_openai extends aihelper
         [
             'name' => 'o3-mini-2025-01-31',
             'context_length' => 200000,
+            'max_output_tokens' => 100000,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2697,6 +2767,7 @@ class ai_openai extends aihelper
         [
             'name' => 'o3-pro',
             'context_length' => 200000,
+            'max_output_tokens' => 100000,
             'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2706,6 +2777,7 @@ class ai_openai extends aihelper
         [
             'name' => 'o3-pro-2025-06-10',
             'context_length' => 200000,
+            'max_output_tokens' => 100000,
             'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2715,6 +2787,7 @@ class ai_openai extends aihelper
         [
             'name' => 'o4-mini',
             'context_length' => 200000,
+            'max_output_tokens' => 100000,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -2724,6 +2797,7 @@ class ai_openai extends aihelper
         [
             'name' => 'o4-mini-2025-04-16',
             'context_length' => 200000,
+            'max_output_tokens' => 100000,
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
             'supports_temperature' => false,
             'supports_tools' => true,
@@ -3114,6 +3188,7 @@ class ai_anthropic extends aihelper
         [
             'name' => 'claude-3-haiku-20240307',
             'context_length' => 200000,
+            'max_output_tokens' => 4096,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.00000003, 'output' => 0.00000125],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3123,6 +3198,7 @@ class ai_anthropic extends aihelper
         [
             'name' => 'claude-haiku-4-5',
             'context_length' => 200000,
+            'max_output_tokens' => 64000,
             'costs' => ['input' => 0.000001, 'input_cached' => 0.0000001, 'output' => 0.000005],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3132,6 +3208,7 @@ class ai_anthropic extends aihelper
         [
             'name' => 'claude-opus-4-0',
             'context_length' => 200000,
+            'max_output_tokens' => 32000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3141,6 +3218,7 @@ class ai_anthropic extends aihelper
         [
             'name' => 'claude-opus-4-1',
             'context_length' => 200000,
+            'max_output_tokens' => 32000,
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3149,7 +3227,8 @@ class ai_anthropic extends aihelper
         ],
         [
             'name' => 'claude-opus-4-5',
-            'context_length' => 64000,
+            'context_length' => 200000,
+            'max_output_tokens' => 32000,
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3159,6 +3238,7 @@ class ai_anthropic extends aihelper
         [
             'name' => 'claude-opus-4-6',
             'context_length' => 1000000,
+            'max_output_tokens' => 32000,
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3167,7 +3247,8 @@ class ai_anthropic extends aihelper
         ],
         [
             'name' => 'claude-sonnet-4-0',
-            'context_length' => 64000,
+            'context_length' => 200000,
+            'max_output_tokens' => 16384,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3177,6 +3258,7 @@ class ai_anthropic extends aihelper
         [
             'name' => 'claude-sonnet-4-5',
             'context_length' => 200000,
+            'max_output_tokens' => 16384,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3186,6 +3268,7 @@ class ai_anthropic extends aihelper
         [
             'name' => 'claude-sonnet-4-6',
             'context_length' => 1000000,
+            'max_output_tokens' => 16384,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3376,7 +3459,7 @@ class ai_anthropic extends aihelper
 
         $args = [
             'model' => $this->model,
-            'max_tokens' => (int) ($this->getContextLengthForModel() * 0.5),
+            'max_tokens' => $this->getMaxOutputTokensForModel(),
             'messages' => self::$sessions[$this->session_id]
         ];
 
@@ -3573,6 +3656,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemini-2.0-flash',
             'context_length' => 1048576,
+            'max_output_tokens' => 8192,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3582,6 +3666,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemini-2.0-flash-lite',
             'context_length' => 1048576,
+            'max_output_tokens' => 8192,
             'costs' => ['input' => 0.000000075, 'input_cached' => 0.000000075, 'output' => 0.0000003],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3591,6 +3676,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemini-2.5-flash',
             'context_length' => 1048576,
+            'max_output_tokens' => 65536,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3600,6 +3686,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemini-2.5-flash-image',
             'context_length' => 1048576,
+            'max_output_tokens' => 65536,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3609,6 +3696,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemini-2.5-flash-lite',
             'context_length' => 1048576,
+            'max_output_tokens' => 65536,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3618,6 +3706,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemini-2.5-pro',
             'context_length' => 1048576,
+            'max_output_tokens' => 65536,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3627,6 +3716,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemini-flash-latest',
             'context_length' => 1048576,
+            'max_output_tokens' => 65536,
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3636,6 +3726,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemini-flash-lite-latest',
             'context_length' => 1048576,
+            'max_output_tokens' => 65536,
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3645,6 +3736,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemini-pro-latest',
             'context_length' => 1048576,
+            'max_output_tokens' => 65536,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3654,6 +3746,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemma-3-12b-it',
             'context_length' => 131072,
+            'max_output_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3663,6 +3756,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemma-3-1b-it',
             'context_length' => 32768,
+            'max_output_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3672,6 +3766,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemma-3-27b-it',
             'context_length' => 131072,
+            'max_output_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3681,6 +3776,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemma-3-4b-it',
             'context_length' => 131072,
+            'max_output_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3690,6 +3786,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemma-3n-e2b-it',
             'context_length' => 128000,
+            'max_output_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3699,6 +3796,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemma-3n-e4b-it',
             'context_length' => 128000,
+            'max_output_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3708,6 +3806,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemma-4-26b-a4b-it',
             'context_length' => 256000,
+            'max_output_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3717,6 +3816,7 @@ class ai_google extends aihelper
         [
             'name' => 'gemma-4-31b-it',
             'context_length' => 256000,
+            'max_output_tokens' => 8192,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -3985,6 +4085,7 @@ class ai_xai extends ai_anthropic
         [
             'name' => 'grok-3',
             'context_length' => 131072,
+            'max_output_tokens' => 16000,
             'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -3994,6 +4095,7 @@ class ai_xai extends ai_anthropic
         [
             'name' => 'grok-3-mini',
             'context_length' => 131072,
+            'max_output_tokens' => 16000,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4003,6 +4105,7 @@ class ai_xai extends ai_anthropic
         [
             'name' => 'grok-4-1-fast-non-reasoning',
             'context_length' => 2000000,
+            'max_output_tokens' => 16000,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4012,6 +4115,7 @@ class ai_xai extends ai_anthropic
         [
             'name' => 'grok-4-1-fast-reasoning',
             'context_length' => 2000000,
+            'max_output_tokens' => 16000,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4021,6 +4125,7 @@ class ai_xai extends ai_anthropic
         [
             'name' => 'grok-4-fast-non-reasoning',
             'context_length' => 256000,
+            'max_output_tokens' => 16000,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4030,6 +4135,7 @@ class ai_xai extends ai_anthropic
         [
             'name' => 'grok-4-fast-reasoning',
             'context_length' => 256000,
+            'max_output_tokens' => 16000,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4039,6 +4145,7 @@ class ai_xai extends ai_anthropic
         [
             'name' => 'grok-4.20-0309-non-reasoning',
             'context_length' => 256000,
+            'max_output_tokens' => 16000,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000006],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4048,6 +4155,7 @@ class ai_xai extends ai_anthropic
         [
             'name' => 'grok-4.20-0309-reasoning',
             'context_length' => 256000,
+            'max_output_tokens' => 16000,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000006],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4057,6 +4165,7 @@ class ai_xai extends ai_anthropic
         [
             'name' => 'grok-4.20-multi-agent-0309',
             'context_length' => 256000,
+            'max_output_tokens' => 16000,
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000006],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4066,6 +4175,7 @@ class ai_xai extends ai_anthropic
         [
             'name' => 'grok-code-fast-1',
             'context_length' => 131072,
+            'max_output_tokens' => 16000,
             'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000015],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4094,6 +4204,7 @@ class ai_deepseek extends ai_anthropic
         [
             'name' => 'deepseek-chat',
             'context_length' => 65536,
+            'max_output_tokens' => 8000,
             'costs' => ['input' => 0.00000028, 'input_cached' => 0.000000028, 'output' => 0.00000042],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4103,6 +4214,7 @@ class ai_deepseek extends ai_anthropic
         [
             'name' => 'deepseek-reasoner',
             'context_length' => 65536,
+            'max_output_tokens' => 64000,
             'costs' => ['input' => 0.00000028, 'input_cached' => 0.000000028, 'output' => 0.00000042],
             'supports_temperature' => true,
             'supports_tools' => false,
@@ -4665,6 +4777,7 @@ class ai_test extends ai_anthropic
         [
             'name' => 'test-model-1',
             'context_length' => 128000,
+            'max_output_tokens' => 16384,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => false,
