@@ -3125,9 +3125,7 @@ class ai_openai extends aihelper
         if (__::nx($output_text ?? null)) {
             $this->log($response, 'failed');
             $error_msg = $this->extractErrorMessage($response);
-            if ($error_msg !== null) {
-                $return['response'] = $error_msg;
-            }
+            $return['response'] = $error_msg ?? 'No response from provider.';
             return $return;
         }
 
@@ -3590,9 +3588,7 @@ class ai_anthropic extends aihelper
                 sleep(5);
             }
             $error_msg = $this->extractErrorMessage($response);
-            if ($error_msg !== null) {
-                $return['response'] = $error_msg;
-            }
+            $return['response'] = $error_msg ?? 'No response from provider.';
             return $return;
         }
 
@@ -4035,9 +4031,7 @@ class ai_google extends aihelper
         if (__::nx($output_text)) {
             $this->log($response, 'failed');
             $error_msg = $this->extractErrorMessage($response);
-            if ($error_msg !== null) {
-                $return['response'] = $error_msg;
-            }
+            $return['response'] = $error_msg ?? 'No response from provider.';
             return $return;
         }
 
@@ -4482,6 +4476,8 @@ class ai_openrouter extends aihelper
             $error_msg = $this->extractErrorMessage($response);
             if ($error_msg !== null) {
                 $return['response'] = $error_msg;
+            } elseif (!__::x($response ?? null) || !__::x($response?->result ?? null)) {
+                $return['response'] = 'No response from provider (timeout or empty response).';
             }
             return $return;
         }

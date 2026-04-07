@@ -205,7 +205,7 @@ class Test extends \PHPUnit\Framework\TestCase
             provider: $provider,
             model: $model,
             temperature: 1.0,
-            max_tries: 1,
+            max_tries: $provider === 'openrouter' ? 3 : 1,
             api_key: $api_key,
             session_id: null,
             log: 'tests/aihelper.log',
