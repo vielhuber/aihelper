@@ -1221,10 +1221,19 @@ abstract class aihelper
                 $args += ['max_output_tokens' => 2500];
             } elseif ($profile === 'reasoning') {
                 $args += ['max_output_tokens' => 4000];
+            } else {
+                $args += ['max_output_tokens' => 8000];
             }
+        } elseif (str_contains($model_name, 'qwen3')) {
+            $args += ['max_output_tokens' => 8000];
         }
         if (str_contains($model_name, 'glm')) {
             $args['max_output_tokens'] = 1500;
+        }
+
+        // for chat completions (llamacpp/openrouter): map max_output_tokens to max_tokens
+        if (isset($args['messages']) && isset($args['max_output_tokens']) && !isset($args['max_tokens'])) {
+            $args['max_tokens'] = $args['max_output_tokens'];
         }
 
         unset($args['reasoning'], $args['ttl']);
