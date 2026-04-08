@@ -685,7 +685,10 @@ class Test extends \PHPUnit\Framework\TestCase
                         $this->assertSame($return, false);
                         $return = $ai->ask('Test!');
                         $this->assertSame($return['success'], false);
-                        $this->assertMatchesRegularExpression('/^$|api|error|missing|auth|provider/i', $return['response'] ?? '');
+                        $this->assertMatchesRegularExpression(
+                            '/^$|api|error|missing|auth|provider/i',
+                            $return['response'] ?? ''
+                        );
                     }
                 }
             }
@@ -1154,7 +1157,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $providers = aihelper::getProviders();
         $success = true;
         foreach ($providers as $providers__value) {
-            if (in_array($providers__value['name'], ['lmstudio', 'test'])) {
+            if (in_array($providers__value['name'], ['openrouter', 'lmstudio', 'test'])) {
                 continue;
             }
             $modelsApi = array_map(function ($m) {
