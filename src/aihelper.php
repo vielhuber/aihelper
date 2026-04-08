@@ -2220,6 +2220,18 @@ abstract class aihelper
                             continue;
                         }
 
+                        // handle reasoning delta (OpenRouter sends reasoning as separate field)
+                        $reasoning = $delta['reasoning'] ?? $delta['reasoning_content'] ?? null;
+                        if ($reasoning !== null && $reasoning !== '') {
+                            $this->stream_running = true;
+                            echo "event: reasoning\n";
+                            echo 'data: ' . json_encode(['delta' => $reasoning]) . "\n\n";
+                            if (ob_get_level() > 0) {
+                                ob_flush();
+                            }
+                            flush();
+                        }
+
                         $raw = $delta['content'] ?? null;
                         if ($raw === null || $raw === '') {
                             continue;
