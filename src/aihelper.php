@@ -686,6 +686,36 @@ abstract class aihelper
                     } else {
                         $output = json_encode($result, JSON_UNESCAPED_UNICODE);
                     }
+                    // truncate very large tool outputs to prevent context overflow
+                    $max_output_chars = 100000;
+                    if (mb_strlen($output) > $max_output_chars) {
+                        $original_len = mb_strlen($output);
+                        $trimmed = $output;
+                        // try JSON-aware truncation
+                        $decoded = json_decode(trim($output), true);
+                        if ($decoded !== null) {
+                            $truncate_json = function ($data, int $max_str = 500, int $max_arr = 5) use (&$truncate_json) {
+                                if (is_array($data) && array_is_list($data)) {
+                                    $sliced = array_map(fn($v) => $truncate_json($v, $max_str, $max_arr), array_slice($data, 0, $max_arr));
+                                    if (count($data) > $max_arr) {
+                                        $sliced[] = '[... ' . (count($data) - $max_arr) . ' more items, ' . count($data) . ' total]';
+                                    }
+                                    return $sliced;
+                                }
+                                if (is_array($data)) {
+                                    return array_map(fn($v) => $truncate_json($v, $max_str, $max_arr), $data);
+                                }
+                                if (is_string($data) && mb_strlen($data) > $max_str) {
+                                    return mb_substr($data, 0, $max_str) . '... [' . mb_strlen($data) . ' chars]';
+                                }
+                                return $data;
+                            };
+                            $trimmed = json_encode($truncate_json($decoded), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+                        } else {
+                            $trimmed = mb_substr($output, 0, $max_output_chars);
+                        }
+                        $output = $trimmed . "\n\n[... truncated from $original_len to " . mb_strlen($trimmed) . " chars]";
+                    }
                     $this->log(mb_substr($output, 0, 200), 'local tool result');
                 }
                 $tool_results[] = ['id' => $tc['id'], 'name' => $tc['name'], 'output' => $output];
