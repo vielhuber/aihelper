@@ -4639,6 +4639,25 @@ class ai_lmstudio extends ai_openai
                 }
             }
         }
+        // fallback: OpenAI-compatible format (llama.cpp, etc.)
+        if (
+            empty($models) &&
+            __::x($response ?? null) &&
+            __::x($response?->result ?? null) &&
+            __::x($response?->result?->data ?? null) &&
+            is_array($response->result->data)
+        ) {
+            foreach ($response->result->data as $models__value) {
+                if (__::x($models__value?->id ?? null)) {
+                    $context_length = (int) ($models__value->meta->n_ctx_train ?? 32768);
+                    $models[] = [
+                        'name' => $models__value->id,
+                        'context_length' => $context_length,
+                        'supports_tools' => true
+                    ];
+                }
+            }
+        }
         if (!empty($models)) {
             // sort by name
             usort($models, function ($a, $b) {
