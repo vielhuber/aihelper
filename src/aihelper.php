@@ -718,6 +718,9 @@ abstract class aihelper
                     ];
                 }
             }
+            // truncate older tool outputs in session to prevent context overflow
+            $this->truncateOlderToolOutputs();
+
             $return = $this->askThis(
                 prompt: null,
                 files: null,
@@ -730,6 +733,78 @@ abstract class aihelper
         }
         return $return;
     }
+
+    protected function truncateOlderToolOutputs(int $max_chars = 500): void
+    {
+        $session = &self::$sessions[$this->session_id];
+        // find tool output entries and truncate all except the last batch
+        // (the last batch was just added and should remain intact)
+        $is_tool_output = function (array $e): bool {
+            if (isset($e['type']) && $e['type'] === 'function_call_output') return true;
+            if (isset($e['role']) && $e['role'] === 'tool') return true;
+            if (isset($e['role']) && $e['role'] === 'user') {
+                foreach ($e['content'] ?? [] as $b) {
+                    if ((is_object($b) ? ($b->type ?? null) : ($b['type'] ?? null)) === 'tool_result') return true;
+                }
+                foreach ($e['parts'] ?? [] as $p) {
+                    if (is_object($p) ? isset($p->functionResponse) : isset($p['functionResponse'])) return true;
+                }
+            }
+            return false;
+        };
+        $last_tool_output_idx = -1;
+        for ($i = count($session) - 1; $i >= 0; $i--) {
+            if ($is_tool_output($session[$i])) {
+                $last_tool_output_idx = $i;
+                break;
+            }
+        }
+        for ($i = 0; $i < count($session); $i++) {
+            if ($i >= $last_tool_output_idx) {
+                break;
+            }
+            $entry = &$session[$i];
+            // openai responses api: function_call_output
+            if (isset($entry['type']) && $entry['type'] === 'function_call_output' && isset($entry['output']) && is_string($entry['output'])) {
+                if (mb_strlen($entry['output']) > $max_chars) {
+                    $entry['output'] = mb_substr($entry['output'], 0, $max_chars) . "\n[... truncated ...]";
+                }
+            }
+            // chat completions: role=tool
+            if (isset($entry['role']) && $entry['role'] === 'tool' && isset($entry['content']) && is_string($entry['content'])) {
+                if (mb_strlen($entry['content']) > $max_chars) {
+                    $entry['content'] = mb_substr($entry['content'], 0, $max_chars) . "\n[... truncated ...]";
+                }
+            }
+            // anthropic: role=user with tool_result blocks
+            if (isset($entry['role']) && $entry['role'] === 'user' && isset($entry['content']) && is_array($entry['content'])) {
+                foreach ($entry['content'] as &$block) {
+                    $type = is_object($block) ? ($block->type ?? null) : ($block['type'] ?? null);
+                    if ($type === 'tool_result') {
+                        $content = is_object($block) ? ($block->content ?? null) : ($block['content'] ?? null);
+                        if (is_string($content) && mb_strlen($content) > $max_chars) {
+                            $truncated = mb_substr($content, 0, $max_chars) . "\n[... truncated ...]";
+                            if (is_object($block)) { $block->content = $truncated; } else { $block['content'] = $truncated; }
+                        }
+                    }
+                }
+            }
+            // google: role=user with functionResponse parts
+            if (isset($entry['role']) && $entry['role'] === 'user' && isset($entry['parts']) && is_array($entry['parts'])) {
+                foreach ($entry['parts'] as &$part) {
+                    $fr = is_object($part) ? ($part->functionResponse ?? null) : ($part['functionResponse'] ?? null);
+                    if ($fr !== null) {
+                        $result = is_object($fr) ? ($fr->response->result ?? null) : ($fr['response']['result'] ?? null);
+                        if (is_string($result) && mb_strlen($result) > $max_chars) {
+                            $truncated = mb_substr($result, 0, $max_chars) . "\n[... truncated ...]";
+                            if (is_object($fr)) { $fr->response->result = $truncated; } else { $part['functionResponse']['response']['result'] = $truncated; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 
     protected function buildLocalToolsArgs(
         string $schema_key = 'parameters',
