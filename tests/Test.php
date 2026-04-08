@@ -60,6 +60,10 @@ class Test extends \PHPUnit\Framework\TestCase
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
+            $this->test__ai_llamacpp($stats, true);
+        }
+        for ($i = 1; $i <= $this->run_count; $i++) {
+            $this->log('run ' . $i . '/' . $this->run_count . '...');
             $this->test__ai_lmstudio($stats, true);
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
@@ -147,17 +151,20 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('openrouter', $_SERVER['OPENROUTER_API_KEY'] ?? null, null, $stats);
     }
 
+    function test__ai_llamacpp(&$stats = [], $force = false)
+    {
+        if ($this->isCi() && $force !== true) {
+            $this->markTestSkipped('Skipped.');
+        }
+        $this->ai_test_prepare('llamacpp', $_SERVER['LLM_API_KEY'] ?? null, $_SERVER['LLM_URL'] ?? null, $stats);
+    }
+
     function test__ai_lmstudio(&$stats = [], $force = false)
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
-        $this->ai_test_prepare(
-            'lmstudio',
-            $_SERVER['LMSTUDIO_API_KEY'] ?? null,
-            $_SERVER['LMSTUDIO_URL'] ?? null,
-            $stats
-        );
+        $this->ai_test_prepare('lmstudio', $_SERVER['LLM_API_KEY'] ?? null, $_SERVER['LLM_URL'] ?? null, $stats);
     }
 
     function test__ai_test(&$stats = [], $force = false)
@@ -223,6 +230,7 @@ class Test extends \PHPUnit\Framework\TestCase
             'xai',
             'deepseek',
             'openrouter',
+            'llamacpp',
             'lmstudio'
         ]);
         if ($supported === true) {
@@ -244,6 +252,7 @@ class Test extends \PHPUnit\Framework\TestCase
             'xai',
             'deepseek',
             'openrouter',
+            'llamacpp',
             'lmstudio'
         ]);
         if ($supported === true) {
@@ -273,6 +282,7 @@ class Test extends \PHPUnit\Framework\TestCase
             'xai',
             'deepseek',
             'openrouter',
+            'llamacpp',
             'lmstudio'
         ]);
         if ($supported === true) {
@@ -304,6 +314,7 @@ class Test extends \PHPUnit\Framework\TestCase
             'xai',
             'deepseek',
             'openrouter',
+            'llamacpp',
             'lmstudio'
         ]);
         if ($supported === true) {
@@ -335,6 +346,7 @@ class Test extends \PHPUnit\Framework\TestCase
             'xai',
             'deepseek',
             'openrouter',
+            'llamacpp',
             'lmstudio'
         ]);
         if ($supported === true) {
@@ -374,6 +386,7 @@ class Test extends \PHPUnit\Framework\TestCase
             'xai',
             'deepseek',
             'openrouter',
+            'llamacpp',
             'lmstudio'
         ]);
         if ($supported === true) {
@@ -526,7 +539,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['anthropic', 'openai', 'openrouter', 'lmstudio', 'test']);
+        $supported = in_array($provider, ['anthropic', 'openai', 'openrouter', 'llamacpp', 'lmstudio', 'test']);
         if ($supported === true) {
             $ai_stream = aihelper::create(
                 provider: $provider,
@@ -556,7 +569,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['anthropic', 'openai', 'openrouter', 'lmstudio']);
+        $supported = in_array($provider, ['anthropic', 'openai', 'openrouter', 'llamacpp', 'lmstudio']);
         if ($supported === true) {
             $ai_stream = aihelper::create(
                 provider: $provider,
@@ -590,7 +603,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
 
         if (($_SERVER['MCP_SERVER_TEST'] ?? '') == '1') {
-            $supported = in_array($provider, ['anthropic', 'openai', 'lmstudio']);
+            $supported = in_array($provider, ['anthropic', 'openai', 'llamacpp', 'lmstudio']);
             if ($supported === true) {
                 $return = __::curl(
                     $_SERVER['MCP_SERVER_TEST_AUTH_URL'] ?? '',
@@ -662,7 +675,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $providers = aihelper::getProviders();
         foreach ([false, true] as $streams__value) {
             foreach ($providers as $providers__value) {
-                if ($providers__value['name'] === 'test') {
+                if (in_array($providers__value['name'], ['test', 'llamacpp', 'lmstudio'], true)) {
                     continue;
                 }
                 foreach ($providers__value['models'] as $models__value) {
@@ -884,14 +897,14 @@ class Test extends \PHPUnit\Framework\TestCase
             provider: 'lmstudio',
             model: 'qwen3.5-27b-ud',
             temperature: 0.3,
-            api_key: $_SERVER['LMSTUDIO_API_KEY'] ?? '',
+            api_key: $_SERVER['LLM_API_KEY'] ?? '',
             session_id: null,
             log: 'tests/aihelper.log',
             timeout: 60 * 30,
             max_tries: 1,
             mcp_servers: $mcp_servers,
             stream: false,
-            url: $_SERVER['LMSTUDIO_URL'] ?? null
+            url: $_SERVER['LLM_URL'] ?? null
         );
         $return = $ai_mcp->ask('Hallo. Welche Dateien liegen in /tmp?');
         $return = $ai_mcp->ask('Was ist 7+4?');
@@ -1071,10 +1084,17 @@ class Test extends \PHPUnit\Framework\TestCase
                 'call_types' => ['local']
             ],
             [
+                'provider' => 'llamacpp',
+                'model' => 'qwen3.5-27b-ud',
+                'api_key' => $_SERVER['LLM_API_KEY'] ?? '',
+                'url' => $_SERVER['LLM_URL'] ?? null,
+                'call_types' => ['local']
+            ],
+            [
                 'provider' => 'lmstudio',
                 'model' => 'qwen3.5-27b-ud',
-                'api_key' => $_SERVER['LMSTUDIO_API_KEY'] ?? '',
-                'url' => $_SERVER['LMSTUDIO_URL'] ?? null,
+                'api_key' => $_SERVER['LLM_API_KEY'] ?? '',
+                'url' => $_SERVER['LLM_URL'] ?? null,
                 'call_types' => ['local']
             ]
         ];
@@ -1157,7 +1177,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $providers = aihelper::getProviders();
         $success = true;
         foreach ($providers as $providers__value) {
-            if (in_array($providers__value['name'], ['openrouter', 'lmstudio', 'test'])) {
+            if (in_array($providers__value['name'], ['openrouter', 'llamacpp', 'lmstudio', 'test'])) {
                 continue;
             }
             $modelsApi = array_map(function ($m) {

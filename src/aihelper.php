@@ -148,6 +148,22 @@ abstract class aihelper
                 url: $url
             );
         }
+        if ($provider === 'llamacpp') {
+            return new ai_llamacpp(
+                model: $model,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream,
+                url: $url
+            );
+        }
         if ($provider === 'lmstudio') {
             return new ai_lmstudio(
                 model: $model,
@@ -194,6 +210,7 @@ abstract class aihelper
                 new ai_xai(),
                 new ai_deepseek(),
                 new ai_openrouter(),
+                new ai_llamacpp(),
                 new ai_lmstudio(),
                 new ai_test()
             ]
@@ -554,7 +571,7 @@ abstract class aihelper
     {
         $is_anthropic = in_array($this->name, ['anthropic', 'xai', 'deepseek'], true);
         $is_google = $this->name === 'google';
-        $is_chat_completions = $this->name === 'openrouter';
+        $is_chat_completions = in_array($this->name, ['openrouter', 'llamacpp'], true);
         $max_tool_rounds = 50;
         while ($max_tool_rounds > 0) {
             // extract pending tool calls from session
@@ -612,7 +629,7 @@ abstract class aihelper
                         $tool_calls[] = [
                             'id' => $tc['id'] ?? '',
                             'name' => $tc['function']['name'] ?? '',
-                            'arguments' => json_decode($tc['function']['arguments'] ?? '{}', true) ?? []
+                            'arguments' => json_decode($tc['function']['arguments'] ?? '{}', true) ?: []
                         ];
                     }
                 }
@@ -659,7 +676,7 @@ abstract class aihelper
                         authorization_token: $server['authorization_token']
                     );
                     if ($result === null) {
-                        $output = 'Error: tool call failed';
+                        $output = 'Error: tool call failed (no response from MCP server)';
                     } elseif (isset($result['result']['content']) && is_array($result['result']['content'])) {
                         $parts = [];
                         foreach ($result['result']['content'] as $item) {
@@ -740,14 +757,22 @@ abstract class aihelper
         // find tool output entries and truncate all except the last batch
         // (the last batch was just added and should remain intact)
         $is_tool_output = function (array $e): bool {
-            if (isset($e['type']) && $e['type'] === 'function_call_output') return true;
-            if (isset($e['role']) && $e['role'] === 'tool') return true;
+            if (isset($e['type']) && $e['type'] === 'function_call_output') {
+                return true;
+            }
+            if (isset($e['role']) && $e['role'] === 'tool') {
+                return true;
+            }
             if (isset($e['role']) && $e['role'] === 'user') {
                 foreach ($e['content'] ?? [] as $b) {
-                    if ((is_object($b) ? ($b->type ?? null) : ($b['type'] ?? null)) === 'tool_result') return true;
+                    if ((is_object($b) ? $b->type ?? null : $b['type'] ?? null) === 'tool_result') {
+                        return true;
+                    }
                 }
                 foreach ($e['parts'] ?? [] as $p) {
-                    if (is_object($p) ? isset($p->functionResponse) : isset($p['functionResponse'])) return true;
+                    if (is_object($p) ? isset($p->functionResponse) : isset($p['functionResponse'])) {
+                        return true;
+                    }
                 }
             }
             return false;
@@ -765,46 +790,73 @@ abstract class aihelper
             }
             $entry = &$session[$i];
             // openai responses api: function_call_output
-            if (isset($entry['type']) && $entry['type'] === 'function_call_output' && isset($entry['output']) && is_string($entry['output'])) {
+            if (
+                isset($entry['type']) &&
+                $entry['type'] === 'function_call_output' &&
+                isset($entry['output']) &&
+                is_string($entry['output'])
+            ) {
                 if (mb_strlen($entry['output']) > $max_chars) {
                     $entry['output'] = mb_substr($entry['output'], 0, $max_chars) . "\n[... truncated ...]";
                 }
             }
             // chat completions: role=tool
-            if (isset($entry['role']) && $entry['role'] === 'tool' && isset($entry['content']) && is_string($entry['content'])) {
+            if (
+                isset($entry['role']) &&
+                $entry['role'] === 'tool' &&
+                isset($entry['content']) &&
+                is_string($entry['content'])
+            ) {
                 if (mb_strlen($entry['content']) > $max_chars) {
                     $entry['content'] = mb_substr($entry['content'], 0, $max_chars) . "\n[... truncated ...]";
                 }
             }
             // anthropic: role=user with tool_result blocks
-            if (isset($entry['role']) && $entry['role'] === 'user' && isset($entry['content']) && is_array($entry['content'])) {
+            if (
+                isset($entry['role']) &&
+                $entry['role'] === 'user' &&
+                isset($entry['content']) &&
+                is_array($entry['content'])
+            ) {
                 foreach ($entry['content'] as &$block) {
-                    $type = is_object($block) ? ($block->type ?? null) : ($block['type'] ?? null);
+                    $type = is_object($block) ? $block->type ?? null : $block['type'] ?? null;
                     if ($type === 'tool_result') {
-                        $content = is_object($block) ? ($block->content ?? null) : ($block['content'] ?? null);
+                        $content = is_object($block) ? $block->content ?? null : $block['content'] ?? null;
                         if (is_string($content) && mb_strlen($content) > $max_chars) {
                             $truncated = mb_substr($content, 0, $max_chars) . "\n[... truncated ...]";
-                            if (is_object($block)) { $block->content = $truncated; } else { $block['content'] = $truncated; }
+                            if (is_object($block)) {
+                                $block->content = $truncated;
+                            } else {
+                                $block['content'] = $truncated;
+                            }
                         }
                     }
                 }
             }
             // google: role=user with functionResponse parts
-            if (isset($entry['role']) && $entry['role'] === 'user' && isset($entry['parts']) && is_array($entry['parts'])) {
+            if (
+                isset($entry['role']) &&
+                $entry['role'] === 'user' &&
+                isset($entry['parts']) &&
+                is_array($entry['parts'])
+            ) {
                 foreach ($entry['parts'] as &$part) {
-                    $fr = is_object($part) ? ($part->functionResponse ?? null) : ($part['functionResponse'] ?? null);
+                    $fr = is_object($part) ? $part->functionResponse ?? null : $part['functionResponse'] ?? null;
                     if ($fr !== null) {
-                        $result = is_object($fr) ? ($fr->response->result ?? null) : ($fr['response']['result'] ?? null);
+                        $result = is_object($fr) ? $fr->response->result ?? null : $fr['response']['result'] ?? null;
                         if (is_string($result) && mb_strlen($result) > $max_chars) {
                             $truncated = mb_substr($result, 0, $max_chars) . "\n[... truncated ...]";
-                            if (is_object($fr)) { $fr->response->result = $truncated; } else { $part['functionResponse']['response']['result'] = $truncated; }
+                            if (is_object($fr)) {
+                                $fr->response->result = $truncated;
+                            } else {
+                                $part['functionResponse']['response']['result'] = $truncated;
+                            }
                         }
                     }
                 }
             }
         }
     }
-
 
     protected function buildLocalToolsArgs(
         string $schema_key = 'parameters',
@@ -860,7 +912,6 @@ abstract class aihelper
                 $response = curl_multi_getcontent($h['ch']);
                 $httpCode = curl_getinfo($h['ch'], CURLINFO_HTTP_CODE);
                 curl_multi_remove_handle($mh, $h['ch']);
-                curl_close($h['ch']);
                 if ($httpCode < 200 || $httpCode >= 300 || !$response) {
                     continue;
                 }
@@ -1028,6 +1079,157 @@ abstract class aihelper
         }
 
         return $content;
+    }
+
+    protected static function modifyArgsLocal(?array $args, ?string $model): ?array
+    {
+        $model_name = strtolower($model ?? '');
+        $uses_tools = !empty($args['tools']) && is_array($args['tools']);
+
+        // --- detect profile ---
+        $profile = 'default';
+        if ($uses_tools) {
+            $profile = 'agentic';
+        } else {
+            $prompt_text = '';
+            // scan input (responses api) or messages (chat completions)
+            $items = $args['input'] ?? ($args['messages'] ?? []);
+            foreach (array_reverse($items) as $item) {
+                if (!is_array($item) || ($item['role'] ?? null) !== 'user') {
+                    continue;
+                }
+                $content = $item['content'] ?? [];
+                if (is_string($content)) {
+                    $prompt_text = $content;
+                    break;
+                }
+                foreach ($content as $part) {
+                    if (is_array($part) && isset($part['text'])) {
+                        $prompt_text .= ' ' . $part['text'];
+                    }
+                }
+                break;
+            }
+            $prompt_text = mb_strtolower(trim($prompt_text));
+
+            if ($prompt_text !== '') {
+                $creative_keywords = [
+                    'geschichte',
+                    'kreativ',
+                    'gedicht',
+                    'erzähl',
+                    'schreib',
+                    'story',
+                    'märchen',
+                    'roman',
+                    'szene',
+                    'witz',
+                    'witzig',
+                    'lustig',
+                    'ulkig',
+                    'humor',
+                    'komisch'
+                ];
+                $reasoning_keywords = [
+                    'denke',
+                    'überlege',
+                    'analysiere',
+                    'erkläre',
+                    'warum',
+                    'berechne',
+                    'löse',
+                    'beweise',
+                    'vergleiche',
+                    'schlussfolgere'
+                ];
+                $matches = fn(array $keywords) => array_reduce(
+                    $keywords,
+                    fn($carry, $kw) => $carry || str_contains($prompt_text, $kw),
+                    false
+                );
+                if ($matches($creative_keywords)) {
+                    $profile = 'creative';
+                } elseif (
+                    $matches($reasoning_keywords) ||
+                    preg_match('/\d+\s*[\*\+\-x\/]\s*\d+/', $prompt_text) === 1
+                ) {
+                    $profile = 'reasoning';
+                }
+            }
+        }
+
+        // --- sampling parameters per model family ---
+        if (str_contains($model_name, 'qwq')) {
+            $args += ['top_p' => 0.95, 'top_k' => 40];
+        } elseif (str_contains($model_name, 'qwen3.5')) {
+            $args += [
+                'top_p' => $profile === 'reasoning' || $profile === 'creative' ? 0.95 : 0.8,
+                'top_k' => 20,
+                'presence_penalty' => $profile === 'creative' ? 0.4 : 0.0,
+                'repeat_penalty' => $profile === 'agentic' ? 1.0 : 1.1
+            ];
+        } elseif (str_contains($model_name, 'qwen3')) {
+            $args += ['top_p' => 0.8, 'top_k' => 20];
+        } elseif (str_contains($model_name, 'gpt-oss') && $uses_tools) {
+            $args += ['top_p' => 0.9, 'top_k' => 20];
+        }
+
+        // --- qwen3: suppress runaway thinking via empty <think> priming ---
+        if (str_contains($model_name, 'qwen3')) {
+            $think_block = "<think>\n\n</think>\n\n";
+            // responses api format
+            if (!empty($args['input']) && is_array($args['input'])) {
+                $already_primed = false;
+                foreach ($args['input'] as $item) {
+                    if (!is_array($item) || ($item['role'] ?? null) !== 'assistant') {
+                        continue;
+                    }
+                    foreach ($item['content'] ?? [] as $part) {
+                        if (is_array($part) && ($part['text'] ?? '') === $think_block) {
+                            $already_primed = true;
+                            break 2;
+                        }
+                    }
+                }
+                if (!$already_primed) {
+                    $args['input'][] = [
+                        'role' => 'assistant',
+                        'content' => [['type' => 'output_text', 'text' => $think_block]]
+                    ];
+                }
+            }
+            // chat completions format
+            if (!empty($args['messages']) && is_array($args['messages'])) {
+                $already_primed = false;
+                foreach ($args['messages'] as $msg) {
+                    if (($msg['role'] ?? null) === 'assistant' && ($msg['content'] ?? '') === $think_block) {
+                        $already_primed = true;
+                        break;
+                    }
+                }
+                if (!$already_primed) {
+                    $args['messages'][] = ['role' => 'assistant', 'content' => $think_block];
+                }
+            }
+        }
+
+        // --- output limits per profile ---
+        if (str_contains($model_name, 'qwen3.5')) {
+            if ($uses_tools) {
+                $args += ['max_output_tokens' => 12000, 'parallel_tool_calls' => false, 'max_tool_calls' => 30];
+            } elseif ($profile === 'creative') {
+                $args += ['max_output_tokens' => 2500];
+            } elseif ($profile === 'reasoning') {
+                $args += ['max_output_tokens' => 4000];
+            }
+        }
+        if (str_contains($model_name, 'glm')) {
+            $args['max_output_tokens'] = 1500;
+        }
+
+        unset($args['reasoning'], $args['ttl']);
+
+        return $args;
     }
 
     protected function stripThinkingBlocks(string $text): string
@@ -1859,7 +2061,7 @@ abstract class aihelper
             };
         }
 
-        if ($this->name === 'openrouter') {
+        if ($this->name === 'openrouter' || $this->name === 'llamacpp') {
             // mimic non-stream result (chat completions format)
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -4589,6 +4791,86 @@ class ai_openrouter extends aihelper
     }
 }
 
+/* compatible with the openai chat completions api */
+class ai_llamacpp extends ai_openrouter
+{
+    public $provider = 'llama.cpp';
+
+    public $title = 'llama.cpp';
+
+    public $name = 'llamacpp';
+
+    protected $url = 'http://localhost:8080/v1';
+
+    public $support_mcp_remote = false;
+    public $support_mcp_local = true;
+
+    public $support_stream = true;
+
+    public $models = [];
+
+    public function fetchModels(): array
+    {
+        $models = [];
+        $response = __::curl(
+            url: $this->url . '/models',
+            method: 'GET',
+            headers: [
+                'Authorization' => 'Bearer ' . $this->api_key
+            ],
+            timeout: $this->timeout
+        );
+        $this->log($response);
+        if (
+            __::x($response ?? null) &&
+            __::x($response?->result ?? null) &&
+            __::x($response?->result?->data ?? null) &&
+            is_array($response->result->data)
+        ) {
+            foreach ($response->result->data as $models__value) {
+                if (__::x($models__value?->id ?? null)) {
+                    $context_length = (int) ($models__value->meta->n_ctx_train ?? 32768);
+                    $models[] = [
+                        'name' => $models__value->id,
+                        'context_length' => $context_length,
+                        'supports_tools' => true
+                    ];
+                }
+            }
+        }
+        if (!empty($models)) {
+            usort($models, function ($a, $b) {
+                return $a['name'] <=> $b['name'];
+            });
+            $models[0]['default'] = true;
+            $models[0]['test'] = true;
+        }
+        return $models;
+    }
+
+    public function ping(): bool
+    {
+        try {
+            $response = __::curl(
+                url: rtrim($this->url, '/') . '/models',
+                method: 'GET',
+                headers: ['Authorization' => 'Bearer ' . $this->api_key],
+                timeout: 30
+            );
+            return ($response->status ?? 0) >= 200 &&
+                ($response->status ?? 0) < 300 &&
+                __::x($response?->result?->data ?? null);
+        } catch (\Exception) {
+            return false;
+        }
+    }
+
+    protected function modifyArgs(?array $args): ?array
+    {
+        return self::modifyArgsLocal($args, $this->model);
+    }
+}
+
 /* compatible with the openai api */
 class ai_lmstudio extends ai_openai
 {
@@ -4722,145 +5004,7 @@ class ai_lmstudio extends ai_openai
 
     protected function modifyArgs(?array $args): ?array
     {
-        $model_name = strtolower($this->model ?? '');
-        $uses_tools = !empty($args['tools']) && is_array($args['tools']);
-
-        // --- detect profile ---
-
-        $profile = 'default';
-        if ($uses_tools) {
-            $profile = 'agentic';
-        } else {
-            $prompt_text = '';
-            foreach (array_reverse($args['input'] ?? []) as $item) {
-                if (!is_array($item) || ($item['role'] ?? null) !== 'user') {
-                    continue;
-                }
-                foreach ($item['content'] ?? [] as $part) {
-                    if (is_array($part) && ($part['type'] ?? null) === 'input_text' && isset($part['text'])) {
-                        $prompt_text .= ' ' . $part['text'];
-                    }
-                }
-                break;
-            }
-            $prompt_text = mb_strtolower(trim($prompt_text));
-
-            if ($prompt_text !== '') {
-                $creative_keywords = [
-                    'geschichte',
-                    'kreativ',
-                    'gedicht',
-                    'erzähl',
-                    'schreib',
-                    'story',
-                    'märchen',
-                    'roman',
-                    'szene',
-                    'witz',
-                    'witzig',
-                    'lustig',
-                    'ulkig',
-                    'humor',
-                    'komisch'
-                ];
-                $reasoning_keywords = [
-                    'denke',
-                    'überlege',
-                    'analysiere',
-                    'erkläre',
-                    'warum',
-                    'berechne',
-                    'löse',
-                    'beweise',
-                    'vergleiche',
-                    'schlussfolgere'
-                ];
-                $matches = fn(array $keywords) => array_reduce(
-                    $keywords,
-                    fn($carry, $kw) => $carry || str_contains($prompt_text, $kw),
-                    false
-                );
-                if ($matches($creative_keywords)) {
-                    $profile = 'creative';
-                } elseif (
-                    $matches($reasoning_keywords) ||
-                    preg_match('/\d+\s*[\*\+\-x\/]\s*\d+/', $prompt_text) === 1
-                ) {
-                    $profile = 'reasoning';
-                }
-            }
-        }
-
-        // --- sampling parameters per model family ---
-
-        if (str_contains($model_name, 'qwq')) {
-            $args += ['top_p' => 0.95, 'top_k' => 40];
-        } elseif (str_contains($model_name, 'qwen3.5')) {
-            $args += [
-                'top_p' => $profile === 'reasoning' || $profile === 'creative' ? 0.95 : 0.8,
-                'top_k' => 20,
-                'presence_penalty' => $profile === 'creative' ? 0.4 : 0.0,
-                // lmstudio responses api ignores frequency_penalty; use repeat_penalty instead
-                // (llmster maps repeat_penalty → llama.repeatPenalty; default is 1.1)
-                'repeat_penalty' => $profile === 'agentic' ? 1.0 : 1.1
-            ];
-        } elseif (str_contains($model_name, 'qwen3')) {
-            $args += ['top_p' => 0.8, 'top_k' => 20];
-        } elseif (str_contains($model_name, 'gpt-oss') && $uses_tools) {
-            $args += ['top_p' => 0.9, 'top_k' => 20];
-        }
-
-        // --- qwen3: suppress runaway thinking via empty <think> priming ---
-        // qwen3 variants in lmstudio do not reliably follow /no_think;
-        // the empty <think> priming trick is the only reliable way to prevent it
-
-        if (str_contains($model_name, 'qwen3')) {
-            $think_block = "<think>\n\n</think>\n\n";
-
-            if (!empty($args['input']) && is_array($args['input'])) {
-                $already_primed = false;
-                foreach ($args['input'] as $item) {
-                    if (!is_array($item) || ($item['role'] ?? null) !== 'assistant') {
-                        continue;
-                    }
-                    foreach ($item['content'] ?? [] as $part) {
-                        if (is_array($part) && ($part['text'] ?? '') === $think_block) {
-                            $already_primed = true;
-                            break 2;
-                        }
-                    }
-                }
-                if (!$already_primed) {
-                    $args['input'][] = [
-                        'role' => 'assistant',
-                        'content' => [['type' => 'output_text', 'text' => $think_block]]
-                    ];
-                }
-            }
-            if (!empty($args['messages'])) {
-                $args['messages'][] = ['role' => 'assistant', 'content' => $think_block];
-            }
-        }
-
-        // --- output limits per profile ---
-
-        if (str_contains($model_name, 'qwen3.5')) {
-            if ($uses_tools) {
-                $args += ['max_output_tokens' => 12000, 'parallel_tool_calls' => false, 'max_tool_calls' => 30];
-            } elseif ($profile === 'creative') {
-                $args += ['max_output_tokens' => 2500];
-            } elseif ($profile === 'reasoning') {
-                $args += ['max_output_tokens' => 4000];
-            }
-        }
-
-        if (str_contains($model_name, 'glm')) {
-            $args['max_output_tokens'] = 1500; // glm produces excessive thinking; hard cap
-        }
-
-        unset($args['reasoning'], $args['ttl']);
-
-        return $args;
+        return self::modifyArgsLocal($args, $this->model);
     }
 }
 
