@@ -212,7 +212,7 @@ class Test extends \PHPUnit\Framework\TestCase
             provider: $provider,
             model: $model,
             temperature: 1.0,
-            max_tries: $provider === 'openrouter' ? 3 : 2,
+            max_tries: 2,
             api_key: $api_key,
             session_id: null,
             log: 'tests/aihelper.log',
@@ -356,6 +356,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 provider: $provider,
                 model: $model,
                 temperature: 1.0,
+                max_tries: 2,
                 api_key: $api_key,
                 session_id: $ai->getSessionId(),
                 log: 'tests/aihelper.log',
@@ -394,6 +395,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 provider: $provider,
                 model: $model,
                 temperature: 1.0,
+                max_tries: 2,
                 api_key: $api_key,
                 history: $ai->getSessionContent(),
                 log: 'tests/aihelper.log',
@@ -549,7 +551,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 session_id: null,
                 log: 'tests/aihelper.log',
                 url: $url,
-                max_tries: 1,
+                max_tries: 2,
                 mcp_servers: null,
                 stream: true
             );
@@ -579,7 +581,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 session_id: null,
                 log: 'tests/aihelper.log',
                 url: $url,
-                max_tries: 1,
+                max_tries: 2,
                 mcp_servers: null,
                 stream: true
             );
@@ -634,7 +636,7 @@ class Test extends \PHPUnit\Framework\TestCase
                     session_id: null,
                     log: 'tests/aihelper.log',
                     url: $url,
-                    max_tries: 1,
+                    max_tries: 2,
                     mcp_servers: $mcp_servers
                 );
                 while (
@@ -836,7 +838,7 @@ class Test extends \PHPUnit\Framework\TestCase
                     session_id: null,
                     log: 'tests/aihelper.log',
                     timeout: 60 * 30,
-                    max_tries: 1,
+                    max_tries: 2,
                     mcp_servers: $mcp_servers,
                     stream: false
                 );
@@ -901,7 +903,7 @@ class Test extends \PHPUnit\Framework\TestCase
             session_id: null,
             log: 'tests/aihelper.log',
             timeout: 60 * 30,
-            max_tries: 1,
+            max_tries: 2,
             mcp_servers: $mcp_servers,
             stream: false,
             url: $_SERVER['LLM_URL'] ?? null
@@ -966,7 +968,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 session_id: null,
                 log: 'tests/aihelper.log',
                 timeout: 60 * 30,
-                max_tries: 1,
+                max_tries: 2,
                 mcp_servers: $mcp_servers,
                 stream: $stream_option__value
             );
@@ -1123,7 +1125,7 @@ class Test extends \PHPUnit\Framework\TestCase
                             session_id: null,
                             log: 'tests/aihelper.log',
                             timeout: 60 * 10,
-                            max_tries: 1,
+                            max_tries: 2,
                             mcp_servers: $mcp_subset,
                             mcp_servers_call_type: $call_type,
                             stream: false,
@@ -1222,7 +1224,7 @@ class Test extends \PHPUnit\Framework\TestCase
                         api_key: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_KEY'] ?? null,
                         url: $_SERVER[mb_strtoupper($providers__value['name']) . '_API_URL'] ?? null,
                         log: 'tests/aihelper.log',
-                        max_tries: 1
+                        max_tries: 2
                     );
                     $return = $ai->ask('Hallo!');
                     if ($return['success'] === true) {
