@@ -4768,6 +4768,10 @@ class ai_openrouter extends aihelper
             $args['stream'] = true;
         }
 
+        if (method_exists($this, 'modifyArgs')) {
+            $args = $this->modifyArgs($args);
+        }
+
         $this->log((int) round(strlen(json_encode($args)) / 3.5), 'ask with input token length');
         $this->log($args, 'ask');
         $response = $this->makeApiCall($args);
