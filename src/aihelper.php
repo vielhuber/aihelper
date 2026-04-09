@@ -240,6 +240,7 @@ abstract class aihelper
             curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
             curl_setopt($ch, CURLOPT_TIMEOUT, 30);
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_UNRESTRICTED_AUTH, true);
             curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             curl_setopt($ch, CURLOPT_POST, true);
@@ -314,6 +315,7 @@ abstract class aihelper
             curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
             curl_setopt($ch, CURLOPT_TIMEOUT, 30);
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_UNRESTRICTED_AUTH, true);
             curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             $initResponse = curl_exec($ch);
@@ -356,6 +358,7 @@ abstract class aihelper
             curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
             curl_setopt($ch, CURLOPT_TIMEOUT, 30);
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_UNRESTRICTED_AUTH, true);
             curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             $toolsResponse = curl_exec($ch);
@@ -396,6 +399,7 @@ abstract class aihelper
             curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
             curl_setopt($ch, CURLOPT_TIMEOUT, 300);
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_UNRESTRICTED_AUTH, true);
             curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             curl_setopt($ch, CURLOPT_POST, true);
@@ -925,6 +929,7 @@ abstract class aihelper
                 curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
                 curl_setopt($ch, CURLOPT_TIMEOUT, 60);
                 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                curl_setopt($ch, CURLOPT_UNRESTRICTED_AUTH, true);
                 curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
                 curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
                 curl_multi_add_handle($mh, $ch);
