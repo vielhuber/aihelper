@@ -33,6 +33,12 @@ abstract class aihelper
     protected $stream_running = false;
     protected $stream_in_think = false;
     protected $stream_think_tag_buf = '';
+    protected $stream_reasoning_buffer = '';
+    // stateful buffer for stripping <tool_call>...</tool_call> XML from streamed text.
+    // qwen3 emits tool calls as XML in content/reasoning; we extract them separately
+    // in the reasoning_buffer parser, so they must be hidden from user-visible streams.
+    protected $stream_tool_call_strip_in_block = false;
+    protected $stream_tool_call_strip_tag_buf = '';
 
     protected $session_id = null;
     protected static $sessions = [];
@@ -785,12 +791,15 @@ abstract class aihelper
         return $return;
     }
 
-    protected function truncateOlderToolOutputs(int $max_chars = 500): void
+    protected function truncateOlderToolOutputs(int $max_chars = 2000): void
     {
         $session = &self::$sessions[$this->session_id];
         // find tool output entries and truncate all except the last batch
         // (the last batch was just added and should remain intact)
-        $is_tool_output = function (array $e): bool {
+        $is_tool_output = function (mixed $e): bool {
+            if (!is_array($e)) {
+                return false;
+            }
             if (isset($e['type']) && $e['type'] === 'function_call_output') {
                 return true;
             }
@@ -823,6 +832,9 @@ abstract class aihelper
                 break;
             }
             $entry = &$session[$i];
+            if (!is_array($entry)) {
+                continue;
+            }
             // openai responses api: function_call_output
             if (
                 isset($entry['type']) &&
@@ -1116,7 +1128,7 @@ abstract class aihelper
         return $content;
     }
 
-    protected static function modifyArgsLocal(?array $args, ?string $model): ?array
+    protected static function modifyArgsLocal(?array $args, ?string $model, ?string $provider = null): ?array
     {
         $model_name = strtolower($model ?? '');
         $uses_tools = !empty($args['tools']) && is_array($args['tools']);
@@ -1210,7 +1222,11 @@ abstract class aihelper
         }
 
         // --- qwen3: suppress runaway thinking via empty <think> priming ---
-        if (str_contains($model_name, 'qwen3')) {
+        // skip for llamacpp: the server uses --chat-template-file with a
+        // non-thinking variant which already emits the priming in the template.
+        // sending it again client-side would double-apply.
+        // kept for openrouter (no server-side template override possible).
+        if (str_contains($model_name, 'qwen3') && $provider !== 'llamacpp') {
             $think_block = "<think>\n\n</think>\n\n";
             // responses api format
             if (!empty($args['input']) && is_array($args['input'])) {
@@ -1280,6 +1296,62 @@ abstract class aihelper
     {
         // remove <think>...</think> blocks produced by reasoning models (e.g. QwQ)
         return trim(preg_replace('/<think>.*?<\/think>\s*/s', '', $text));
+    }
+
+    /**
+     * Stateful removal of <tool_call>...</tool_call> blocks from a streamed text.
+     * Handles tags split across chunks by buffering partial tag prefixes.
+     * Used to hide qwen3 tool call XML from user-visible content/reasoning streams
+     * (they are extracted separately by the reasoning_buffer parser).
+     */
+    protected function stripToolCallBlocks(string $text): string
+    {
+        $open_tag = '<tool_call>';
+        $close_tag = '</tool_call>';
+        $pending = $this->stream_tool_call_strip_tag_buf . $text;
+        $this->stream_tool_call_strip_tag_buf = '';
+        $out = '';
+
+        while ($pending !== '') {
+            $needle = $this->stream_tool_call_strip_in_block ? $close_tag : $open_tag;
+            $pos = strpos($pending, $needle);
+            if ($pos !== false) {
+                if (!$this->stream_tool_call_strip_in_block) {
+                    $out .= substr($pending, 0, $pos);
+                    $this->stream_tool_call_strip_in_block = true;
+                    $pending = substr($pending, $pos + strlen($open_tag));
+                } else {
+                    $this->stream_tool_call_strip_in_block = false;
+                    $pending = substr($pending, $pos + strlen($close_tag));
+                }
+            } else {
+                // no match found; buffer a possible partial-tag suffix
+                $max_len = max(strlen($open_tag), strlen($close_tag)) - 1;
+                $buf_len = 0;
+                for ($i = min($max_len, strlen($pending)); $i >= 1; $i--) {
+                    $tail = substr($pending, -$i);
+                    if (strpos($open_tag, $tail) === 0 || strpos($close_tag, $tail) === 0) {
+                        $buf_len = $i;
+                        break;
+                    }
+                }
+                if ($buf_len > 0) {
+                    $this->stream_tool_call_strip_tag_buf = substr($pending, -$buf_len);
+                    $pending = substr($pending, 0, strlen($pending) - $buf_len);
+                }
+                if (!$this->stream_tool_call_strip_in_block) {
+                    $out .= $pending;
+                }
+                break;
+            }
+        }
+        return $out;
+    }
+
+    protected function resetToolCallStripState(): void
+    {
+        $this->stream_tool_call_strip_in_block = false;
+        $this->stream_tool_call_strip_tag_buf = '';
     }
 
     protected static function extractErrorMessage(mixed $input): ?string
@@ -2126,6 +2198,9 @@ abstract class aihelper
                 ]
             ];
 
+            $this->stream_reasoning_buffer = '';
+            $this->resetToolCallStripState();
+
             $stream_callback = function ($chunk) {
                 $this->log($chunk, 'chunk');
                 $this->stream_buffer_in .= $chunk;
@@ -2228,13 +2303,20 @@ abstract class aihelper
                         // handle reasoning delta (OpenRouter sends reasoning as separate field)
                         $reasoning = $delta['reasoning'] ?? $delta['reasoning_content'] ?? null;
                         if ($reasoning !== null && $reasoning !== '') {
-                            $this->stream_running = true;
-                            echo "event: reasoning\n";
-                            echo 'data: ' . json_encode(['delta' => $reasoning]) . "\n\n";
-                            if (ob_get_level() > 0) {
-                                ob_flush();
+                            // always keep full reasoning (including tool_call XML) in buffer
+                            // for the reasoning_buffer parser to extract tool calls from
+                            $this->stream_reasoning_buffer .= $reasoning;
+                            // but strip tool_call XML from what's streamed to the user
+                            $reasoning_visible = $this->stripToolCallBlocks($reasoning);
+                            if ($reasoning_visible !== '' && trim($reasoning_visible) !== '') {
+                                $this->stream_running = true;
+                                echo "event: reasoning\n";
+                                echo 'data: ' . json_encode(['delta' => $reasoning_visible]) . "\n\n";
+                                if (ob_get_level() > 0) {
+                                    ob_flush();
+                                }
+                                flush();
                             }
-                            flush();
                         }
 
                         $raw = $delta['content'] ?? null;
@@ -2283,13 +2365,30 @@ abstract class aihelper
                             }
                         }
 
+                        // keep full reasoning_text in buffer for the parser to extract tool calls from
                         if ($reasoning_text !== '') {
+                            $this->stream_reasoning_buffer .= $reasoning_text;
+                        }
+
+                        // strip tool_call XML (+ whitespace-only) from user-visible reasoning stream
+                        $reasoning_visible = $reasoning_text !== ''
+                            ? $this->stripToolCallBlocks($reasoning_text)
+                            : '';
+                        if ($reasoning_visible !== '' && trim($reasoning_visible) !== '') {
                             echo "event: reasoning\n";
-                            echo 'data: ' . json_encode(['delta' => $reasoning_text]) . "\n\n";
+                            echo 'data: ' . json_encode(['delta' => $reasoning_visible]) . "\n\n";
                             if (ob_get_level() > 0) {
                                 ob_flush();
                             }
                             flush();
+                        }
+
+                        if ($normal_text !== '') {
+                            // also buffer content for tool call extraction (qwen3 may emit
+                            // tool_call XML directly in content, not just reasoning)
+                            $this->stream_reasoning_buffer .= $normal_text;
+                            // strip tool_call XML from user-visible content
+                            $normal_text = $this->stripToolCallBlocks($normal_text);
                         }
 
                         if ($normal_text !== '') {
@@ -4777,6 +4876,76 @@ class ai_openrouter extends aihelper
         $response = $this->makeApiCall($args);
         if ($this->stream === true) {
             $response = $this->stream_response;
+            // extract tool calls from reasoning_content OR content (llama.cpp/OpenRouter Qwen3 emit
+            // tool calls as <tool_call> XML in the reasoning field or content instead of tool_calls)
+            $content_text = $response->result->choices[0]->message->content ?? '';
+            $search_text = $this->stream_reasoning_buffer;
+            if (str_contains($content_text, '<tool_call>')) {
+                $search_text .= "\n" . $content_text;
+            }
+            if (
+                $search_text !== '' &&
+                empty($response->result->choices[0]->message->tool_calls ?? [])
+            ) {
+                $tool_calls = [];
+                // match both closed and unclosed <tool_call> blocks
+                if (preg_match_all('/<tool_call>\s*(.*?)(?:<\/tool_call>|\z)/s', $search_text, $matches)) {
+                    foreach ($matches[1] as $tc_xml) {
+                        $name = null;
+                        $arguments = '{}';
+                        // extract function name: <function=name> or "name": "..."
+                        if (preg_match('/<function=(\S+?)>/', $tc_xml, $nm)) {
+                            $name = $nm[1];
+                        } elseif (preg_match('/"name"\s*:\s*"([^"]+)"/', $tc_xml, $nm)) {
+                            $name = $nm[1];
+                        }
+                        // extract arguments: prefer <parameter=key>value</parameter> (Qwen3 XML format),
+                        // fall back to JSON {...} (standard format). Parameter may be unclosed if stream was cut.
+                        if (preg_match_all('/<parameter=(\S+?)>\s*([\s\S]*?)(?:\s*<\/parameter>|\s*<\/function|\s*<\/tool_call|\z)/s', $tc_xml, $pm, PREG_SET_ORDER)) {
+                            $args_map = [];
+                            foreach ($pm as $p) {
+                                $val = trim($p[2]);
+                                $decoded = json_decode($val, true);
+                                $args_map[$p[1]] = $decoded !== null ? $decoded : $val;
+                            }
+                            $arguments = json_encode($args_map, JSON_UNESCAPED_UNICODE);
+                        } elseif (preg_match('/\{[\s\S]*\}/s', $tc_xml, $am)) {
+                            $arguments = $am[0];
+                        }
+                        if ($name !== null) {
+                            $tool_calls[] = (object) [
+                                'id' => 'call_' . substr(md5($name . $arguments), 0, 8),
+                                'type' => 'function',
+                                'function' => (object) [
+                                    'name' => $name,
+                                    'arguments' => $arguments
+                                ]
+                            ];
+                        }
+                    }
+                }
+                if (!empty($tool_calls)) {
+                    $response->result->choices[0]->message->tool_calls = $tool_calls;
+                    $response->result->choices[0]->finish_reason = 'tool_calls';
+                    // strip <tool_call> blocks from content if they were there
+                    if (isset($response->result->choices[0]->message->content)) {
+                        $response->result->choices[0]->message->content = trim(
+                            preg_replace('/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/s', '', $response->result->choices[0]->message->content)
+                        );
+                    }
+                    $this->log(count($tool_calls) . ' tool call(s) extracted from reasoning/content', 'reasoning_tool_calls');
+                } elseif (empty($response->result->choices[0]->message->content ?? '')) {
+                    // no tool calls and content empty: model put final answer into reasoning field
+                    // strip any <think>...</think> wrappers and use reasoning as content
+                    $final_text = $this->stream_reasoning_buffer;
+                    $final_text = preg_replace('/<think>[\s\S]*?<\/think>\s*/', '', $final_text);
+                    $final_text = trim($final_text);
+                    if ($final_text !== '') {
+                        $response->result->choices[0]->message->content = $final_text;
+                        $this->log(strlen($final_text) . ' chars promoted from reasoning to content', 'reasoning_content_promoted');
+                    }
+                }
+            }
         }
         $this->log($response?->result ?? null, 'response');
         $this->addCosts($response, $return);
@@ -4848,6 +5017,11 @@ class ai_openrouter extends aihelper
             timeout: $this->timeout,
             stream_callback: $this->getStreamCallback()
         );
+    }
+
+    protected function modifyArgs(?array $args): ?array
+    {
+        return self::modifyArgsLocal($args, $this->model, 'openrouter');
     }
 }
 
@@ -4927,7 +5101,7 @@ class ai_llamacpp extends ai_openrouter
 
     protected function modifyArgs(?array $args): ?array
     {
-        return self::modifyArgsLocal($args, $this->model);
+        return self::modifyArgsLocal($args, $this->model, 'llamacpp');
     }
 }
 
