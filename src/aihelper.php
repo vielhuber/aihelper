@@ -1209,11 +1209,17 @@ abstract class aihelper
         if (str_contains($model_name, 'qwq')) {
             $args += ['top_p' => 0.95, 'top_k' => 40];
         } elseif (str_contains($model_name, 'qwen3.5')) {
+            // official Qwen recommendation for qwen3.5 thinking mode (general tasks):
+            // temperature=1.0, top_p=0.95, top_k=20, min_p=0.0, presence_penalty=1.5, repeat_penalty=1.0
+            // presence_penalty=1.5 is critical to prevent repetition loops during reasoning.
+            // override temperature (not with += since applyTemperatureParameter may have set it).
+            $args['temperature'] = 1.0;
             $args += [
-                'top_p' => $profile === 'reasoning' || $profile === 'creative' ? 0.95 : 0.8,
+                'top_p' => 0.95,
                 'top_k' => 20,
-                'presence_penalty' => $profile === 'creative' ? 0.4 : 0.0,
-                'repeat_penalty' => $profile === 'agentic' ? 1.0 : 1.1
+                'min_p' => 0.0,
+                'presence_penalty' => 1.5,
+                'repeat_penalty' => 1.0,
             ];
         } elseif (str_contains($model_name, 'qwen3')) {
             $args += ['top_p' => 0.8, 'top_k' => 20];
@@ -1222,47 +1228,46 @@ abstract class aihelper
         }
 
         // --- qwen3: suppress runaway thinking via empty <think> priming ---
-        // skip for llamacpp: the server uses --chat-template-file with a
-        // non-thinking variant which already emits the priming in the template.
-        // sending it again client-side would double-apply.
-        // kept for openrouter (no server-side template override possible).
-        if (str_contains($model_name, 'qwen3') && $provider !== 'llamacpp') {
-            $think_block = "<think>\n\n</think>\n\n";
-            // responses api format
-            if (!empty($args['input']) && is_array($args['input'])) {
-                $already_primed = false;
-                foreach ($args['input'] as $item) {
-                    if (!is_array($item) || ($item['role'] ?? null) !== 'assistant') {
-                        continue;
-                    }
-                    foreach ($item['content'] ?? [] as $part) {
-                        if (is_array($part) && ($part['text'] ?? '') === $think_block) {
-                            $already_primed = true;
-                            break 2;
-                        }
-                    }
-                }
-                if (!$already_primed) {
-                    $args['input'][] = [
-                        'role' => 'assistant',
-                        'content' => [['type' => 'output_text', 'text' => $think_block]]
-                    ];
-                }
-            }
-            // chat completions format
-            if (!empty($args['messages']) && is_array($args['messages'])) {
-                $already_primed = false;
-                foreach ($args['messages'] as $msg) {
-                    if (($msg['role'] ?? null) === 'assistant' && ($msg['content'] ?? '') === $think_block) {
-                        $already_primed = true;
-                        break;
-                    }
-                }
-                if (!$already_primed) {
-                    $args['messages'][] = ['role' => 'assistant', 'content' => $think_block];
-                }
-            }
-        }
+        // DISABLED: we now rely on Qwen's recommended sampling params (presence_penalty=1.5)
+        // to control reasoning loops while keeping thinking enabled. kept as commented-out
+        // fallback in case loops re-appear. re-enable this block if needed.
+        // if (str_contains($model_name, 'qwen3') && $provider !== 'llamacpp') {
+        //     $think_block = "<think>\n\n</think>\n\n";
+        //     // responses api format
+        //     if (!empty($args['input']) && is_array($args['input'])) {
+        //         $already_primed = false;
+        //         foreach ($args['input'] as $item) {
+        //             if (!is_array($item) || ($item['role'] ?? null) !== 'assistant') {
+        //                 continue;
+        //             }
+        //             foreach ($item['content'] ?? [] as $part) {
+        //                 if (is_array($part) && ($part['text'] ?? '') === $think_block) {
+        //                     $already_primed = true;
+        //                     break 2;
+        //                 }
+        //             }
+        //         }
+        //         if (!$already_primed) {
+        //             $args['input'][] = [
+        //                 'role' => 'assistant',
+        //                 'content' => [['type' => 'output_text', 'text' => $think_block]]
+        //             ];
+        //         }
+        //     }
+        //     // chat completions format
+        //     if (!empty($args['messages']) && is_array($args['messages'])) {
+        //         $already_primed = false;
+        //         foreach ($args['messages'] as $msg) {
+        //             if (($msg['role'] ?? null) === 'assistant' && ($msg['content'] ?? '') === $think_block) {
+        //                 $already_primed = true;
+        //                 break;
+        //             }
+        //         }
+        //         if (!$already_primed) {
+        //             $args['messages'][] = ['role' => 'assistant', 'content' => $think_block];
+        //         }
+        //     }
+        // }
 
         // --- output limits per profile ---
         if (str_contains($model_name, 'qwen3.5')) {
