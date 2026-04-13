@@ -1223,6 +1223,18 @@ abstract class aihelper
             ];
         } elseif (str_contains($model_name, 'qwen3')) {
             $args += ['top_p' => 0.8, 'top_k' => 20];
+        } elseif (str_contains($model_name, 'minimax') && str_contains($model_name, 'm2')) {
+            // official MiniMax M2.7 recommendation:
+            // temperature=1.0, top_p=0.95, top_k=40, presence_penalty=1.5
+            // presence_penalty=1.5 prevents repetition loops during <think> reasoning (same issue as qwen3.5).
+            $args['temperature'] = 1.0;
+            $args += [
+                'top_p' => 0.95,
+                'top_k' => 40,
+                'min_p' => 0.0,
+                'presence_penalty' => 1.5,
+                'repeat_penalty' => 1.0,
+            ];
         } elseif (str_contains($model_name, 'gpt-oss') && $uses_tools) {
             $args += ['top_p' => 0.9, 'top_k' => 20];
         }
@@ -1283,6 +1295,17 @@ abstract class aihelper
         } elseif (str_contains($model_name, 'qwen3')) {
             $args += ['max_output_tokens' => 8000];
         }
+        if (str_contains($model_name, 'minimax') && str_contains($model_name, 'm2')) {
+            if ($uses_tools) {
+                $args += ['max_output_tokens' => 12000, 'parallel_tool_calls' => false, 'max_tool_calls' => 30];
+            } elseif ($profile === 'creative') {
+                $args += ['max_output_tokens' => 2500];
+            } elseif ($profile === 'reasoning') {
+                $args += ['max_output_tokens' => 4000];
+            } else {
+                $args += ['max_output_tokens' => 8000];
+            }
+        }
         if (str_contains($model_name, 'glm')) {
             $args['max_output_tokens'] = 1500;
         }
@@ -1304,15 +1327,21 @@ abstract class aihelper
     }
 
     /**
-     * Stateful removal of <tool_call>...</tool_call> blocks from a streamed text.
-     * Handles tags split across chunks by buffering partial tag prefixes.
-     * Used to hide qwen3 tool call XML from user-visible content/reasoning streams
+     * Stateful removal of <tool_call>...</tool_call> and <minimax:tool_call>...</minimax:tool_call>
+     * blocks from a streamed text. Handles tags split across chunks by buffering partial tag prefixes.
+     * Used to hide tool call XML from user-visible content/reasoning streams
      * (they are extracted separately by the reasoning_buffer parser).
      */
     protected function stripToolCallBlocks(string $text): string
     {
-        $open_tag = '<tool_call>';
-        $close_tag = '</tool_call>';
+        // strip both minimax and standard tool_call blocks
+        $text = $this->stripToolCallBlocksPair($text, '<minimax:tool_call>', '</minimax:tool_call>');
+        $text = $this->stripToolCallBlocksPair($text, '<tool_call>', '</tool_call>');
+        return $text;
+    }
+
+    protected function stripToolCallBlocksPair(string $text, string $open_tag, string $close_tag): string
+    {
         $pending = $this->stream_tool_call_strip_tag_buf . $text;
         $this->stream_tool_call_strip_tag_buf = '';
         $out = '';
@@ -2311,9 +2340,10 @@ abstract class aihelper
                             // always keep full reasoning (including tool_call XML) in buffer
                             // for the reasoning_buffer parser to extract tool calls from
                             $this->stream_reasoning_buffer .= $reasoning;
-                            // but strip tool_call XML from what's streamed to the user
+                            // strip tool_call XML from what's streamed to the user, but keep
+                            // legitimate whitespace (newlines between paragraphs, etc.)
                             $reasoning_visible = $this->stripToolCallBlocks($reasoning);
-                            if ($reasoning_visible !== '' && trim($reasoning_visible) !== '') {
+                            if ($reasoning_visible !== '') {
                                 $this->stream_running = true;
                                 echo "event: reasoning\n";
                                 echo 'data: ' . json_encode(['delta' => $reasoning_visible]) . "\n\n";
@@ -2375,11 +2405,11 @@ abstract class aihelper
                             $this->stream_reasoning_buffer .= $reasoning_text;
                         }
 
-                        // strip tool_call XML (+ whitespace-only) from user-visible reasoning stream
+                        // strip tool_call XML from user-visible reasoning stream
                         $reasoning_visible = $reasoning_text !== ''
                             ? $this->stripToolCallBlocks($reasoning_text)
                             : '';
-                        if ($reasoning_visible !== '' && trim($reasoning_visible) !== '') {
+                        if ($reasoning_visible !== '') {
                             echo "event: reasoning\n";
                             echo 'data: ' . json_encode(['delta' => $reasoning_visible]) . "\n\n";
                             if (ob_get_level() > 0) {
@@ -4881,11 +4911,13 @@ class ai_openrouter extends aihelper
         $response = $this->makeApiCall($args);
         if ($this->stream === true) {
             $response = $this->stream_response;
-            // extract tool calls from reasoning_content OR content (llama.cpp/OpenRouter Qwen3 emit
-            // tool calls as <tool_call> XML in the reasoning field or content instead of tool_calls)
+            // extract tool calls from reasoning_content OR content (llama.cpp/OpenRouter models emit
+            // tool calls as XML in the reasoning field or content instead of tool_calls).
+            // supports both qwen3 format (<tool_call>...<function=name>...<parameter=key>)
+            // and minimax format (<minimax:tool_call>...<invoke name="name">...<parameter name="key">)
             $content_text = $response->result->choices[0]->message->content ?? '';
             $search_text = $this->stream_reasoning_buffer;
-            if (str_contains($content_text, '<tool_call>')) {
+            if (str_contains($content_text, '<tool_call>') || str_contains($content_text, '<minimax:tool_call>')) {
                 $search_text .= "\n" . $content_text;
             }
             if (
@@ -4893,20 +4925,35 @@ class ai_openrouter extends aihelper
                 empty($response->result->choices[0]->message->tool_calls ?? [])
             ) {
                 $tool_calls = [];
-                // match both closed and unclosed <tool_call> blocks
-                if (preg_match_all('/<tool_call>\s*(.*?)(?:<\/tool_call>|\z)/s', $search_text, $matches)) {
+                // match both standard and minimax tool_call blocks (closed and unclosed)
+                if (preg_match_all('/<(?:minimax:)?tool_call>\s*(.*?)(?:<\/(?:minimax:)?tool_call>|\z)/s', $search_text, $matches)) {
                     foreach ($matches[1] as $tc_xml) {
                         $name = null;
                         $arguments = '{}';
-                        // extract function name: <function=name> or "name": "..."
-                        if (preg_match('/<function=(\S+?)>/', $tc_xml, $nm)) {
+                        // extract function name:
+                        // minimax: <invoke name="tool-name">
+                        // qwen3:   <function=name>
+                        // json:    "name": "..."
+                        if (preg_match('/<invoke\s+name="([^"]+)"/', $tc_xml, $nm)) {
+                            $name = $nm[1];
+                        } elseif (preg_match('/<function=(\S+?)>/', $tc_xml, $nm)) {
                             $name = $nm[1];
                         } elseif (preg_match('/"name"\s*:\s*"([^"]+)"/', $tc_xml, $nm)) {
                             $name = $nm[1];
                         }
-                        // extract arguments: prefer <parameter=key>value</parameter> (Qwen3 XML format),
-                        // fall back to JSON {...} (standard format). Parameter may be unclosed if stream was cut.
-                        if (preg_match_all('/<parameter=(\S+?)>\s*([\s\S]*?)(?:\s*<\/parameter>|\s*<\/function|\s*<\/tool_call|\z)/s', $tc_xml, $pm, PREG_SET_ORDER)) {
+                        // extract arguments:
+                        // minimax: <parameter name="key">value</parameter>
+                        // qwen3:   <parameter=key>value</parameter>
+                        // json:    {...}
+                        if (preg_match_all('/<parameter\s+name="(\S+?)">\s*([\s\S]*?)(?:\s*<\/parameter>|\s*<\/invoke|\s*<\/(?:minimax:)?tool_call|\z)/s', $tc_xml, $pm, PREG_SET_ORDER)) {
+                            $args_map = [];
+                            foreach ($pm as $p) {
+                                $val = trim($p[2]);
+                                $decoded = json_decode($val, true);
+                                $args_map[$p[1]] = $decoded !== null ? $decoded : $val;
+                            }
+                            $arguments = json_encode($args_map, JSON_UNESCAPED_UNICODE);
+                        } elseif (preg_match_all('/<parameter=(\S+?)>\s*([\s\S]*?)(?:\s*<\/parameter>|\s*<\/function|\s*<\/tool_call|\z)/s', $tc_xml, $pm, PREG_SET_ORDER)) {
                             $args_map = [];
                             foreach ($pm as $p) {
                                 $val = trim($p[2]);
@@ -4932,10 +4979,10 @@ class ai_openrouter extends aihelper
                 if (!empty($tool_calls)) {
                     $response->result->choices[0]->message->tool_calls = $tool_calls;
                     $response->result->choices[0]->finish_reason = 'tool_calls';
-                    // strip <tool_call> blocks from content if they were there
+                    // strip <tool_call> and <minimax:tool_call> blocks from content if they were there
                     if (isset($response->result->choices[0]->message->content)) {
                         $response->result->choices[0]->message->content = trim(
-                            preg_replace('/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/s', '', $response->result->choices[0]->message->content)
+                            preg_replace('/<(?:minimax:)?tool_call>[\s\S]*?(?:<\/(?:minimax:)?tool_call>|$)/s', '', $response->result->choices[0]->message->content)
                         );
                     }
                     $this->log(count($tool_calls) . ' tool call(s) extracted from reasoning/content', 'reasoning_tool_calls');
@@ -5069,8 +5116,10 @@ class ai_llamacpp extends ai_openrouter
             foreach ($response->result->data as $models__value) {
                 if (__::x($models__value?->id ?? null)) {
                     $context_length = (int) ($models__value->meta->n_ctx_train ?? 32768);
+                    // strip split-shard suffix: "Model-0001-of-0004.gguf" → "Model.gguf"
+                    $name = preg_replace('/-\d{4}-of-\d{4}(\.gguf)$/i', '$1', $models__value->id);
                     $models[] = [
-                        'name' => $models__value->id,
+                        'name' => $name,
                         'context_length' => $context_length,
                         'supports_tools' => true
                     ];
