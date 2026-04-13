@@ -704,11 +704,21 @@ abstract class aihelper
                         // try JSON-aware truncation
                         $decoded = json_decode(trim($output), true);
                         if ($decoded !== null) {
-                            $truncate_json = function ($data, int $max_str = 500, int $max_arr = 5) use (&$truncate_json) {
+                            $truncate_json = function ($data, int $max_str = 500, int $max_arr = 5) use (
+                                &$truncate_json
+                            ) {
                                 if (is_array($data) && array_is_list($data)) {
-                                    $sliced = array_map(fn($v) => $truncate_json($v, $max_str, $max_arr), array_slice($data, 0, $max_arr));
+                                    $sliced = array_map(
+                                        fn($v) => $truncate_json($v, $max_str, $max_arr),
+                                        array_slice($data, 0, $max_arr)
+                                    );
                                     if (count($data) > $max_arr) {
-                                        $sliced[] = '[... ' . (count($data) - $max_arr) . ' more items, ' . count($data) . ' total]';
+                                        $sliced[] =
+                                            '[... ' .
+                                            (count($data) - $max_arr) .
+                                            ' more items, ' .
+                                            count($data) .
+                                            ' total]';
                                     }
                                     return $sliced;
                                 }
@@ -720,11 +730,15 @@ abstract class aihelper
                                 }
                                 return $data;
                             };
-                            $trimmed = json_encode($truncate_json($decoded), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+                            $trimmed = json_encode(
+                                $truncate_json($decoded),
+                                JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT
+                            );
                         } else {
                             $trimmed = mb_substr($output, 0, $max_output_chars);
                         }
-                        $output = $trimmed . "\n\n[... truncated from $original_len to " . mb_strlen($trimmed) . " chars]";
+                        $output =
+                            $trimmed . "\n\n[... truncated from $original_len to " . mb_strlen($trimmed) . ' chars]';
                     }
                     $this->log(mb_substr($output, 0, 200), 'local tool result');
                 }
@@ -1219,7 +1233,7 @@ abstract class aihelper
                 'top_k' => 20,
                 'min_p' => 0.0,
                 'presence_penalty' => 1.5,
-                'repeat_penalty' => 1.0,
+                'repeat_penalty' => 1.0
             ];
         } elseif (str_contains($model_name, 'qwen3')) {
             $args += ['top_p' => 0.8, 'top_k' => 20];
@@ -1233,7 +1247,7 @@ abstract class aihelper
                 'top_k' => 40,
                 'min_p' => 0.0,
                 'presence_penalty' => 1.5,
-                'repeat_penalty' => 1.0,
+                'repeat_penalty' => 1.0
             ];
         } elseif (str_contains($model_name, 'gpt-oss') && $uses_tools) {
             $args += ['top_p' => 0.9, 'top_k' => 20];
@@ -2335,7 +2349,7 @@ abstract class aihelper
                         }
 
                         // handle reasoning delta (OpenRouter sends reasoning as separate field)
-                        $reasoning = $delta['reasoning'] ?? $delta['reasoning_content'] ?? null;
+                        $reasoning = $delta['reasoning'] ?? ($delta['reasoning_content'] ?? null);
                         if ($reasoning !== null && $reasoning !== '') {
                             // always keep full reasoning (including tool_call XML) in buffer
                             // for the reasoning_buffer parser to extract tool calls from
@@ -2406,9 +2420,7 @@ abstract class aihelper
                         }
 
                         // strip tool_call XML from user-visible reasoning stream
-                        $reasoning_visible = $reasoning_text !== ''
-                            ? $this->stripToolCallBlocks($reasoning_text)
-                            : '';
+                        $reasoning_visible = $reasoning_text !== '' ? $this->stripToolCallBlocks($reasoning_text) : '';
                         if ($reasoning_visible !== '') {
                             echo "event: reasoning\n";
                             echo 'data: ' . json_encode(['delta' => $reasoning_visible]) . "\n\n";
@@ -4920,13 +4932,16 @@ class ai_openrouter extends aihelper
             if (str_contains($content_text, '<tool_call>') || str_contains($content_text, '<minimax:tool_call>')) {
                 $search_text .= "\n" . $content_text;
             }
-            if (
-                $search_text !== '' &&
-                empty($response->result->choices[0]->message->tool_calls ?? [])
-            ) {
+            if ($search_text !== '' && empty($response->result->choices[0]->message->tool_calls ?? [])) {
                 $tool_calls = [];
                 // match both standard and minimax tool_call blocks (closed and unclosed)
-                if (preg_match_all('/<(?:minimax:)?tool_call>\s*(.*?)(?:<\/(?:minimax:)?tool_call>|\z)/s', $search_text, $matches)) {
+                if (
+                    preg_match_all(
+                        '/<(?:minimax:)?tool_call>\s*(.*?)(?:<\/(?:minimax:)?tool_call>|\z)/s',
+                        $search_text,
+                        $matches
+                    )
+                ) {
                     foreach ($matches[1] as $tc_xml) {
                         $name = null;
                         $arguments = '{}';
@@ -4945,7 +4960,14 @@ class ai_openrouter extends aihelper
                         // minimax: <parameter name="key">value</parameter>
                         // qwen3:   <parameter=key>value</parameter>
                         // json:    {...}
-                        if (preg_match_all('/<parameter\s+name="(\S+?)">\s*([\s\S]*?)(?:\s*<\/parameter>|\s*<\/invoke|\s*<\/(?:minimax:)?tool_call|\z)/s', $tc_xml, $pm, PREG_SET_ORDER)) {
+                        if (
+                            preg_match_all(
+                                '/<parameter\s+name="(\S+?)">\s*([\s\S]*?)(?:\s*<\/parameter>|\s*<\/invoke|\s*<\/(?:minimax:)?tool_call|\z)/s',
+                                $tc_xml,
+                                $pm,
+                                PREG_SET_ORDER
+                            )
+                        ) {
                             $args_map = [];
                             foreach ($pm as $p) {
                                 $val = trim($p[2]);
@@ -4953,7 +4975,14 @@ class ai_openrouter extends aihelper
                                 $args_map[$p[1]] = $decoded !== null ? $decoded : $val;
                             }
                             $arguments = json_encode($args_map, JSON_UNESCAPED_UNICODE);
-                        } elseif (preg_match_all('/<parameter=(\S+?)>\s*([\s\S]*?)(?:\s*<\/parameter>|\s*<\/function|\s*<\/tool_call|\z)/s', $tc_xml, $pm, PREG_SET_ORDER)) {
+                        } elseif (
+                            preg_match_all(
+                                '/<parameter=(\S+?)>\s*([\s\S]*?)(?:\s*<\/parameter>|\s*<\/function|\s*<\/tool_call|\z)/s',
+                                $tc_xml,
+                                $pm,
+                                PREG_SET_ORDER
+                            )
+                        ) {
                             $args_map = [];
                             foreach ($pm as $p) {
                                 $val = trim($p[2]);
@@ -4982,10 +5011,17 @@ class ai_openrouter extends aihelper
                     // strip <tool_call> and <minimax:tool_call> blocks from content if they were there
                     if (isset($response->result->choices[0]->message->content)) {
                         $response->result->choices[0]->message->content = trim(
-                            preg_replace('/<(?:minimax:)?tool_call>[\s\S]*?(?:<\/(?:minimax:)?tool_call>|$)/s', '', $response->result->choices[0]->message->content)
+                            preg_replace(
+                                '/<(?:minimax:)?tool_call>[\s\S]*?(?:<\/(?:minimax:)?tool_call>|$)/s',
+                                '',
+                                $response->result->choices[0]->message->content
+                            )
                         );
                     }
-                    $this->log(count($tool_calls) . ' tool call(s) extracted from reasoning/content', 'reasoning_tool_calls');
+                    $this->log(
+                        count($tool_calls) . ' tool call(s) extracted from reasoning/content',
+                        'reasoning_tool_calls'
+                    );
                 } elseif (empty($response->result->choices[0]->message->content ?? '')) {
                     // no tool calls and content empty: model put final answer into reasoning field
                     // strip any <think>...</think> wrappers and use reasoning as content
@@ -4994,7 +5030,10 @@ class ai_openrouter extends aihelper
                     $final_text = trim($final_text);
                     if ($final_text !== '') {
                         $response->result->choices[0]->message->content = $final_text;
-                        $this->log(strlen($final_text) . ' chars promoted from reasoning to content', 'reasoning_content_promoted');
+                        $this->log(
+                            strlen($final_text) . ' chars promoted from reasoning to content',
+                            'reasoning_content_promoted'
+                        );
                     }
                 }
             }
@@ -5116,8 +5155,8 @@ class ai_llamacpp extends ai_openrouter
             foreach ($response->result->data as $models__value) {
                 if (__::x($models__value?->id ?? null)) {
                     $context_length = (int) ($models__value->meta->n_ctx_train ?? 32768);
-                    // strip split-shard suffix: "Model-0001-of-0004.gguf" → "Model.gguf"
-                    $name = preg_replace('/-\d{4}-of-\d{4}(\.gguf)$/i', '$1', $models__value->id);
+                    // strip split-shard suffix: "Model-0001-of-0004.gguf" → "Model"
+                    $name = preg_replace('/-\d{1,10}-of-\d{1,10}(\.gguf)$/i', '', $models__value->id);
                     $models[] = [
                         'name' => $name,
                         'context_length' => $context_length,
