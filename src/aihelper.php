@@ -792,14 +792,30 @@ abstract class aihelper
             // truncate older tool outputs in session to prevent context overflow
             $this->truncateOlderToolOutputs();
 
-            $return = $this->askThis(
-                prompt: null,
-                files: null,
-                add_prompt_to_session: false,
-                prev_output_text: null,
-                prev_costs: $return['costs']
-            );
-            $this->log($return, 'local tool loop return');
+            // Retry the follow-up LLM call honoring max_tries so transient
+            // empty responses (e.g. llama.cpp slot contention under parallel
+            // load) get a chance to recover. Mirrors the retry loop in ask().
+            // add_prompt_to_session stays false — there is no user prompt in
+            // tool-loop follow-ups — so the simple "only retry if failed"
+            // condition is sufficient without the first-attempt guard that
+            // ask() needs.
+            $return['success'] = false;
+            $max_tries = $this->max_tries;
+            while ($return['success'] === false && $max_tries > 0) {
+                if ($max_tries < $this->max_tries) {
+                    $this->log('⚠️ tries left: ' . $max_tries);
+                    usleep(500_000); // 500ms backoff between attempts
+                }
+                $return = $this->askThis(
+                    prompt: null,
+                    files: null,
+                    add_prompt_to_session: false,
+                    prev_output_text: null,
+                    prev_costs: $return['costs']
+                );
+                $this->log($return, 'local tool loop return');
+                $max_tries--;
+            }
             $max_tool_rounds--;
         }
         return $return;
