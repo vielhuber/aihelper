@@ -1238,16 +1238,19 @@ abstract class aihelper
         } elseif (str_contains($model_name, 'qwen3')) {
             $args += ['top_p' => 0.8, 'top_k' => 20];
         } elseif (str_contains($model_name, 'minimax') && str_contains($model_name, 'm2')) {
-            // official MiniMax M2.7 recommendation:
-            // temperature=1.0, top_p=0.95, top_k=40, presence_penalty=1.5
-            // presence_penalty=1.5 prevents repetition loops during <think> reasoning (same issue as qwen3.5).
+            // Official MiniMax M2.7 recommendation (from the HuggingFace model card
+            // at MiniMaxAI/MiniMax-M2.7 and the unsloth/MiniMax-M2.7-GGUF README):
+            // temperature=1.0, top_p=0.95, top_k=40 — and explicitly NO penalty
+            // parameters. The model was tuned to work without presence_penalty,
+            // frequency_penalty or repeat_penalty; adding them disturbs the token
+            // distribution and (with llama.cpp at Q4_K_XL) causes the model to
+            // emit EOS prematurely after just the intro text, before any tool
+            // calls. If repetition loops in the <think> stream re-appear, prefer a
+            // small frequency_penalty (~0.3) over a large presence_penalty.
             $args['temperature'] = 1.0;
             $args += [
                 'top_p' => 0.95,
                 'top_k' => 40,
-                'min_p' => 0.0,
-                'presence_penalty' => 1.5,
-                'repeat_penalty' => 1.0
             ];
         } elseif (str_contains($model_name, 'gpt-oss') && $uses_tools) {
             $args += ['top_p' => 0.9, 'top_k' => 20];
