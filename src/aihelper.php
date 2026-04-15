@@ -1898,12 +1898,17 @@ abstract class aihelper
                                 if (isset($this->stream_response->result->content[$index])) {
                                     $block = &$this->stream_response->result->content[$index];
                                     if (isset($block->input) && is_string($block->input)) {
-                                        // convert empty string to empty array (API expects object/array, not string)
+                                        // convert empty string to empty object (anthropic API requires tool_use.input to be a dict, not an array — json_encode(new stdClass()) → "{}", json_encode([]) → "[]")
                                         if ($block->input === '') {
-                                            $block->input = [];
+                                            $block->input = new \stdClass();
                                         } else {
-                                            $parsedInput = json_decode($block->input, true);
-                                            if ($parsedInput !== null) {
+                                            $parsedInput = json_decode($block->input);
+                                            if (is_object($parsedInput)) {
+                                                $block->input = $parsedInput;
+                                            } elseif (is_array($parsedInput) && count($parsedInput) === 0) {
+                                                // json_decode('{}') with assoc=false returns stdClass, but guard against '[]' → stay a dict
+                                                $block->input = new \stdClass();
+                                            } elseif ($parsedInput !== null) {
                                                 $block->input = $parsedInput;
                                             }
                                         }
@@ -3904,12 +3909,12 @@ class ai_anthropic extends aihelper
                 }
             }
 
-            // fix mcp_tool_use blocks with empty array or string inputs (should be objects)
+            // fix tool_use / mcp_tool_use blocks with empty array or string inputs: anthropic API requires .input to be a dict (JSON object) — empty PHP arrays serialize as "[]" which fails validation
             if (is_array($content)) {
                 for ($i = 0; $i < count($content); $i++) {
                     if (
                         isset($content[$i]->type) &&
-                        $content[$i]->type === 'mcp_tool_use' &&
+                        ($content[$i]->type === 'mcp_tool_use' || $content[$i]->type === 'tool_use') &&
                         isset($content[$i]->input)
                     ) {
                         if (is_array($content[$i]->input) && count($content[$i]->input) === 0) {
@@ -3919,6 +3924,8 @@ class ai_anthropic extends aihelper
                             $decoded = json_decode($content[$i]->input);
                             if (is_object($decoded)) {
                                 $content[$i]->input = $decoded;
+                            } elseif ($content[$i]->input === '' || $content[$i]->input === '[]') {
+                                $content[$i]->input = new \stdClass();
                             }
                         }
                     }
