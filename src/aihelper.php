@@ -556,6 +556,7 @@ abstract class aihelper
         while ($return['success'] === false && $max_tries > 0) {
             if ($max_tries < $this->max_tries) {
                 $this->log('⚠️ tries left: ' . $max_tries);
+                usleep(3_000_000); // 3s backoff to survive slot-contention bursts
             }
             $return = $this->askThis(
                 prompt: $prompt,
@@ -804,7 +805,7 @@ abstract class aihelper
             while ($return['success'] === false && $max_tries > 0) {
                 if ($max_tries < $this->max_tries) {
                     $this->log('⚠️ tries left: ' . $max_tries);
-                    usleep(500_000); // 500ms backoff between attempts
+                    usleep(3_000_000); // 3s backoff to survive slot-contention bursts
                 }
                 $return = $this->askThis(
                     prompt: null,
