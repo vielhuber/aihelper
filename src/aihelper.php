@@ -5182,8 +5182,11 @@ class ai_llamacpp extends ai_openrouter
             foreach ($response->result->data as $models__value) {
                 if (__::x($models__value?->id ?? null)) {
                     $context_length = (int) ($models__value->meta->n_ctx_train ?? 32768);
+                    $name = $models__value->id;
                     // strip split-shard suffix: "Model-0001-of-0004.gguf" → "Model"
-                    $name = preg_replace('/-\d{1,10}-of-\d{1,10}(\.gguf)$/i', '', $models__value->id);
+                    $name = preg_replace('/-\d{1,10}-of-\d{1,10}(\.gguf)$/i', '', $name);
+                    // completely remove .gguf
+                    $name = preg_replace('/\.gguf$/i', '', $name);
                     $models[] = [
                         'name' => $name,
                         'context_length' => $context_length,
