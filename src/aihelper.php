@@ -3759,6 +3759,16 @@ class ai_anthropic extends aihelper
             'test' => false
         ],
         [
+            'name' => 'claude-opus-4-7',
+            'context_length' => 1000000,
+            'max_output_tokens' => 32000,
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
             'name' => 'claude-sonnet-4-0',
             'context_length' => 200000,
             'max_output_tokens' => 16384,
