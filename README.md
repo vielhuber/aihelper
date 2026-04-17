@@ -40,7 +40,7 @@ $ai = aihelper::create(
     session_id: null, // submit session to continue a conversation (get with $ai->getSessionId())
     history: null, // submit messages (get with $ai->getSessionContent()),
     stream: false,
-    url: null // overwrite connection url (e.g. for lmstudio or ollama)
+    url: null // overwrite connection url (e.g. for lmstudio/ollama)
 );
 
 $ai->ask(prompt: 'Wer wurde 2018 Fußball-Weltmeister?');
