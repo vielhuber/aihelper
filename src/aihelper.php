@@ -1239,10 +1239,11 @@ abstract class aihelper
         // --- sampling parameters per model family ---
         if (str_contains($model_name, 'qwq')) {
             $args += ['top_p' => 0.95, 'top_k' => 40];
-        } elseif (str_contains($model_name, 'qwen3.5')) {
-            // official Qwen recommendation for qwen3.5 thinking mode (general tasks):
+        } elseif (str_contains($model_name, 'qwen3.5') || str_contains($model_name, 'qwen3.6')) {
+            // official Qwen recommendation for qwen3.5/3.6 thinking mode (general tasks):
             // temperature=1.0, top_p=0.95, top_k=20, min_p=0.0, presence_penalty=1.5, repeat_penalty=1.0
-            // presence_penalty=1.5 is critical to prevent repetition loops during reasoning.
+            // presence_penalty=1.5 is critical to prevent repetition loops during reasoning
+            // (confirmed looping on 3.6-35B-A3B without it — same MoE/A3B architecture as 3.5).
             // override temperature (not with += since applyTemperatureParameter may have set it).
             $args['temperature'] = 1.0;
             $args += [
@@ -1316,7 +1317,7 @@ abstract class aihelper
         // }
 
         // --- output limits per profile ---
-        if (str_contains($model_name, 'qwen3.5')) {
+        if (str_contains($model_name, 'qwen3.5') || str_contains($model_name, 'qwen3.6')) {
             if ($uses_tools) {
                 $args += ['max_output_tokens' => 12000, 'parallel_tool_calls' => false, 'max_tool_calls' => 30];
             } elseif ($profile === 'creative') {
