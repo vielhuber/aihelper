@@ -4134,9 +4134,17 @@ class ai_anthropic extends aihelper
     {
         $model_name = strtolower($this->model ?? '');
         $supports_thinking = str_contains($model_name, 'sonnet') || str_contains($model_name, 'opus');
+        $adaptive_thinking_models = ['claude-opus-4-7'];
+        $adaptive_thinking = in_array($model_name, $adaptive_thinking_models, true);
 
         if ($supports_thinking) {
-            $args['thinking'] = ['type' => 'enabled', 'budget_tokens' => 10000];
+            if ($adaptive_thinking) {
+                // new API: use adaptive thinking + effort level instead of enabled/budget_tokens
+                $args['thinking'] = ['type' => 'adaptive'];
+                $args['output_config'] = ['effort' => 'high'];
+            } else {
+                $args['thinking'] = ['type' => 'enabled', 'budget_tokens' => 10000];
+            }
             // temperature must be 1 when thinking is enabled
             $args['temperature'] = 1.0;
         }
