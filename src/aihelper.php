@@ -1239,11 +1239,17 @@ abstract class aihelper
         // --- sampling parameters per model family ---
         if (str_contains($model_name, 'qwq')) {
             $args += ['top_p' => 0.95, 'top_k' => 40];
-        } elseif (str_contains($model_name, 'qwen3.5') || str_contains($model_name, 'qwen3.6')) {
-            // official Qwen recommendation for qwen3.5/3.6 thinking mode (general tasks):
+        } elseif (
+            preg_match('/qwen(\d+)\.(\d+)/', $model_name, $_qm) === 1 &&
+            ((int) $_qm[1] >= 4 || ((int) $_qm[1] === 3 && (int) $_qm[2] >= 5))
+        ) {
+            // Matches Qwen3.5+ (3.5, 3.6, 3.7, … 3.10, …) and any Qwen4+ (4.x,
+            // 5.x, …). Keeps the regex forward-compatible with future releases.
+            // official Qwen recommendation for qwen3.5+ thinking mode (general tasks):
             // temperature=1.0, top_p=0.95, top_k=20, min_p=0.0, presence_penalty=1.5, repeat_penalty=1.0
             // presence_penalty=1.5 is critical to prevent repetition loops during reasoning
             // (confirmed looping on 3.6-35B-A3B without it — same MoE/A3B architecture as 3.5).
+            // Detector auto-picks up future 3.x releases (3.7, 3.8, …).
             // override temperature (not with += since applyTemperatureParameter may have set it).
             $args['temperature'] = 1.0;
             $args += [
@@ -1252,6 +1258,16 @@ abstract class aihelper
                 'min_p' => 0.0,
                 'presence_penalty' => 1.5,
                 'repeat_penalty' => 1.0
+            ];
+            // qwen3.5+ is trained to leverage thinking traces from prior turns
+            // for multi-step agentic workflows. enable_thinking=true tells the
+            // server's jinja chat template to keep <think> blocks from past
+            // assistant turns in the prompt the model sees on each subsequent
+            // call, instead of dropping them. Combined with the non-stripped
+            // history in addResponseToSession, this restores the context
+            // the model is trained to use.
+            $args['chat_template_kwargs'] = ($args['chat_template_kwargs'] ?? []) + [
+                'enable_thinking' => true,
             ];
         } elseif (str_contains($model_name, 'qwen3')) {
             $args += ['top_p' => 0.8, 'top_k' => 20];
@@ -1317,7 +1333,11 @@ abstract class aihelper
         // }
 
         // --- output limits per profile ---
-        if (str_contains($model_name, 'qwen3.5') || str_contains($model_name, 'qwen3.6')) {
+        // Matches Qwen3.5+ and Qwen4+ (see detection notes in the sampling branch above).
+        if (
+            preg_match('/qwen(\d+)\.(\d+)/', $model_name, $_qm) === 1 &&
+            ((int) $_qm[1] >= 4 || ((int) $_qm[1] === 3 && (int) $_qm[2] >= 5))
+        ) {
             if ($uses_tools) {
                 $args += ['max_output_tokens' => 12000, 'parallel_tool_calls' => false, 'max_tool_calls' => 30];
             } elseif ($profile === 'creative') {
@@ -1360,6 +1380,7 @@ abstract class aihelper
         // remove <think>...</think> blocks produced by reasoning models (e.g. QwQ)
         return trim(preg_replace('/<think>.*?<\/think>\s*/s', '', $text));
     }
+
 
     /**
      * Stateful removal of <tool_call>...</tool_call> and <minimax:tool_call>...</minimax:tool_call>
@@ -3479,10 +3500,19 @@ class ai_openai extends aihelper
                 if ($output__value->type === 'message' && __::x($output__value?->content ?? null)) {
                     $content = $output__value->content;
 
-                    // strip <think>...</think> blocks before storing in history (e.g. QwQ)
-                    foreach ($content as $content_item) {
-                        if (is_object($content_item) && isset($content_item->text)) {
-                            $content_item->text = $this->stripThinkingBlocks($content_item->text);
+                    // Strip <think>...</think> blocks before storing in history
+                    // for single-turn reasoning models (e.g. QwQ). Skip the
+                    // strip for the Qwen thinking lineage (3.5+ and 4+) which
+                    // is trained to consume prior-turn traces for agentic
+                    // multi-step workflows.
+                    $_qwen_preserve =
+                        preg_match('/qwen(\d+)\.(\d+)/', strtolower((string) ($this->model ?? '')), $_qm) === 1 &&
+                        ((int) $_qm[1] >= 4 || ((int) $_qm[1] === 3 && (int) $_qm[2] >= 5));
+                    if (!$_qwen_preserve) {
+                        foreach ($content as $content_item) {
+                            if (is_object($content_item) && isset($content_item->text)) {
+                                $content_item->text = $this->stripThinkingBlocks($content_item->text);
+                            }
                         }
                     }
 
