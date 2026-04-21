@@ -1005,7 +1005,11 @@ abstract class aihelper
                 }
                 $url = $h['mcp']['url'] ?? null;
                 $authorization_token = $h['mcp']['authorization_token'] ?? null;
+                $allowed_tools = $h['mcp']['allowed_tools'] ?? null;
                 foreach ($toolsData['result']['tools'] as $tool) {
+                    if ($allowed_tools !== null && !in_array($tool['name'], $allowed_tools, true)) {
+                        continue;
+                    }
                     $schema = self::buildLocalToolsArgsSanitize(
                         $tool['inputSchema'] ?? ['type' => 'object'],
                         $strip_schema_keys
