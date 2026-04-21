@@ -1067,8 +1067,46 @@ abstract class aihelper
         mixed $files = null,
         bool $add_prompt_to_session = true,
         ?string $prev_output_text = null,
-        float $prev_costs = 0.0
+        float $prev_costs = 0.0,
+        int $length_continuation_count = 0
     ): array;
+
+    /**
+     * If the model was cut off by the length limit (max_tokens / finish_reason=length /
+     * incomplete / finishReason=MAX_TOKENS), append the partial response to the session
+     * and auto-continue via a fresh askThis call. Returns the recursive result, or null
+     * if no continuation is needed. Capped at 10 continuations per turn.
+     */
+    protected function continueIfNotFinished(
+        mixed $response,
+        string $output_text,
+        float $costs,
+        int $length_continuation_count
+    ): ?array {
+        if ($length_continuation_count >= 10 || !__::x($response?->result ?? null)) {
+            return null;
+        }
+        $r = $response->result;
+        $is_cutoff =
+            ($r->stop_reason ?? null) === 'max_tokens' ||
+            ($r->choices[0]->finish_reason ?? null) === 'length' ||
+            (($r->status ?? null) === 'incomplete' &&
+                ($r->incomplete_details->reason ?? null) === 'max_output_tokens') ||
+            ($r->candidates[0]->finishReason ?? null) === 'MAX_TOKENS';
+        if (!$is_cutoff) {
+            return null;
+        }
+        $this->log('length cutoff detected — auto-continuing (' . ($length_continuation_count + 1) . '/10)');
+        $this->addResponseToSession($response);
+        return $this->askThis(
+            prompt: 'Continue.',
+            files: null,
+            add_prompt_to_session: true,
+            prev_output_text: $output_text,
+            prev_costs: $costs,
+            length_continuation_count: $length_continuation_count + 1
+        );
+    }
 
     public function ping(): bool
     {
@@ -3540,7 +3578,8 @@ class ai_openai extends aihelper
         mixed $files = null,
         bool $add_prompt_to_session = true,
         ?string $prev_output_text = null,
-        float $prev_costs = 0.0
+        float $prev_costs = 0.0,
+        int $length_continuation_count = 0
     ): array {
         $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
@@ -3673,6 +3712,17 @@ class ai_openai extends aihelper
             $error_msg = $this->extractErrorMessage($response);
             $return['response'] = $error_msg ?? 'No response from provider.';
             return $return;
+        }
+
+        // auto-continue when the model was cut off by the length limit
+        $continued = $this->continueIfNotFinished(
+            $response,
+            $output_text,
+            $return['costs'],
+            $length_continuation_count
+        );
+        if ($continued !== null) {
+            return $continued;
         }
 
         $return['response'] = $output_text;
@@ -3990,7 +4040,8 @@ class ai_anthropic extends aihelper
         mixed $files = null,
         bool $add_prompt_to_session = true,
         ?string $prev_output_text = null,
-        float $prev_costs = 0.0
+        float $prev_costs = 0.0,
+        int $length_continuation_count = 0
     ): array {
         $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
@@ -4117,7 +4168,8 @@ class ai_anthropic extends aihelper
                 files: $files,
                 add_prompt_to_session: false,
                 prev_output_text: $output_text,
-                prev_costs: $return['costs']
+                prev_costs: $return['costs'],
+                length_continuation_count: $length_continuation_count
             );
         }
 
@@ -4138,6 +4190,17 @@ class ai_anthropic extends aihelper
             $error_msg = $this->extractErrorMessage($response);
             $return['response'] = $error_msg ?? 'No response from provider.';
             return $return;
+        }
+
+        // auto-continue when the model was cut off by the length limit
+        $continued = $this->continueIfNotFinished(
+            $response,
+            $output_text,
+            $return['costs'],
+            $length_continuation_count
+        );
+        if ($continued !== null) {
+            return $continued;
         }
 
         $return['response'] = $output_text;
@@ -4504,7 +4567,8 @@ class ai_google extends aihelper
         mixed $files = null,
         bool $add_prompt_to_session = true,
         ?string $prev_output_text = null,
-        float $prev_costs = 0.0
+        float $prev_costs = 0.0,
+        int $length_continuation_count = 0
     ): array {
         $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
@@ -4589,6 +4653,17 @@ class ai_google extends aihelper
             $error_msg = $this->extractErrorMessage($response);
             $return['response'] = $error_msg ?? 'No response from provider.';
             return $return;
+        }
+
+        // auto-continue when the model was cut off by the length limit
+        $continued = $this->continueIfNotFinished(
+            $response,
+            $output_text,
+            $return['costs'],
+            $length_continuation_count
+        );
+        if ($continued !== null) {
+            return $continued;
         }
 
         $return['response'] = $output_text;
@@ -4945,7 +5020,8 @@ class ai_openrouter extends aihelper
         mixed $files = null,
         bool $add_prompt_to_session = true,
         ?string $prev_output_text = null,
-        float $prev_costs = 0.0
+        float $prev_costs = 0.0,
+        int $length_continuation_count = 0
     ): array {
         $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
 
@@ -5150,6 +5226,17 @@ class ai_openrouter extends aihelper
             $error_msg = $this->extractErrorMessage($response);
             $return['response'] = $error_msg ?? 'No response from provider.';
             return $return;
+        }
+
+        // auto-continue when the model was cut off by the length limit
+        $continued = $this->continueIfNotFinished(
+            $response,
+            $output_text,
+            $return['costs'],
+            $length_continuation_count
+        );
+        if ($continued !== null) {
+            return $continued;
         }
 
         $return['response'] = $output_text;
