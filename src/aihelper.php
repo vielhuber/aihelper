@@ -3730,16 +3730,6 @@ class ai_anthropic extends aihelper
 
     public $models = [
         [
-            'name' => 'claude-3-haiku-20240307',
-            'context_length' => 200000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0.00000025, 'input_cached' => 0.00000003, 'output' => 0.00000125],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'claude-haiku-4-5',
             'context_length' => 200000,
             'max_output_tokens' => 64000,

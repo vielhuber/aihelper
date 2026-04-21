@@ -962,7 +962,6 @@ class Test extends \PHPUnit\Framework\TestCase
                 provider: 'anthropic',
                 model: 'claude-haiku-4-5',
                 //model: 'claude-sonnet-4-5',
-                //model: 'claude-3-haiku-20240307',
                 temperature: 1.0,
                 api_key: $_SERVER['ANTHROPIC_API_KEY'] ?? '',
                 session_id: null,
