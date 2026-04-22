@@ -1308,8 +1308,18 @@ abstract class aihelper
             // call, instead of dropping them. Combined with the non-stripped
             // history in addResponseToSession, this restores the context
             // the model is trained to use.
+            // exception: small variants (e.g. 9B) tend to run out of output
+            // tokens while still inside <think>, never producing the final
+            // answer. disable thinking for them — short classifier/utility
+            // tasks don't benefit from long CoT anyway.
+            $enable_thinking = true;
+            if (preg_match('/qwen(\d+)\.(\d+)-(\d+)b/', $model_name, $_size_m) === 1) {
+                if ((int) $_size_m[3] < 14) {
+                    $enable_thinking = false;
+                }
+            }
             $args['chat_template_kwargs'] = ($args['chat_template_kwargs'] ?? []) + [
-                'enable_thinking' => true,
+                'enable_thinking' => $enable_thinking,
             ];
         } elseif (str_contains($model_name, 'qwen3')) {
             $args += ['top_p' => 0.8, 'top_k' => 20];
