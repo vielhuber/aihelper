@@ -3409,6 +3409,10 @@ class ai_openai extends aihelper
                     if (strpos($name, '-preview') !== false) {
                         continue;
                     }
+                    // exclude dated gpt-image-2 variants (e.g. gpt-image-2-2026-04-21)
+                    if (strpos($name, 'gpt-image-2-') !== false) {
+                        continue;
+                    }
                     if (
                         in_array($name, [
                             'gpt-5-search-api',
@@ -3445,6 +3449,7 @@ class ai_openai extends aihelper
                             'gpt-image-1',
                             'gpt-image-1-mini',
                             'gpt-image-1.5',
+                            'gpt-image-2',
                             'chatgpt-image-latest',
                             'dall-e-3',
                             'dall-e-2',
