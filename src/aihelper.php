@@ -5,43 +5,44 @@ use vielhuber\stringhelper\__;
 
 abstract class aihelper
 {
-    public $provider = null;
-    public $title = null;
-    public $name = null;
-    protected $url = null;
-    public $models = [];
-    public $support_mcp_remote = null;
-    public $support_stream = null;
+    public ?string $provider = null;
+    public ?string $title = null;
+    public ?string $name = null;
+    protected ?string $url = null;
+    public array $models = [];
+    public ?bool $support_mcp_remote = null;
+    public ?bool $support_stream = null;
 
-    protected $model = null;
-    protected $temperature = null;
-    protected $timeout = null;
-    protected $api_key = null;
-    protected $log = null;
-    protected $max_tries = null;
-    protected $mcp_servers = null;
-    protected $mcp_servers_call_type = null;
-    protected $mcp_servers_tools_map = [];
+    protected ?string $model = null;
+    protected ?float $temperature = null;
+    protected ?int $timeout = null;
+    protected ?string $api_key = null;
+    protected ?string $log = null;
+    protected ?int $max_tries = null;
+    protected ?bool $enable_thinking = null;
+    protected ?array $mcp_servers = null;
+    protected ?string $mcp_servers_call_type = null;
+    protected array $mcp_servers_tools_map = [];
 
-    protected $stream = null;
-    protected $stream_response = null;
-    protected $stream_event = null;
-    protected $stream_buffer_in = null;
-    protected $stream_buffer_data = null;
-    protected $stream_current_block_type = null;
-    protected $stream_first_text_sent = false;
-    protected $stream_running = false;
-    protected $stream_in_think = false;
-    protected $stream_think_tag_buf = '';
-    protected $stream_reasoning_buffer = '';
+    protected ?bool $stream = null;
+    protected mixed $stream_response = null;
+    protected ?string $stream_event = null;
+    protected ?string $stream_buffer_in = null;
+    protected ?string $stream_buffer_data = null;
+    protected ?string $stream_current_block_type = null;
+    protected bool $stream_first_text_sent = false;
+    protected bool $stream_running = false;
+    protected bool $stream_in_think = false;
+    protected string $stream_think_tag_buf = '';
+    protected string $stream_reasoning_buffer = '';
     // stateful buffer for stripping <tool_call>...</tool_call> XML from streamed text.
     // qwen3 emits tool calls as XML in content/reasoning; we extract them separately
     // in the reasoning_buffer parser, so they must be hidden from user-visible streams.
-    protected $stream_tool_call_strip_in_block = false;
-    protected $stream_tool_call_strip_tag_buf = '';
+    protected bool $stream_tool_call_strip_in_block = false;
+    protected string $stream_tool_call_strip_tag_buf = '';
 
-    protected $session_id = null;
-    protected static $sessions = [];
+    protected ?string $session_id = null;
+    protected static array $sessions = [];
 
     public static function create(
         string $provider,
@@ -56,7 +57,8 @@ abstract class aihelper
         ?string $session_id = null,
         ?array $history = null,
         ?bool $stream = null,
-        ?string $url = null
+        ?string $url = null,
+        ?bool $enable_thinking = null
     ): ?self {
         if ($provider === 'openai') {
             return new ai_openai(
@@ -71,7 +73,8 @@ abstract class aihelper
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
-                url: $url
+                url: $url,
+                enable_thinking: $enable_thinking
             );
         }
         if ($provider === 'anthropic') {
@@ -87,7 +90,8 @@ abstract class aihelper
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
-                url: $url
+                url: $url,
+                enable_thinking: $enable_thinking
             );
         }
         if ($provider === 'google') {
@@ -103,7 +107,8 @@ abstract class aihelper
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
-                url: $url
+                url: $url,
+                enable_thinking: $enable_thinking
             );
         }
         if ($provider === 'xai') {
@@ -119,7 +124,8 @@ abstract class aihelper
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
-                url: $url
+                url: $url,
+                enable_thinking: $enable_thinking
             );
         }
         if ($provider === 'deepseek') {
@@ -135,7 +141,8 @@ abstract class aihelper
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
-                url: $url
+                url: $url,
+                enable_thinking: $enable_thinking
             );
         }
         if ($provider === 'openrouter') {
@@ -151,7 +158,8 @@ abstract class aihelper
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
-                url: $url
+                url: $url,
+                enable_thinking: $enable_thinking
             );
         }
         if ($provider === 'llamacpp') {
@@ -167,7 +175,8 @@ abstract class aihelper
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
-                url: $url
+                url: $url,
+                enable_thinking: $enable_thinking
             );
         }
         if ($provider === 'lmstudio') {
@@ -183,7 +192,8 @@ abstract class aihelper
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
-                url: $url
+                url: $url,
+                enable_thinking: $enable_thinking
             );
         }
         if ($provider === 'test') {
@@ -199,7 +209,8 @@ abstract class aihelper
                 session_id: $session_id,
                 history: $history,
                 stream: $stream,
-                url: $url
+                url: $url,
+                enable_thinking: $enable_thinking
             );
         }
         return null;
@@ -468,7 +479,8 @@ abstract class aihelper
         ?string $session_id = null,
         ?array $history = null,
         ?bool $stream = null,
-        ?string $url = null
+        ?string $url = null,
+        ?bool $enable_thinking = null
     ) {
         if ($temperature === null) {
             $temperature = 1.0;
@@ -481,6 +493,9 @@ abstract class aihelper
         }
         if ($url !== null) {
             $this->url = $url;
+        }
+        if ($enable_thinking !== null) {
+            $this->enable_thinking = $enable_thinking;
         }
         if ($api_key !== null) {
             $this->api_key = $api_key;
@@ -1201,9 +1216,10 @@ abstract class aihelper
         return $content;
     }
 
-    protected static function modifyArgsLocal(?array $args, ?string $model, ?string $provider = null): ?array
+    protected function modifyArgsLocal(?array $args): ?array
     {
-        $model_name = strtolower($model ?? '');
+        $model_name = strtolower($this->model ?? '');
+        $enable_thinking = $this->enable_thinking;
         $uses_tools = !empty($args['tools']) && is_array($args['tools']);
 
         // --- detect profile ---
@@ -1287,40 +1303,44 @@ abstract class aihelper
         ) {
             // Matches Qwen3.5+ (3.5, 3.6, 3.7, … 3.10, …) and any Qwen4+ (4.x,
             // 5.x, …). Keeps the regex forward-compatible with future releases.
-            // official Qwen recommendation for qwen3.5+ thinking mode (general tasks):
-            // temperature=1.0, top_p=0.95, top_k=20, min_p=0.0, presence_penalty=1.5, repeat_penalty=1.0
+            // Official Unsloth recommendation (https://unsloth.ai/docs/models/qwen3.6):
+            //   Thinking / General:  temp=1.0, top_p=0.95, top_k=20, min_p=0.0, presence_penalty=1.5
+            //   Instruct / General:  temp=0.7, top_p=0.8,  top_k=20, min_p=0.0, presence_penalty=1.5
             // presence_penalty=1.5 is critical to prevent repetition loops during reasoning
             // (confirmed looping on 3.6-35B-A3B without it — same MoE/A3B architecture as 3.5).
-            // Detector auto-picks up future 3.x releases (3.7, 3.8, …).
-            // override temperature (not with += since applyTemperatureParameter may have set it).
-            $args['temperature'] = 1.0;
-            $args += [
-                'top_p' => 0.95,
-                'top_k' => 20,
-                'min_p' => 0.0,
-                'presence_penalty' => 1.5,
-                'repeat_penalty' => 1.0
-            ];
-            // qwen3.5+ is trained to leverage thinking traces from prior turns
-            // for multi-step agentic workflows. enable_thinking=true tells the
-            // server's jinja chat template to keep <think> blocks from past
-            // assistant turns in the prompt the model sees on each subsequent
-            // call, instead of dropping them. Combined with the non-stripped
-            // history in addResponseToSession, this restores the context
-            // the model is trained to use.
-            // exception: small variants (e.g. 9B) tend to run out of output
-            // tokens while still inside <think>, never producing the final
-            // answer. disable thinking for them — short classifier/utility
-            // tasks don't benefit from long CoT anyway.
-            $enable_thinking = true;
-            if (preg_match('/qwen(\d+)\.(\d+)-(\d+)b/', $model_name, $_size_m) === 1) {
-                if ((int) $_size_m[3] < 14) {
-                    $enable_thinking = false;
-                }
+            // Resolve effective thinking mode:
+            //   - explicit $enable_thinking=true/false from caller takes precedence
+            //   - null means "use server-side default" — we can't see that default here,
+            //     but our llama-server is started with enable_thinking=true for this
+            //     family, so null is treated like true for sampling purposes.
+            $thinking_effective = $enable_thinking !== false;
+            if ($thinking_effective === true) {
+                $args['temperature'] = 1.0;
+                $args += [
+                    'top_p' => 0.95,
+                    'top_k' => 20,
+                    'min_p' => 0.0,
+                    'presence_penalty' => 1.5,
+                    'repeat_penalty' => 1.0
+                ];
+            } else {
+                $args['temperature'] = 0.7;
+                $args += [
+                    'top_p' => 0.8,
+                    'top_k' => 20,
+                    'min_p' => 0.0,
+                    'presence_penalty' => 1.5,
+                    'repeat_penalty' => 1.0
+                ];
             }
-            $args['chat_template_kwargs'] = ($args['chat_template_kwargs'] ?? []) + [
-                'enable_thinking' => $enable_thinking,
-            ];
+            // Only emit chat_template_kwargs when the caller explicitly wants to
+            // override the server default. Leaving it unset keeps the llama-server
+            // startup value (--chat-template-kwargs) in charge.
+            if ($enable_thinking !== null) {
+                $args['chat_template_kwargs'] = ($args['chat_template_kwargs'] ?? []) + [
+                    'enable_thinking' => $enable_thinking
+                ];
+            }
         } elseif (str_contains($model_name, 'qwen3')) {
             $args += ['top_p' => 0.8, 'top_k' => 20];
         } elseif (str_contains($model_name, 'minimax') && str_contains($model_name, 'm2')) {
@@ -1336,7 +1356,7 @@ abstract class aihelper
             $args['temperature'] = 1.0;
             $args += [
                 'top_p' => 0.95,
-                'top_k' => 40,
+                'top_k' => 40
             ];
         } elseif (str_contains($model_name, 'gpt-oss') && $uses_tools) {
             $args += ['top_p' => 0.9, 'top_k' => 20];
@@ -1432,7 +1452,6 @@ abstract class aihelper
         // remove <think>...</think> blocks produced by reasoning models (e.g. QwQ)
         return trim(preg_replace('/<think>.*?<\/think>\s*/s', '', $text));
     }
-
 
     /**
      * Stateful removal of <tool_call>...</tool_call> and <minimax:tool_call>...</minimax:tool_call>
@@ -2750,19 +2769,19 @@ abstract class aihelper
 
 class ai_openai extends aihelper
 {
-    public $provider = 'OpenAI';
+    public ?string $provider = 'OpenAI';
 
-    public $title = 'OpenAI';
+    public ?string $title = 'OpenAI';
 
-    public $name = 'openai';
+    public ?string $name = 'openai';
 
-    protected $url = 'https://api.openai.com/v1';
+    protected ?string $url = 'https://api.openai.com/v1';
 
-    public $support_mcp_remote = true;
+    public ?bool $support_mcp_remote = true;
 
-    public $support_stream = true;
+    public ?bool $support_stream = true;
 
-    public $models = [
+    public array $models = [
         [
             'name' => 'gpt-3.5-turbo',
             'context_length' => 16384,
@@ -3761,7 +3780,10 @@ class ai_openai extends aihelper
         $is_o_model = preg_match('/^(o1|o3|o4)(-|$)/', $model_name) === 1;
         $is_o1_pro = preg_match('/^o1-pro/', $model_name) === 1;
         if ($is_o_model && !$is_o1_pro) {
-            $args['reasoning'] = ['effort' => 'medium', 'summary' => 'detailed'];
+            // reasoning models always reason; enable_thinking=false maps to the
+            // lowest effort ("minimal"), null/true keeps the default "medium".
+            $effort = $this->enable_thinking === false ? 'minimal' : 'medium';
+            $args['reasoning'] = ['effort' => $effort, 'summary' => 'detailed'];
         } else {
             unset($args['reasoning']);
         }
@@ -3785,19 +3807,19 @@ class ai_openai extends aihelper
 
 class ai_anthropic extends aihelper
 {
-    public $provider = 'Anthropic';
+    public ?string $provider = 'Anthropic';
 
-    public $title = 'Anthropic';
+    public ?string $title = 'Anthropic';
 
-    public $name = 'anthropic';
+    public ?string $name = 'anthropic';
 
-    protected $url = 'https://api.anthropic.com/v1';
+    protected ?string $url = 'https://api.anthropic.com/v1';
 
-    public $support_mcp_remote = true;
+    public ?bool $support_mcp_remote = true;
 
-    public $support_stream = true;
+    public ?bool $support_stream = true;
 
-    public $models = [
+    public array $models = [
         [
             'name' => 'claude-haiku-4-5',
             'context_length' => 200000,
@@ -4239,8 +4261,12 @@ class ai_anthropic extends aihelper
         $supports_thinking = str_contains($model_name, 'sonnet') || str_contains($model_name, 'opus');
         $adaptive_thinking_models = ['claude-opus-4-7'];
         $adaptive_thinking = in_array($model_name, $adaptive_thinking_models, true);
+        // explicit enable_thinking=false overrides the default-on behavior for
+        // sonnet/opus models; null keeps the existing default (thinking on where
+        // supported); true enables it even if a future model doesn't default to it.
+        $want_thinking = $this->enable_thinking !== false && ($this->enable_thinking === true || $supports_thinking);
 
-        if ($supports_thinking) {
+        if ($supports_thinking && $want_thinking) {
             if ($adaptive_thinking) {
                 // new API: use adaptive thinking + effort level instead of enabled/budget_tokens
                 $args['thinking'] = ['type' => 'adaptive'];
@@ -4274,19 +4300,19 @@ class ai_anthropic extends aihelper
 
 class ai_google extends aihelper
 {
-    public $provider = 'Google';
+    public ?string $provider = 'Google';
 
-    public $title = 'Google';
+    public ?string $title = 'Google';
 
-    public $name = 'google';
+    public ?string $name = 'google';
 
-    protected $url = 'https://generativelanguage.googleapis.com/v1beta';
+    protected ?string $url = 'https://generativelanguage.googleapis.com/v1beta';
 
-    public $support_mcp_remote = false;
+    public ?bool $support_mcp_remote = false;
 
-    public $support_stream = true;
+    public ?bool $support_stream = true;
 
-    public $models = [
+    public array $models = [
         [
             'name' => 'gemini-2.0-flash',
             'context_length' => 1048576,
@@ -4604,8 +4630,11 @@ class ai_google extends aihelper
             'contents' => self::$sessions[$this->session_id]
         ];
         $args = $this->applyTemperatureParameter($args, 'generationConfig');
+        // Gemini 2.5 thinking budget. null = default (1024), true = default (1024),
+        // false = explicitly off (0). No-op on models without thinking support.
         if (in_array($this->model, ['gemini-2.5-pro', 'gemini-2.5-flash'], true)) {
-            $args['generationConfig']['thinkingConfig'] = ['thinkingBudget' => 1024];
+            $budget = $this->enable_thinking === false ? 0 : 1024;
+            $args['generationConfig']['thinkingConfig'] = ['thinkingBudget' => $budget];
         }
 
         if (!empty($this->mcp_servers) && $this->mcp_servers_call_type === 'local') {
@@ -4713,19 +4742,19 @@ class ai_google extends aihelper
 /* compatible with the anthropic api */
 class ai_xai extends ai_anthropic
 {
-    public $provider = 'xAI';
+    public ?string $provider = 'xAI';
 
-    public $title = 'xAI';
+    public ?string $title = 'xAI';
 
-    public $name = 'xai';
+    public ?string $name = 'xai';
 
-    protected $url = 'https://api.x.ai/v1';
+    protected ?string $url = 'https://api.x.ai/v1';
 
-    public $support_mcp_remote = false;
+    public ?bool $support_mcp_remote = false;
 
-    public $support_stream = false;
+    public ?bool $support_stream = false;
 
-    public $models = [
+    public array $models = [
         [
             'name' => 'grok-3',
             'context_length' => 131072,
@@ -4832,19 +4861,19 @@ class ai_xai extends ai_anthropic
 /* compatible with the anthropic api */
 class ai_deepseek extends ai_anthropic
 {
-    public $provider = 'DeepSeek';
+    public ?string $provider = 'DeepSeek';
 
-    public $title = 'DeepSeek';
+    public ?string $title = 'DeepSeek';
 
-    public $name = 'deepseek';
+    public ?string $name = 'deepseek';
 
-    protected $url = 'https://api.deepseek.com/anthropic';
+    protected ?string $url = 'https://api.deepseek.com/anthropic';
 
-    public $support_mcp_remote = false;
+    public ?bool $support_mcp_remote = false;
 
-    public $support_stream = false;
+    public ?bool $support_stream = false;
 
-    public $models = [
+    public array $models = [
         [
             'name' => 'deepseek-chat',
             'context_length' => 65536,
@@ -4902,19 +4931,19 @@ class ai_deepseek extends ai_anthropic
 /* compatible with the openai api */
 class ai_openrouter extends aihelper
 {
-    public $provider = 'OpenRouter';
+    public ?string $provider = 'OpenRouter';
 
-    public $title = 'OpenRouter';
+    public ?string $title = 'OpenRouter';
 
-    public $name = 'openrouter';
+    public ?string $name = 'openrouter';
 
-    protected $url = 'https://openrouter.ai/api/v1';
+    protected ?string $url = 'https://openrouter.ai/api/v1';
 
-    public $support_mcp_remote = false;
+    public ?bool $support_mcp_remote = false;
 
-    public $support_stream = true;
+    public ?bool $support_stream = true;
 
-    public $models = [];
+    public array $models = [];
 
     public function fetchModels(): array
     {
@@ -5284,27 +5313,27 @@ class ai_openrouter extends aihelper
 
     protected function modifyArgs(?array $args): ?array
     {
-        return self::modifyArgsLocal($args, $this->model, 'openrouter');
+        return $this->modifyArgsLocal($args);
     }
 }
 
 /* compatible with the openai chat completions api */
 class ai_llamacpp extends ai_openrouter
 {
-    public $provider = 'llama.cpp';
+    public ?string $provider = 'llama.cpp';
 
-    public $title = 'llama.cpp';
+    public ?string $title = 'llama.cpp';
 
-    public $name = 'llamacpp';
+    public ?string $name = 'llamacpp';
 
-    protected $url = 'http://localhost:8080/v1';
+    protected ?string $url = 'http://localhost:8080/v1';
 
-    public $support_mcp_remote = false;
-    public $support_mcp_local = true;
+    public ?bool $support_mcp_remote = false;
+    public bool $support_mcp_local = true;
 
-    public $support_stream = true;
+    public ?bool $support_stream = true;
 
-    public $models = [];
+    public array $models = [];
 
     public function fetchModels(): array
     {
@@ -5369,26 +5398,26 @@ class ai_llamacpp extends ai_openrouter
 
     protected function modifyArgs(?array $args): ?array
     {
-        return self::modifyArgsLocal($args, $this->model, 'llamacpp');
+        return $this->modifyArgsLocal($args);
     }
 }
 
 /* compatible with the openai api */
 class ai_lmstudio extends ai_openai
 {
-    public $provider = 'Element Labs';
+    public ?string $provider = 'Element Labs';
 
-    public $title = 'LM Studio';
+    public ?string $title = 'LM Studio';
 
-    public $name = 'lmstudio';
+    public ?string $name = 'lmstudio';
 
-    protected $url = 'http://localhost:1234/v1';
+    protected ?string $url = 'http://localhost:1234/v1';
 
-    public $support_mcp_remote = true;
+    public ?bool $support_mcp_remote = true;
 
-    public $support_stream = true;
+    public ?bool $support_stream = true;
 
-    public $models = [];
+    public array $models = [];
 
     public function fetchModels(): array
     {
@@ -5506,25 +5535,25 @@ class ai_lmstudio extends ai_openai
 
     protected function modifyArgs(?array $args): ?array
     {
-        return self::modifyArgsLocal($args, $this->model);
+        return $this->modifyArgsLocal($args);
     }
 }
 
 class ai_test extends ai_anthropic
 {
-    public $provider = 'aihelper';
+    public ?string $provider = 'aihelper';
 
-    public $title = 'Test';
+    public ?string $title = 'Test';
 
-    public $name = 'test';
+    public ?string $name = 'test';
 
-    protected $url = null;
+    protected ?string $url = null;
 
-    public $support_mcp_remote = false;
+    public ?bool $support_mcp_remote = false;
 
-    public $support_stream = true;
+    public ?bool $support_stream = true;
 
-    public $models = [
+    public array $models = [
         [
             'name' => 'test-model-1',
             'context_length' => 128000,
