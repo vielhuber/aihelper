@@ -4517,6 +4517,7 @@ class ai_google extends aihelper
                             'gemini-2.0-flash-001',
                             'gemini-2.0-flash-lite-001',
                             'gemini-embedding-001',
+                            'gemini-embedding-2',
                             'aqa',
                             'imagen-4.0-generate-001',
                             'imagen-4.0-ultra-generate-001',
