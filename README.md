@@ -42,7 +42,8 @@ $ai = aihelper::create(
     history: null, // submit messages (get with $ai->getSessionContent()),
     stream: false,
     url: null, // overwrite connection url (e.g. for llamacpp/lmstudio)
-    enable_thinking: null // true|false|null — force reasoning/thinking on/off; null = provider default (see below)
+    enable_thinking: null, // true|false|null — force reasoning/thinking on/off; null = provider default (see below)
+    auto_compact: false // true = transparently compact the session when it approaches the model's context window
 );
 
 $ai->ask(prompt: 'Wer wurde 2018 Fußball-Weltmeister?');

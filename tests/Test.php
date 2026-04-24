@@ -175,6 +175,98 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('test', null, null, $stats);
     }
 
+    function test__auto_compact()
+    {
+        $session_id = 'auto-compact-test-' . mt_rand(100000, 999999);
+        $cache_file =
+            sys_get_temp_dir() . '/aihelper-cache/' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $session_id) . '.txt';
+        @unlink($cache_file);
+
+        // fabricate a session that exceeds ~70% of test provider's ctx (128k).
+        // ~90k tokens ≈ ~360k chars. use a compact mixture of roles.
+        $bloat = str_repeat('Dies ist ein langer Gesprächsverlauf mit vielen Details. ', 400);
+        $history = [];
+        // head: 5 prepended system-like prompts
+        for ($i = 0; $i < 5; $i++) {
+            $history[] = ['role' => 'user', 'content' => '# SKILL ' . $i . "\n\nInstruktionen für den Assistenten."];
+        }
+        // middle: lots of back-and-forth that we want compacted
+        for ($i = 0; $i < 30; $i++) {
+            $history[] = ['role' => 'user', 'content' => 'Frage ' . $i . ': ' . $bloat];
+            $history[] = ['role' => 'assistant', 'content' => 'Antwort ' . $i . ': ' . $bloat];
+        }
+        // tail: 4 recent messages that must stay verbatim
+        $tail_marker_user = 'TAIL_USER_MARKER_' . mt_rand(1000, 9999);
+        $tail_marker_asst = 'TAIL_ASSISTANT_MARKER_' . mt_rand(1000, 9999);
+        $history[] = ['role' => 'user', 'content' => $tail_marker_user . ' frage 1'];
+        $history[] = ['role' => 'assistant', 'content' => $tail_marker_asst . ' antwort 1'];
+        $history[] = ['role' => 'user', 'content' => $tail_marker_user . ' frage 2'];
+        $history[] = ['role' => 'assistant', 'content' => $tail_marker_asst . ' antwort 2'];
+
+        $message_count_before = count($history);
+        $this->assertGreaterThan(9, $message_count_before);
+
+        $ai = aihelper::create(
+            provider: 'test',
+            log: 'tests/aihelper.log',
+            session_id: $session_id,
+            history: $history,
+            auto_compact: true
+        );
+        $this->assertNotNull($ai);
+
+        // trigger compaction explicitly (so we don't depend on ask() side effects)
+        $ai->autoCompactSession();
+
+        $session_after = $ai->getSessionContent();
+        $this->assertLessThan($message_count_before, count($session_after), 'session should shrink after compaction');
+        // head (5) + summary (1) + tail (4) == 10
+        $this->assertSame(10, count($session_after), 'head(5) + summary(1) + tail(4) = 10 expected');
+
+        // head is preserved verbatim
+        for ($i = 0; $i < 5; $i++) {
+            $this->assertSame(
+                '# SKILL ' . $i . "\n\nInstruktionen für den Assistenten.",
+                $session_after[$i]['content']
+            );
+        }
+        // tail is preserved verbatim (last 4 messages unchanged)
+        $tail_after = array_slice($session_after, -4);
+        $this->assertStringContainsString($tail_marker_user, $tail_after[0]['content']);
+        $this->assertStringContainsString($tail_marker_asst, $tail_after[1]['content']);
+        $this->assertStringContainsString($tail_marker_user, $tail_after[2]['content']);
+        $this->assertStringContainsString($tail_marker_asst, $tail_after[3]['content']);
+
+        // summary message sits between head and tail, carries the banner text.
+        // content shape differs per provider (ai_test → ai_anthropic returns
+        // content as an array of blocks, not a plain string) — serialize for
+        // a shape-agnostic substring check.
+        $summary_msg = $session_after[5];
+        $this->assertArrayHasKey('content', $summary_msg);
+        $this->assertStringContainsString(
+            'Zusammenfassung des bisherigen Verlaufs',
+            json_encode($summary_msg['content'])
+        );
+
+        // persistence: running summary should now live on disk under /tmp/aihelper-cache/
+        $this->assertFileExists($cache_file, 'running summary must be persisted to disk');
+        $persisted = file_get_contents($cache_file);
+        $this->assertNotEmpty($persisted);
+
+        // noop: with auto_compact=false, even a bloated session stays untouched
+        $ai3 = aihelper::create(
+            provider: 'test',
+            log: 'tests/aihelper.log',
+            session_id: 'no-compact-test-' . mt_rand(100000, 999999),
+            history: $history,
+            auto_compact: false
+        );
+        $ai3->autoCompactSession();
+        $this->assertSame($message_count_before, count($ai3->getSessionContent()));
+
+        @unlink($cache_file);
+    }
+
     function ai_test_prepare($provider, $api_key = null, $url = null, &$stats = [])
     {
         $models = aihelper::create(

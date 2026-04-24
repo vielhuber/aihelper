@@ -35,14 +35,15 @@ abstract class aihelper
     protected bool $stream_in_think = false;
     protected string $stream_think_tag_buf = '';
     protected string $stream_reasoning_buffer = '';
-    // stateful buffer for stripping <tool_call>...</tool_call> XML from streamed text.
-    // qwen3 emits tool calls as XML in content/reasoning; we extract them separately
-    // in the reasoning_buffer parser, so they must be hidden from user-visible streams.
     protected bool $stream_tool_call_strip_in_block = false;
     protected string $stream_tool_call_strip_tag_buf = '';
 
     protected ?string $session_id = null;
     protected static array $sessions = [];
+
+    protected ?bool $auto_compact = null;
+    protected ?string $auto_compact_summary = null;
+    protected ?string $auto_compact_cache = null;
 
     public static function create(
         string $provider,
@@ -58,7 +59,8 @@ abstract class aihelper
         ?array $history = null,
         ?bool $stream = null,
         ?string $url = null,
-        ?bool $enable_thinking = null
+        ?bool $enable_thinking = null,
+        ?bool $auto_compact = null
     ): ?self {
         if ($provider === 'openai') {
             return new ai_openai(
@@ -74,7 +76,8 @@ abstract class aihelper
                 history: $history,
                 stream: $stream,
                 url: $url,
-                enable_thinking: $enable_thinking
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact
             );
         }
         if ($provider === 'anthropic') {
@@ -91,7 +94,8 @@ abstract class aihelper
                 history: $history,
                 stream: $stream,
                 url: $url,
-                enable_thinking: $enable_thinking
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact
             );
         }
         if ($provider === 'google') {
@@ -108,7 +112,8 @@ abstract class aihelper
                 history: $history,
                 stream: $stream,
                 url: $url,
-                enable_thinking: $enable_thinking
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact
             );
         }
         if ($provider === 'xai') {
@@ -125,7 +130,8 @@ abstract class aihelper
                 history: $history,
                 stream: $stream,
                 url: $url,
-                enable_thinking: $enable_thinking
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact
             );
         }
         if ($provider === 'deepseek') {
@@ -142,7 +148,8 @@ abstract class aihelper
                 history: $history,
                 stream: $stream,
                 url: $url,
-                enable_thinking: $enable_thinking
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact
             );
         }
         if ($provider === 'openrouter') {
@@ -159,7 +166,8 @@ abstract class aihelper
                 history: $history,
                 stream: $stream,
                 url: $url,
-                enable_thinking: $enable_thinking
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact
             );
         }
         if ($provider === 'llamacpp') {
@@ -176,7 +184,8 @@ abstract class aihelper
                 history: $history,
                 stream: $stream,
                 url: $url,
-                enable_thinking: $enable_thinking
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact
             );
         }
         if ($provider === 'lmstudio') {
@@ -193,7 +202,8 @@ abstract class aihelper
                 history: $history,
                 stream: $stream,
                 url: $url,
-                enable_thinking: $enable_thinking
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact
             );
         }
         if ($provider === 'test') {
@@ -210,7 +220,8 @@ abstract class aihelper
                 history: $history,
                 stream: $stream,
                 url: $url,
-                enable_thinking: $enable_thinking
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact
             );
         }
         return null;
@@ -480,7 +491,8 @@ abstract class aihelper
         ?array $history = null,
         ?bool $stream = null,
         ?string $url = null,
-        ?bool $enable_thinking = null
+        ?bool $enable_thinking = null,
+        ?bool $auto_compact = null
     ) {
         if ($temperature === null) {
             $temperature = 1.0;
@@ -562,10 +574,27 @@ abstract class aihelper
         if (__::x($history)) {
             self::$sessions[$this->session_id] = $history;
         }
+        // auto-compact setup. persistent running summary lives as a plain text
+        // file in the system temp dir, keyed by session_id so that subsequent
+        // calls with the same session_id reuse the same summary (which in turn
+        // keeps server-side kv-cache prefixes stable).
+        if ($auto_compact === true) {
+            $this->auto_compact = true;
+            $cacheDir = sys_get_temp_dir() . '/aihelper-cache';
+            if (!is_dir($cacheDir)) {
+                @mkdir($cacheDir, 0777, true);
+            }
+            $this->auto_compact_cache =
+                $cacheDir . '/' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $this->session_id) . '.txt';
+            if (is_file($this->auto_compact_cache)) {
+                $this->auto_compact_summary = file_get_contents($this->auto_compact_cache) ?: null;
+            }
+        }
     }
 
     public function ask(?string $prompt = null, mixed $files = null): array
     {
+        $this->autoCompactSession();
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
         $max_tries = $this->max_tries;
         while ($return['success'] === false && $max_tries > 0) {
@@ -591,6 +620,209 @@ abstract class aihelper
             $return = $this->runLocalToolLoop($return);
         }
         return $return;
+    }
+
+    /**
+     * Auto-compact the current session if it is about to exceed the model's
+     * context window. Opt-in via the $auto_compact constructor flag. Safe to
+     * call on any provider — works on the provider-agnostic self::$sessions
+     * array and uses bringPromptInFormat() to produce the summary message in
+     * the host provider's native shape.
+     *
+     * Strategy (Running Summary):
+     *   - keep first $keep_head messages verbatim (prepended system prompts /
+     *     skills)
+     *   - keep last $keep_tail messages verbatim (recent turns)
+     *   - replace everything in between with one summary message that extends
+     *     the previous running summary
+     *
+     * Summary is produced by a nested, stripped-down aihelper instance on the
+     * same provider/model (no tools, no streaming, no nested compact,
+     * temperature 0 for determinism). The final summary text is persisted to
+     * sys_get_temp_dir() + "/aihelper-cache/<session_id>.txt" so subsequent
+     * aihelper instances with the same session_id pick up where we left off.
+     *
+     * Everything lives in this one function by design — the transcript
+     * builder, token estimator and nested summarizer are small enough to be
+     * inlined and benefit from keeping the whole compaction flow in a single
+     * readable place.
+     */
+    public function autoCompactSession(): void
+    {
+        // ---- tunables (inlined by design — callers only flip auto_compact) -
+        $threshold = 0.7; // trigger when tokens exceed this fraction of ctx
+        $keep_head = 5; // first N messages (prepended prompts) stay verbatim
+        $keep_tail = 4; // last N messages stay verbatim (recent exchange)
+        $chars_per_token = 4; // rough char→token estimator (ok for threshold work)
+
+        // ---- guards --------------------------------------------------------
+        if ($this->auto_compact !== true) {
+            return;
+        }
+        if (empty($this->session_id) || !isset(self::$sessions[$this->session_id])) {
+            return;
+        }
+        $session = self::$sessions[$this->session_id];
+        if (!is_array($session) || count($session) < $keep_head + $keep_tail + 1) {
+            return; // nothing to compact yet
+        }
+
+        // ---- threshold check ----------------------------------------------
+        $session_json = json_encode($session);
+        $current_tokens = is_string($session_json) ? (int) ceil(strlen($session_json) / $chars_per_token) : 0;
+        $context_length = $this->getContextLengthForModel();
+        $threshold_tokens = (int) ($context_length * $threshold);
+        if ($current_tokens <= $threshold_tokens) {
+            return; // still within budget
+        }
+
+        $this->log(
+            '🗜️ auto_compact: ' .
+                $current_tokens .
+                ' > ' .
+                $threshold_tokens .
+                ' tokens (ctx ' .
+                $context_length .
+                '), compacting ' .
+                (count($session) - $keep_head - $keep_tail) .
+                ' middle messages'
+        );
+
+        // ---- split head / middle / tail -----------------------------------
+        $head = array_slice($session, 0, $keep_head);
+        $middle = array_slice($session, $keep_head, count($session) - $keep_head - $keep_tail);
+        $tail = array_slice($session, -$keep_tail);
+
+        // ---- flatten middle to plain-text transcript ----------------------
+        // recursive extractor (closure so we don't need a named helper) —
+        // handles all provider shapes: OpenAI blocks, Anthropic content
+        // blocks, Google parts. pulls strings from any `text`/`content`/
+        // `parts` key and numeric indexes, ignoring meta keys like `type`.
+        $extract = function (mixed $node) use (&$extract): string {
+            if ($node === null) {
+                return '';
+            }
+            if (is_string($node)) {
+                return $node;
+            }
+            if (is_object($node)) {
+                $node = (array) $node;
+            }
+            if (!is_array($node)) {
+                return '';
+            }
+            $parts = [];
+            foreach ($node as $k => $v) {
+                if (in_array($k, ['text', 'content', 'parts'], true) || is_int($k)) {
+                    $parts[] = $extract($v);
+                }
+            }
+            return trim(implode(' ', array_filter($parts, fn($p) => $p !== '')));
+        };
+        $transcript_lines = [];
+        foreach ($middle as $msg) {
+            $msg_arr = is_array($msg) ? $msg : (array) $msg;
+            $role = $msg_arr['role'] ?? 'unknown';
+            $text = $extract($msg_arr['content'] ?? ($msg_arr['parts'] ?? null));
+            if ($text === '') {
+                // tool-call envelope without text — preserve tool name/args so
+                // the summarizer knows what happened
+                if (!empty($msg_arr['tool_calls'])) {
+                    $text = '[tool_calls] ' . substr((string) json_encode($msg_arr['tool_calls']), 0, 500);
+                } elseif (!empty($msg_arr['function_call'])) {
+                    $text = '[function_call] ' . substr((string) json_encode($msg_arr['function_call']), 0, 500);
+                }
+            }
+            if ($text !== '') {
+                $transcript_lines[] = strtoupper((string) $role) . ': ' . $text;
+            }
+        }
+        $transcript = implode("\n\n", $transcript_lines);
+
+        // ---- nested summarizer call ---------------------------------------
+        $system_prompt =
+            'Du bist ein Kontext-Komprimierer. Fasse den folgenden Gesprächsverlauf strukturiert zusammen, ' .
+            'sodass ein nachfolgender Assistent ohne den vollen Verlauf weiterarbeiten kann.' .
+            "\n\n" .
+            'Bewahre unbedingt:' .
+            "\n" .
+            '- Nutzer-Ziel und offene Fragen' .
+            "\n" .
+            '- Bereits ausgeführte Tool-Aufrufe mit ihren Argumenten und Ergebnis-Kernfakten (z.B. "fetch_mails mit limit=10 ergab 10 Mails, Betreffe: ...")' .
+            "\n" .
+            '- Vom Nutzer geäußerte Präferenzen und Entscheidungen' .
+            "\n" .
+            '- Wichtige Werte (IDs, Namen, Datumsangaben) die im weiteren Verlauf referenziert werden könnten' .
+            "\n\n" .
+            'Format: Markdown mit Abschnitten "Ziel", "Ausgeführte Aktionen", "Schlüsselwerte", "Offene Punkte".' .
+            "\n" .
+            'Kürze aggressiv. Keine Prosa-Einleitung, kein "Zusammenfassung:" am Anfang.';
+        $user_prompt = '';
+        if ($this->auto_compact_summary !== null && $this->auto_compact_summary !== '') {
+            $user_prompt .=
+                "Bisherige Zusammenfassung (weiterführen und ergänzen):\n\n" .
+                $this->auto_compact_summary .
+                "\n\n----\n\n";
+        }
+        $user_prompt .= "Neu hinzugekommener Verlauf (diesen integrieren):\n\n" . $transcript;
+
+        $new_summary = null;
+        try {
+            // fresh session per summarizer run — a stable suffix would collide
+            // across successive compactions within the same process because
+            // aihelper's constructor keeps stale data when history is empty
+            // (__::x([]) === false, so history: [] does not overwrite).
+            $summarizer = self::create(
+                provider: $this->name,
+                model: $this->model,
+                temperature: 0.0,
+                api_key: $this->api_key,
+                url: $this->url,
+                log: $this->log,
+                max_tries: 1,
+                session_id: $this->session_id . '::compact::' . uniqid('', true),
+                history: [],
+                stream: false,
+                enable_thinking: false,
+                auto_compact: false
+            );
+            if ($summarizer !== null) {
+                $summarizer->prependPromptToSession($system_prompt);
+                $result = $summarizer->ask($user_prompt);
+                // drop ephemeral summarizer session so long-running worker
+                // processes don't accumulate dead compact-sessions
+                $sid = $summarizer->getSessionId();
+                if ($sid !== null) {
+                    unset(self::$sessions[$sid]);
+                }
+                if (is_array($result) && ($result['success'] ?? false) === true) {
+                    $text = is_string($result['response'] ?? null) ? trim($result['response']) : '';
+                    if ($text !== '') {
+                        $new_summary = $text;
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->log('⚠️ auto_compact summarizer error: ' . $e->getMessage());
+        }
+
+        // ---- apply result to session --------------------------------------
+        if ($new_summary === null) {
+            // summarizer failed — drop middle without summary rather than
+            // blocking the user. logged above so we can debug later.
+            $this->log('⚠️ auto_compact: summarizer returned empty, dropping middle without summary');
+            self::$sessions[$this->session_id] = array_merge($head, $tail);
+            return;
+        }
+        $this->auto_compact_summary = $new_summary;
+        if ($this->auto_compact_cache !== null) {
+            @file_put_contents($this->auto_compact_cache, $new_summary);
+        }
+        $summary_banner =
+            "[Zusammenfassung des bisherigen Verlaufs — die zwischen den initialen Instruktionen und den letzten Turns liegenden Nachrichten wurden komprimiert]\n\n" .
+            $new_summary;
+        $summary_message = $this->bringPromptInFormat($summary_banner);
+        self::$sessions[$this->session_id] = array_merge($head, [$summary_message], $tail);
     }
 
     protected function runLocalToolLoop(array $return): array
