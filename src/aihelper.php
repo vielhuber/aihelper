@@ -650,9 +650,9 @@ abstract class aihelper
     public function autoCompactSession(): void
     {
         // ---- tunables (inlined by design — callers only flip auto_compact) -
-        $threshold = 0.7; // trigger when tokens exceed this fraction of ctx
+        $threshold = 0.5; // trigger when tokens exceed this fraction of ctx
         $keep_head = 5; // first N messages (prepended prompts) stay verbatim
-        $keep_tail = 4; // last N messages stay verbatim (recent exchange)
+        $keep_tail = 3; // last N messages stay verbatim (recent exchange)
         $chars_per_token = 4; // rough char→token estimator (ok for threshold work)
 
         // ---- guards --------------------------------------------------------
@@ -1047,6 +1047,10 @@ abstract class aihelper
             // tool-loop follow-ups — so the simple "only retry if failed"
             // condition is sufficient without the first-attempt guard that
             // ask() needs.
+            // also re-run auto-compact here: tool results can balloon the
+            // session beyond the model's context length between iterations,
+            // and ask()'s single up-front call cannot foresee that.
+            $this->autoCompactSession();
             $return['success'] = false;
             $max_tries = $this->max_tries;
             while ($return['success'] === false && $max_tries > 0) {
@@ -5588,7 +5592,11 @@ class ai_llamacpp extends ai_openrouter
         ) {
             foreach ($response->result->data as $models__value) {
                 if (__::x($models__value?->id ?? null)) {
-                    $context_length = (int) ($models__value->meta->n_ctx_train ?? 32768);
+                    // n_ctx_train is the model's training ctx; at runtime
+                    // llama.cpp divides the deployed n_ctx across n_parallel
+                    // slots, so per-request budget is n_ctx/n_slots. halve as
+                    // a conservative fallback when slot info is not exposed.
+                    $context_length = (int) (((int) ($models__value->meta->n_ctx_train ?? 32768)) / 2);
                     $name = $models__value->id;
                     // strip split-shard suffix: "Model-0001-of-0004.gguf" → "Model"
                     $name = preg_replace('/-\d{1,10}-of-\d{1,10}(\.gguf)$/i', '', $name);
@@ -5695,7 +5703,11 @@ class ai_lmstudio extends ai_openai
         ) {
             foreach ($response->result->data as $models__value) {
                 if (__::x($models__value?->id ?? null)) {
-                    $context_length = (int) ($models__value->meta->n_ctx_train ?? 32768);
+                    // n_ctx_train is the model's training ctx; at runtime
+                    // llama.cpp divides the deployed n_ctx across n_parallel
+                    // slots, so per-request budget is n_ctx/n_slots. halve as
+                    // a conservative fallback when slot info is not exposed.
+                    $context_length = (int) (((int) ($models__value->meta->n_ctx_train ?? 32768)) / 2);
                     $models[] = [
                         'name' => $models__value->id,
                         'context_length' => $context_length,
