@@ -612,6 +612,15 @@ abstract class aihelper
             $this->log($return, 'return');
             $max_tries--;
         }
+        $this->log(
+            sprintf(
+                'success=%s call_type=%s map_count=%d',
+                var_export($return['success'] ?? null, true),
+                (string) ($this->mcp_servers_call_type ?? 'null'),
+                count($this->mcp_servers_tools_map ?? [])
+            ),
+            'pre-tool-loop'
+        );
         if (
             $return['success'] === true &&
             $this->mcp_servers_call_type === 'local' &&
@@ -650,9 +659,13 @@ abstract class aihelper
     public function autoCompactSession(): void
     {
         // ---- tunables (inlined by design — callers only flip auto_compact) -
-        $threshold = 0.5; // trigger when tokens exceed this fraction of ctx
-        $keep_head = 5; // first N messages (prepended prompts) stay verbatim
-        $keep_tail = 3; // last N messages stay verbatim (recent exchange)
+        $threshold = 0.7; // trigger when tokens exceed this fraction of ctx
+        $keep_head = 10; // first N messages (prepended prompts + early tool-use
+                        // demonstrations) stay verbatim — important so the
+                        // model retains a clear example of the structured
+                        // tool_calls format and does not regress to emitting
+                        // tool_calls as plain-text JSON after compaction
+        $keep_tail = 4; // last N messages stay verbatim (recent exchange)
         $chars_per_token = 4; // rough char→token estimator (ok for threshold work)
 
         // ---- guards --------------------------------------------------------
