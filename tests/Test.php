@@ -186,8 +186,8 @@ class Test extends \PHPUnit\Framework\TestCase
         // ~90k tokens ≈ ~360k chars. use a compact mixture of roles.
         $bloat = str_repeat('Dies ist ein langer Gesprächsverlauf mit vielen Details. ', 400);
         $history = [];
-        // head: 5 prepended system-like prompts
-        for ($i = 0; $i < 5; $i++) {
+        // head: 10 prepended system-like prompts (matches autoCompactSession's keep_head)
+        for ($i = 0; $i < 10; $i++) {
             $history[] = ['role' => 'user', 'content' => '# SKILL ' . $i . "\n\nInstruktionen für den Assistenten."];
         }
         // middle: lots of back-and-forth that we want compacted
@@ -220,11 +220,11 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $session_after = $ai->getSessionContent();
         $this->assertLessThan($message_count_before, count($session_after), 'session should shrink after compaction');
-        // head (5) + summary (1) + tail (4) == 10
-        $this->assertSame(10, count($session_after), 'head(5) + summary(1) + tail(4) = 10 expected');
+        // head (10) + summary (1) + tail (4) == 15
+        $this->assertSame(15, count($session_after), 'head(10) + summary(1) + tail(4) = 15 expected');
 
         // head is preserved verbatim
-        for ($i = 0; $i < 5; $i++) {
+        for ($i = 0; $i < 10; $i++) {
             $this->assertSame(
                 '# SKILL ' . $i . "\n\nInstruktionen für den Assistenten.",
                 $session_after[$i]['content']
@@ -237,11 +237,11 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertStringContainsString($tail_marker_user, $tail_after[2]['content']);
         $this->assertStringContainsString($tail_marker_asst, $tail_after[3]['content']);
 
-        // summary message sits between head and tail, carries the banner text.
-        // content shape differs per provider (ai_test → ai_anthropic returns
-        // content as an array of blocks, not a plain string) — serialize for
-        // a shape-agnostic substring check.
-        $summary_msg = $session_after[5];
+        // summary message sits between head and tail (index = keep_head),
+        // carries the banner text. content shape differs per provider
+        // (ai_test → ai_anthropic returns content as an array of blocks, not a
+        // plain string) — serialize for a shape-agnostic substring check.
+        $summary_msg = $session_after[10];
         $this->assertArrayHasKey('content', $summary_msg);
         $this->assertStringContainsString(
             'Zusammenfassung des bisherigen Verlaufs',
