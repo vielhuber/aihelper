@@ -3542,6 +3542,46 @@ class ai_openai extends aihelper
             'test' => false
         ],
         [
+            'name' => 'gpt-5.5',
+            'context_length' => 1050000,
+            'max_output_tokens' => 128000,
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.00003],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.5-2026-04-23',
+            'context_length' => 1050000,
+            'max_output_tokens' => 128000,
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.00003],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.5-pro',
+            'context_length' => 1050000,
+            'max_output_tokens' => 128000,
+            'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00018],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-5.5-pro-2026-04-23',
+            'context_length' => 1050000,
+            'max_output_tokens' => 128000,
+            'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00018],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
             'name' => 'o1',
             'context_length' => 200000,
             'max_output_tokens' => 65536,
@@ -5131,8 +5171,8 @@ class ai_deepseek extends ai_anthropic
             'costs' => ['input' => 0.00000028, 'input_cached' => 0.000000028, 'output' => 0.00000042],
             'supports_temperature' => true,
             'supports_tools' => false,
-            'default' => true,
-            'test' => true
+            'default' => false,
+            'test' => false
         ],
         [
             'name' => 'deepseek-reasoner',
@@ -5141,6 +5181,26 @@ class ai_deepseek extends ai_anthropic
             'costs' => ['input' => 0.00000028, 'input_cached' => 0.000000028, 'output' => 0.00000042],
             'supports_temperature' => true,
             'supports_tools' => false,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'deepseek-v4-flash',
+            'context_length' => 1000000,
+            'max_output_tokens' => 64000,
+            'costs' => ['input' => 0.00000004, 'input_cached' => 0.000000004, 'output' => 0.0000001],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => true,
+            'test' => true
+        ],
+        [
+            'name' => 'deepseek-v4-pro',
+            'context_length' => 1000000,
+            'max_output_tokens' => 64000,
+            'costs' => ['input' => 0.00000027, 'input_cached' => 0.000000027, 'output' => 0.00000042],
+            'supports_temperature' => true,
+            'supports_tools' => true,
             'default' => false,
             'test' => false
         ]
