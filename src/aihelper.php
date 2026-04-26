@@ -5165,26 +5165,6 @@ class ai_deepseek extends ai_anthropic
 
     public array $models = [
         [
-            'name' => 'deepseek-chat',
-            'context_length' => 65536,
-            'max_output_tokens' => 8000,
-            'costs' => ['input' => 0.00000028, 'input_cached' => 0.000000028, 'output' => 0.00000042],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'deepseek-reasoner',
-            'context_length' => 65536,
-            'max_output_tokens' => 64000,
-            'costs' => ['input' => 0.00000028, 'input_cached' => 0.000000028, 'output' => 0.00000042],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'deepseek-v4-flash',
             'context_length' => 1000000,
             'max_output_tokens' => 64000,
