@@ -1589,6 +1589,13 @@ abstract class aihelper
                 $args['chat_template_kwargs'] = ($args['chat_template_kwargs'] ?? []) + [
                     'enable_thinking' => $enable_thinking
                 ];
+                // soft hint to keep the <think> block bounded — Qwen3.x's chat
+                // template renders this into a system-level instruction (not a
+                // hard server-side cap), so the model self-conditions rather
+                // than getting truncated mid-thought
+                if ($enable_thinking === true) {
+                    $args['chat_template_kwargs'] += ['thinking_budget' => 2000];
+                }
             }
         } elseif (str_contains($model_name, 'qwen3')) {
             $args += ['top_p' => 0.8, 'top_k' => 20];
@@ -1698,8 +1705,14 @@ abstract class aihelper
 
     protected function stripThinkingBlocks(string $text): string
     {
-        // remove <think>...</think> blocks produced by reasoning models (e.g. QwQ)
-        return trim(preg_replace('/<think>.*?<\/think>\s*/s', '', $text));
+        // remove <think>...</think> blocks produced by reasoning models (e.g. QwQ).
+        // also strip orphan closing </think> tags — llama-server occasionally
+        // misclassifies the closing tag as content when the think block is
+        // empty (post-tool-turn after a tool_call), leaving '</think>...' at
+        // the start of the assistant content.
+        $text = preg_replace('/<think>.*?<\/think>\s*/s', '', $text);
+        $text = preg_replace('/^\s*<\/think>\s*/', '', $text);
+        return trim($text);
     }
 
     /**
