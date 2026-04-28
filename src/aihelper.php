@@ -1600,20 +1600,39 @@ abstract class aihelper
         } elseif (str_contains($model_name, 'qwen3')) {
             $args += ['top_p' => 0.8, 'top_k' => 20];
         } elseif (str_contains($model_name, 'minimax') && str_contains($model_name, 'm2')) {
-            // Official MiniMax M2.7 recommendation (from the HuggingFace model card
-            // at MiniMaxAI/MiniMax-M2.7 and the unsloth/MiniMax-M2.7-GGUF README):
-            // temperature=1.0, top_p=0.95, top_k=40 — and explicitly NO penalty
-            // parameters. The model was tuned to work without presence_penalty,
-            // frequency_penalty or repeat_penalty; adding them disturbs the token
-            // distribution and (with llama.cpp at Q4_K_XL) causes the model to
-            // emit EOS prematurely after just the intro text, before any tool
-            // calls. If repetition loops in the <think> stream re-appear, prefer a
-            // small frequency_penalty (~0.3) over a large presence_penalty.
+            // Official MiniMax M2.7 recommendation (https://unsloth.ai/docs/models/minimax-m27
+            // and the MiniMaxAI/MiniMax-M2.7 HuggingFace card):
+            // temperature=1.0, top_p=0.95, top_k=40, min_p=0.01 — and explicitly
+            // NO penalty parameters. The model was tuned to work without
+            // presence_penalty, frequency_penalty or repeat_penalty; adding them
+            // disturbs the token distribution and (with llama.cpp at Q4_K_XL)
+            // causes the model to emit EOS prematurely after just the intro
+            // text, before any tool calls. If repetition loops in the <think>
+            // stream re-appear, prefer a small frequency_penalty (~0.3) over a
+            // large presence_penalty.
             $args['temperature'] = 1.0;
             $args += [
                 'top_p' => 0.95,
-                'top_k' => 40
+                'top_k' => 40,
+                'min_p' => 0.01
             ];
+        } elseif (preg_match('/gemma-?(\d+)/', $model_name, $_gm) === 1 && (int) $_gm[1] >= 4) {
+            // Official Gemma 4 recommendation (https://unsloth.ai/docs/models/gemma-4):
+            // temperature=1.0, top_p=0.95, top_k=64. No penalty parameters
+            // documented. enable_thinking is controlled via chat_template_kwargs
+            // server-side (set in runpod.sh per-model startup).
+            $args['temperature'] = 1.0;
+            $args += [
+                'top_p' => 0.95,
+                'top_k' => 64
+            ];
+            // Allow caller to override the server-default enable_thinking flag
+            // (mirrors the Qwen3.5+ branch above for consistency).
+            if ($enable_thinking !== null) {
+                $args['chat_template_kwargs'] = ($args['chat_template_kwargs'] ?? []) + [
+                    'enable_thinking' => $enable_thinking
+                ];
+            }
         } elseif (str_contains($model_name, 'gpt-oss') && $uses_tools) {
             $args += ['top_p' => 0.9, 'top_k' => 20];
         }
