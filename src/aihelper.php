@@ -1633,6 +1633,39 @@ abstract class aihelper
                     'enable_thinking' => $enable_thinking
                 ];
             }
+        } elseif (preg_match('/glm-?(\d+)\.?(\d+)?/', $model_name, $_glm) === 1 && (int) $_glm[1] >= 5) {
+            // Official GLM-5.1 recommendation (https://unsloth.ai/docs/models/glm-5.1):
+            //   Default / Tool-Calling: temperature=1.0, top_p=0.95
+            //   Terminal Bench:         temperature=0.7, top_p=1.0
+            // No top_k / min_p / penalty parameters documented. We default to
+            // the tool-calling profile since Charly's master is exclusively a
+            // tool orchestrator. enable_thinking via chat_template_kwargs.
+            $args['temperature'] = 1.0;
+            $args += [
+                'top_p' => 0.95
+            ];
+            if ($enable_thinking !== null) {
+                $args['chat_template_kwargs'] = ($args['chat_template_kwargs'] ?? []) + [
+                    'enable_thinking' => $enable_thinking
+                ];
+            }
+        } elseif (preg_match('/kimi-?k(\d+)\.?(\d+)?/', $model_name, $_kim) === 1) {
+            // Official Kimi K2.6 recommendation (https://unsloth.ai/docs/models/kimi-k2.6):
+            //   Thinking Mode (default): temperature=1.0, top_p=0.95
+            //   Instant Mode (non-think): temperature=0.6, top_p=0.95
+            // Hybrid thinking model — enable_thinking via chat_template_kwargs.
+            // Treats Kimi-Dev variants as legacy (they don't match this regex,
+            // they match `kimi-dev` not `kimi-k…`).
+            $thinking_effective = $enable_thinking !== false;
+            $args['temperature'] = $thinking_effective === true ? 1.0 : 0.6;
+            $args += [
+                'top_p' => 0.95
+            ];
+            if ($enable_thinking !== null) {
+                $args['chat_template_kwargs'] = ($args['chat_template_kwargs'] ?? []) + [
+                    'enable_thinking' => $enable_thinking
+                ];
+            }
         } elseif (str_contains($model_name, 'gpt-oss') && $uses_tools) {
             $args += ['top_p' => 0.9, 'top_k' => 20];
         }
