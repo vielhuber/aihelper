@@ -1904,7 +1904,15 @@ abstract class aihelper
             }
         }
         if (str_contains($model_name, 'glm')) {
-            $args['max_output_tokens'] = 1500;
+            if ($uses_tools) {
+                $args += ['max_output_tokens' => 12000, 'parallel_tool_calls' => false, 'max_tool_calls' => 30];
+            } elseif ($profile === 'creative') {
+                $args += ['max_output_tokens' => 2500];
+            } elseif ($profile === 'reasoning') {
+                $args += ['max_output_tokens' => 4000];
+            } else {
+                $args += ['max_output_tokens' => 8000];
+            }
         }
 
         // for chat completions (llamacpp/openrouter): map max_output_tokens to max_tokens
