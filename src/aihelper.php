@@ -659,14 +659,24 @@ abstract class aihelper
     public function autoCompactSession(): void
     {
         // ---- tunables (inlined by design — callers only flip auto_compact) -
-        $threshold = 0.7; // trigger when tokens exceed this fraction of ctx
+        $threshold = 0.65; // trigger when tokens exceed this fraction of ctx —
+                          // earlier than 0.7 to leave headroom for the
+                          // summarizer call itself (system + transcript prompt)
+                          // and the next assistant turn that follows compaction
         $keep_head = 10; // first N messages (prepended prompts + early tool-use
                         // demonstrations) stay verbatim — important so the
                         // model retains a clear example of the structured
                         // tool_calls format and does not regress to emitting
                         // tool_calls as plain-text JSON after compaction
-        $keep_tail = 4; // last N messages stay verbatim (recent exchange)
-        $chars_per_token = 4; // rough char→token estimator (ok for threshold work)
+        $keep_tail = 6; // last N messages stay verbatim (recent exchange).
+                        // sized to fit at least two complete tool roundtrips
+                        // (user → assistant.tool_calls → tool → assistant.text)
+                        // so a recent tool result never gets summarised away
+                        // before the assistant answered on top of it
+        $chars_per_token = 3; // char→token estimator — tool-heavy sessions are
+                             // dominated by JSON (args, results) where 1 token
+                             // ≈ 3 chars; the prior 4 underestimated usage and
+                             // delayed compaction past safe headroom
 
         // ---- guards --------------------------------------------------------
         if ($this->auto_compact !== true) {
