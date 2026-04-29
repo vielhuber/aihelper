@@ -702,9 +702,52 @@ abstract class aihelper
         );
 
         // ---- split head / middle / tail -----------------------------------
-        $head = array_slice($session, 0, $keep_head);
-        $middle = array_slice($session, $keep_head, count($session) - $keep_head - $keep_tail);
-        $tail = array_slice($session, -$keep_tail);
+        // Tool-call boundary safety: a `tool` message is only valid when its
+        // immediately preceding entry is an `assistant` with `tool_calls`.
+        // Strict Jinja templates (e.g. MiniMax-M2.7) raise a Jinja exception
+        // when this invariant is violated. Naive slicing at fixed offsets can
+        // strand a tool message at the start of `tail` (its parent assistant
+        // got compacted into the summary) or at the end of `head` (its
+        // assistant follows in middle). Walk both boundaries until they land
+        // on a safe role.
+        $head_end = $keep_head;
+        $tail_start = count($session) - $keep_tail;
+
+        // grow head forward so it doesn't END with an assistant whose tool_calls
+        // result lives in middle — keep the assistant + tool result paired.
+        // also: if head currently ends WITH a tool message, that's already
+        // matched on its left (preceding assistant tool_calls in head) and ok.
+        while ($head_end < $tail_start) {
+            $last = is_array($session[$head_end - 1] ?? null) ? $session[$head_end - 1] : (array) ($session[$head_end - 1] ?? []);
+            $next = is_array($session[$head_end] ?? null) ? $session[$head_end] : (array) ($session[$head_end] ?? []);
+            $last_has_tool_calls = ($last['role'] ?? '') === 'assistant' && !empty($last['tool_calls']);
+            $next_is_tool = ($next['role'] ?? '') === 'tool';
+            if ($last_has_tool_calls && $next_is_tool) {
+                $head_end++;
+                continue;
+            }
+            break;
+        }
+
+        // grow tail backward so it doesn't START with a `tool` message — the
+        // matching assistant tool_calls would be in the summary and template
+        // would orphan it. shift left until tail starts on user/assistant.
+        while ($tail_start > $head_end) {
+            $first = is_array($session[$tail_start] ?? null) ? $session[$tail_start] : (array) ($session[$tail_start] ?? []);
+            if (($first['role'] ?? '') === 'tool') {
+                $tail_start--;
+                continue;
+            }
+            // also: if tail starts with an assistant that has only `content`
+            // referring to a prior tool result (e.g. post-tool-turn), that's
+            // ok — assistant text after a tool result is a legal end-of-turn.
+            // we only correct the tool-as-first case above.
+            break;
+        }
+
+        $head = array_slice($session, 0, $head_end);
+        $middle = array_slice($session, $head_end, $tail_start - $head_end);
+        $tail = array_slice($session, $tail_start);
 
         // ---- flatten middle to plain-text transcript ----------------------
         // recursive extractor (closure so we don't need a named helper) —
@@ -1633,18 +1676,39 @@ abstract class aihelper
                     'enable_thinking' => $enable_thinking
                 ];
             }
-        } elseif (preg_match('/glm-?(\d+)\.?(\d+)?/', $model_name, $_glm) === 1 && (int) $_glm[1] >= 5) {
-            // Official GLM-5.1 recommendation (https://unsloth.ai/docs/models/glm-5.1):
-            //   Default / Tool-Calling: temperature=1.0, top_p=0.95
-            //   Terminal Bench:         temperature=0.7, top_p=1.0
-            // No top_k / min_p / penalty parameters documented. We default to
-            // the tool-calling profile since Charly's master is exclusively a
-            // tool orchestrator. enable_thinking via chat_template_kwargs.
-            $args['temperature'] = 1.0;
-            $args += [
-                'top_p' => 0.95
-            ];
-            if ($enable_thinking !== null) {
+        } elseif (
+            preg_match('/glm-?(\d+)\.?(\d+)?/', $model_name, $_glm) === 1 &&
+            ((int) $_glm[1] >= 5 || ((int) $_glm[1] === 4 && (int) ($_glm[2] ?? 0) >= 7))
+        ) {
+            // Covers GLM-4.7 / GLM-4.7-Flash and GLM-5.x / GLM-5.1.
+            // Officially documented sampler profiles:
+            //   General      : temperature=1.0, top_p=0.95, min_p=0.01    (https://unsloth.ai/docs/models/glm-5.1)
+            //   Tool-Calling : temperature=0.7, top_p=1.0,  min_p=0.01    (https://unsloth.ai/docs/models/tutorials/glm-4.7-flash)
+            // repeat_penalty must be disabled (=1.0) per the GLM-4.7-Flash tutorial.
+            // Charly's master and any sub-chat that issues MCP tools both run as
+            // tool-calling — switch profile based on $uses_tools so the same
+            // handler covers both paths cleanly.
+            // hybrid-thinking enable_thinking is only valid for GLM ≥ 5; the
+            // GLM-4.7-Flash tutorial does not document a thinking flag, so we
+            // only emit chat_template_kwargs when the caller explicitly requests
+            // an override AND we're on a hybrid-thinking model line.
+            if ($uses_tools === true) {
+                $args['temperature'] = 0.7;
+                $args += [
+                    'top_p' => 1.0,
+                    'min_p' => 0.01,
+                    'repeat_penalty' => 1.0
+                ];
+            } else {
+                $args['temperature'] = 1.0;
+                $args += [
+                    'top_p' => 0.95,
+                    'min_p' => 0.01,
+                    'repeat_penalty' => 1.0
+                ];
+            }
+            $glm_major = (int) $_glm[1];
+            if ($enable_thinking !== null && $glm_major >= 5) {
                 $args['chat_template_kwargs'] = ($args['chat_template_kwargs'] ?? []) + [
                     'enable_thinking' => $enable_thinking
                 ];
