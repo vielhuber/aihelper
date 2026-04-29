@@ -574,10 +574,11 @@ abstract class aihelper
         if (__::x($history)) {
             self::$sessions[$this->session_id] = $history;
         }
-        // auto-compact setup. persistent running summary lives as a plain text
-        // file in the system temp dir, keyed by session_id so that subsequent
-        // calls with the same session_id reuse the same summary (which in turn
-        // keeps server-side kv-cache prefixes stable).
+        // auto-compact setup. persistent compact state (running summary +
+        // compacted session snapshot as JSON) lives in the system temp dir,
+        // keyed by session_id so that subsequent calls with the same
+        // session_id reuse the cached state. autoCompactSession() handles
+        // both reading the cache (rehydration) and writing it (persistence).
         if ($auto_compact === true) {
             $this->auto_compact = true;
             $cacheDir = sys_get_temp_dir() . '/aihelper-cache';
@@ -586,9 +587,6 @@ abstract class aihelper
             }
             $this->auto_compact_cache =
                 $cacheDir . '/' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $this->session_id) . '.txt';
-            if (is_file($this->auto_compact_cache)) {
-                $this->auto_compact_summary = file_get_contents($this->auto_compact_cache) ?: null;
-            }
         }
     }
 
@@ -686,7 +684,83 @@ abstract class aihelper
             return;
         }
         $session = self::$sessions[$this->session_id];
-        if (!is_array($session) || count($session) < $keep_head + $keep_tail + 1) {
+        if (!is_array($session)) {
+            return;
+        }
+
+        // ---- rehydrate from disk snapshot (if present) --------------------
+        // a previous process compacted this session and wrote a JSON snapshot
+        // (head + summary + tail). on a fresh process the caller passes the
+        // *full* history again — we replace its already-compacted prefix with
+        // the snapshot, keeping only the messages added after the snapshot
+        // anchor. this avoids re-running a (slow, expensive) compact on every
+        // worker pickup. only runs once per process — auto_compact_summary !==
+        // null after rehydration acts as the run-once flag.
+        if ($this->auto_compact_summary === null && $this->auto_compact_cache !== null && is_file($this->auto_compact_cache)) {
+            $cache_raw = @file_get_contents($this->auto_compact_cache);
+            if (is_string($cache_raw) && $cache_raw !== '') {
+                $cache_data = json_decode($cache_raw, true);
+                if (is_array($cache_data) && isset($cache_data['summary']) && isset($cache_data['session']) && is_array($cache_data['session'])) {
+                    // new JSON snapshot format
+                    $snapshot = $cache_data['session'];
+                    if (count($snapshot) > 0) {
+                        // shape-agnostic message hash so we can locate the
+                        // snapshot's last message inside the freshly-loaded
+                        // history. role + serialised content/tool_calls/parts
+                        // is unique enough across providers (openai/anthropic
+                        // /google) without depending on db ids.
+                        $messageHash = function (array $m): string {
+                            return md5(
+                                ($m['role'] ?? '') . '|' .
+                                json_encode($m['content'] ?? null) . '|' .
+                                json_encode($m['tool_calls'] ?? null) . '|' .
+                                json_encode($m['parts'] ?? null) . '|' .
+                                json_encode($m['tool_call_id'] ?? null)
+                            );
+                        };
+                        $anchor = is_array($snapshot[count($snapshot) - 1])
+                            ? $snapshot[count($snapshot) - 1]
+                            : (array) $snapshot[count($snapshot) - 1];
+                        $anchor_role = $anchor['role'] ?? '';
+                        $anchor_hash = $messageHash($anchor);
+                        // walk the freshly-loaded history; latest match wins
+                        // (defensive against duplicate "OK" assistants etc.)
+                        $anchor_idx = null;
+                        foreach ($session as $i => $msg) {
+                            $m = is_array($msg) ? $msg : (array) $msg;
+                            if (($m['role'] ?? '') === $anchor_role && $messageHash($m) === $anchor_hash) {
+                                $anchor_idx = $i;
+                            }
+                        }
+                        if ($anchor_idx !== null) {
+                            // splice: snapshot replaces everything up to (and
+                            // including) the anchor; everything after the
+                            // anchor in the fresh history are messages that
+                            // arrived since the last compact and must be kept.
+                            $tail_after_anchor = array_slice($session, $anchor_idx + 1);
+                            self::$sessions[$this->session_id] = array_merge($snapshot, $tail_after_anchor);
+                            $session = self::$sessions[$this->session_id];
+                            $this->auto_compact_summary = (string) $cache_data['summary'];
+                            $this->log(
+                                '🔄 auto_compact: rehydrated snapshot — ' .
+                                    count($snapshot) . ' compacted msgs + ' .
+                                    count($tail_after_anchor) . ' new'
+                            );
+                        }
+                        // anchor not found → snapshot is stale (db edited,
+                        // session_id reused, etc). fall through; the regular
+                        // compact path below will re-establish a fresh snapshot.
+                    }
+                } else {
+                    // legacy plain-text format (pre-snapshot) — only the
+                    // running summary, no session payload. keep it so the
+                    // summarizer can continue/extend it on the next compact.
+                    $this->auto_compact_summary = $cache_raw;
+                }
+            }
+        }
+
+        if (count($session) < $keep_head + $keep_tail + 1) {
             return; // nothing to compact yet
         }
 
@@ -881,14 +955,28 @@ abstract class aihelper
             return;
         }
         $this->auto_compact_summary = $new_summary;
-        if ($this->auto_compact_cache !== null) {
-            @file_put_contents($this->auto_compact_cache, $new_summary);
-        }
         $summary_banner =
             "[Zusammenfassung des bisherigen Verlaufs — die zwischen den initialen Instruktionen und den letzten Turns liegenden Nachrichten wurden komprimiert]\n\n" .
             $new_summary;
         $summary_message = $this->bringPromptInFormat($summary_banner);
         self::$sessions[$this->session_id] = array_merge($head, [$summary_message], $tail);
+        // persist a full JSON snapshot (summary + compacted session). on the
+        // next process boot the rehydration block at the top of this function
+        // splices this snapshot in front of any new messages from the freshly
+        // loaded history, so the (slow) compact pass runs only when the
+        // threshold is actually re-breached — not on every worker pickup.
+        if ($this->auto_compact_cache !== null) {
+            @file_put_contents(
+                $this->auto_compact_cache,
+                json_encode(
+                    [
+                        'summary' => $new_summary,
+                        'session' => self::$sessions[$this->session_id]
+                    ],
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                )
+            );
+        }
     }
 
     protected function runLocalToolLoop(array $return): array
