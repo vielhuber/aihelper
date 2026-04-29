@@ -195,13 +195,15 @@ class Test extends \PHPUnit\Framework\TestCase
             $history[] = ['role' => 'user', 'content' => 'Frage ' . $i . ': ' . $bloat];
             $history[] = ['role' => 'assistant', 'content' => 'Antwort ' . $i . ': ' . $bloat];
         }
-        // tail: 4 recent messages that must stay verbatim
+        // tail: 6 recent messages that must stay verbatim (matches autoCompactSession's keep_tail)
         $tail_marker_user = 'TAIL_USER_MARKER_' . mt_rand(1000, 9999);
         $tail_marker_asst = 'TAIL_ASSISTANT_MARKER_' . mt_rand(1000, 9999);
         $history[] = ['role' => 'user', 'content' => $tail_marker_user . ' frage 1'];
         $history[] = ['role' => 'assistant', 'content' => $tail_marker_asst . ' antwort 1'];
         $history[] = ['role' => 'user', 'content' => $tail_marker_user . ' frage 2'];
         $history[] = ['role' => 'assistant', 'content' => $tail_marker_asst . ' antwort 2'];
+        $history[] = ['role' => 'user', 'content' => $tail_marker_user . ' frage 3'];
+        $history[] = ['role' => 'assistant', 'content' => $tail_marker_asst . ' antwort 3'];
 
         $message_count_before = count($history);
         $this->assertGreaterThan(9, $message_count_before);
@@ -220,8 +222,8 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $session_after = $ai->getSessionContent();
         $this->assertLessThan($message_count_before, count($session_after), 'session should shrink after compaction');
-        // head (10) + summary (1) + tail (4) == 15
-        $this->assertSame(15, count($session_after), 'head(10) + summary(1) + tail(4) = 15 expected');
+        // head (10) + summary (1) + tail (6) == 17
+        $this->assertSame(17, count($session_after), 'head(10) + summary(1) + tail(6) = 17 expected');
 
         // head is preserved verbatim
         for ($i = 0; $i < 10; $i++) {
@@ -230,12 +232,14 @@ class Test extends \PHPUnit\Framework\TestCase
                 $session_after[$i]['content']
             );
         }
-        // tail is preserved verbatim (last 4 messages unchanged)
-        $tail_after = array_slice($session_after, -4);
+        // tail is preserved verbatim (last 6 messages unchanged)
+        $tail_after = array_slice($session_after, -6);
         $this->assertStringContainsString($tail_marker_user, $tail_after[0]['content']);
         $this->assertStringContainsString($tail_marker_asst, $tail_after[1]['content']);
         $this->assertStringContainsString($tail_marker_user, $tail_after[2]['content']);
         $this->assertStringContainsString($tail_marker_asst, $tail_after[3]['content']);
+        $this->assertStringContainsString($tail_marker_user, $tail_after[4]['content']);
+        $this->assertStringContainsString($tail_marker_asst, $tail_after[5]['content']);
 
         // summary message sits between head and tail (index = keep_head),
         // carries the banner text. content shape differs per provider
