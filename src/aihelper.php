@@ -2113,9 +2113,40 @@ abstract class aihelper
 
     protected function parseJson(mixed $msg): mixed
     {
-        if (strpos(trim($msg), '```json') === 0 || __::string_is_json($msg)) {
-            $msg = json_decode(trim(rtrim(ltrim(ltrim(trim($msg), '```json'), '```'), '```')));
+        // Fast path: direct decode for clean JSON strings (no fences, no
+        // surrounding prose). Preserves the existing behavior for callers
+        // that genuinely return parseable JSON.
+        if (is_string($msg) && __::string_is_json(trim($msg))) {
+            return json_decode(trim($msg));
         }
+        // Code-fence path: many models (esp. claude-haiku-4-5 with extended
+        // thinking) wrap JSON like ```json\n{…}\n```\n\n**Begründung:** …
+        // The previous ltrim-based stripping was both incorrect (ltrim with a
+        // charlist treats the mask as a SET of characters, not a literal
+        // prefix) and brittle against trailing prose — json_decode would
+        // return null and parseJson would silently lose the verdict.
+        // Match the first ```json|``` … ``` block and decode its inner body
+        // instead, leaving the original string intact if the inner block
+        // itself fails to decode.
+        if (is_string($msg) && preg_match('/```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```/s', $msg, $m) === 1) {
+            $decoded = json_decode($m[1]);
+            if ($decoded !== null || strtolower(trim($m[1])) === 'null') {
+                return $decoded;
+            }
+        }
+        // Inline-JSON path: model emitted JSON without code fence but with
+        // surrounding prose ("My answer: {…}"). Extract the first balanced
+        // {…} or […] and try decoding it. PCRE recursion handles nested
+        // braces correctly.
+        if (is_string($msg) && preg_match('/\{(?:[^{}]|(?R))*\}|\[(?:[^\[\]]|(?R))*\]/', $msg, $m) === 1) {
+            $decoded = json_decode($m[0]);
+            if ($decoded !== null || strtolower(trim($m[0])) === 'null') {
+                return $decoded;
+            }
+        }
+        // Fallback: return the original message untouched so callers always
+        // see something meaningful (the previous implementation returned null
+        // on any decode failure, which silently dropped the response).
         return $msg;
     }
 
@@ -2411,15 +2442,13 @@ abstract class aihelper
 
                             // add new content block
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_start') {
-                                // if the new block is a thinking block AND it already
-                                // ships initial thinking content (Anthropic sometimes
-                                // includes the first chunk in content_block_start
-                                // rather than a follow-up content_block_delta), emit
-                                // it as a reasoning event right away so downstream
-                                // consumers don't lose the opening sentence.
                                 $initial_block_type = $parsed['content_block']['type'] ?? null;
                                 $initial_thinking = $parsed['content_block']['thinking'] ?? '';
-                                if ($initial_block_type === 'thinking' && is_string($initial_thinking) && $initial_thinking !== '') {
+                                if (
+                                    $initial_block_type === 'thinking' &&
+                                    is_string($initial_thinking) &&
+                                    $initial_thinking !== ''
+                                ) {
                                     echo "event: reasoning\n";
                                     echo 'data: ' .
                                         json_encode(
@@ -2513,15 +2542,9 @@ abstract class aihelper
                                     }
 
                                     // handle thinking delta
-                                    // Match the canonical Anthropic delta.type field
-                                    // first; fall back to checking the thinking key
-                                    // alone for tolerance with older response shapes.
-                                    // Without the type-check we'd false-positive on a
-                                    // hypothetical text_delta that happens to also
-                                    // carry a non-empty `thinking` field — keep the
-                                    // discrimination tight.
                                     $delta_type = $parsed['delta']['type'] ?? null;
-                                    $is_thinking_delta = $delta_type === 'thinking_delta' ||
+                                    $is_thinking_delta =
+                                        $delta_type === 'thinking_delta' ||
                                         ($delta_type === null && isset($parsed['delta']['thinking']));
                                     if ($is_thinking_delta && isset($parsed['delta']['thinking'])) {
                                         $thinking_chunk = (string) $parsed['delta']['thinking'];
@@ -5247,6 +5270,29 @@ class ai_google extends aihelper
         if (in_array($this->model, ['gemini-2.5-pro', 'gemini-2.5-flash'], true)) {
             $budget = $this->enable_thinking === false ? 0 : 1024;
             $args['generationConfig']['thinkingConfig'] = ['thinkingBudget' => $budget];
+        }
+        // Gemma 4 family (gemma-4-31b-it, gemma-4-26b-a4b-it, future variants):
+        //   - Official sampler recommendation (https://ai.google.dev/gemma/docs/core
+        //     and https://unsloth.ai/docs/models/gemma-4):
+        //     temperature=1.0, top_p=0.95, top_k=64, no penalty parameters.
+        //   - Temperature is forced to 1.0 even when the caller passed a lower
+        //     value (Gemma 4 was tuned for higher entropy; lower temps degrade
+        //     instruction-following per the model card).
+        //   - Thinking on Gemini-API-served Gemma 4 is controlled via
+        //     thinkingConfig.thinkingLevel ("low" | "medium" | "high"), NOT via
+        //     thinkingBudget which is gemini-2.5-only. Enable_thinking semantics:
+        //     null/true → high (we want thinking on for agentic workflows),
+        //     false → low (thinkingLevel cannot be turned fully off, but "low"
+        //     minimizes the budget).
+        if (preg_match('/^gemma-4-/', $this->model) === 1) {
+            if (!isset($args['generationConfig']) || !is_array($args['generationConfig'])) {
+                $args['generationConfig'] = [];
+            }
+            $args['generationConfig']['temperature'] = 1.0;
+            $args['generationConfig']['topP'] = 0.95;
+            $args['generationConfig']['topK'] = 64;
+            $thinking_level = $this->enable_thinking === false ? 'low' : 'high';
+            $args['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $thinking_level];
         }
 
         if (!empty($this->mcp_servers) && $this->mcp_servers_call_type === 'local') {
