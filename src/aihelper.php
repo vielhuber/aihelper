@@ -1978,6 +1978,23 @@ abstract class aihelper
                 $args += ['max_output_tokens' => 8000];
             }
         }
+        // Gemma 4+ (matches gemma-4-31b-it, gemma-4-26b-a4b-it, future versions)
+        // — output limits aligned with the Qwen / MiniMax / GLM agentic profile.
+        // 12000 tokens for tool-calling chains gives the model headroom for
+        // multi-step reasoning + tool_call args; parallel_tool_calls=false
+        // forces the dispatcher to emit one tool at a time which is what our
+        // master/sub-chat orchestration model assumes.
+        if (preg_match('/gemma-?(\d+)/', $model_name, $_gm) === 1 && (int) $_gm[1] >= 4) {
+            if ($uses_tools) {
+                $args += ['max_output_tokens' => 12000, 'parallel_tool_calls' => false, 'max_tool_calls' => 30];
+            } elseif ($profile === 'creative') {
+                $args += ['max_output_tokens' => 2500];
+            } elseif ($profile === 'reasoning') {
+                $args += ['max_output_tokens' => 4000];
+            } else {
+                $args += ['max_output_tokens' => 8000];
+            }
+        }
 
         // for chat completions (llamacpp/openrouter): map max_output_tokens to max_tokens
         if (isset($args['messages']) && isset($args['max_output_tokens']) && !isset($args['max_tokens'])) {
