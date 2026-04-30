@@ -658,23 +658,23 @@ abstract class aihelper
     {
         // ---- tunables (inlined by design — callers only flip auto_compact) -
         $threshold = 0.65; // trigger when tokens exceed this fraction of ctx —
-                          // earlier than 0.7 to leave headroom for the
-                          // summarizer call itself (system + transcript prompt)
-                          // and the next assistant turn that follows compaction
+        // earlier than 0.7 to leave headroom for the
+        // summarizer call itself (system + transcript prompt)
+        // and the next assistant turn that follows compaction
         $keep_head = 10; // first N messages (prepended prompts + early tool-use
-                        // demonstrations) stay verbatim — important so the
-                        // model retains a clear example of the structured
-                        // tool_calls format and does not regress to emitting
-                        // tool_calls as plain-text JSON after compaction
+        // demonstrations) stay verbatim — important so the
+        // model retains a clear example of the structured
+        // tool_calls format and does not regress to emitting
+        // tool_calls as plain-text JSON after compaction
         $keep_tail = 6; // last N messages stay verbatim (recent exchange).
-                        // sized to fit at least two complete tool roundtrips
-                        // (user → assistant.tool_calls → tool → assistant.text)
-                        // so a recent tool result never gets summarised away
-                        // before the assistant answered on top of it
+        // sized to fit at least two complete tool roundtrips
+        // (user → assistant.tool_calls → tool → assistant.text)
+        // so a recent tool result never gets summarised away
+        // before the assistant answered on top of it
         $chars_per_token = 3; // char→token estimator — tool-heavy sessions are
-                             // dominated by JSON (args, results) where 1 token
-                             // ≈ 3 chars; the prior 4 underestimated usage and
-                             // delayed compaction past safe headroom
+        // dominated by JSON (args, results) where 1 token
+        // ≈ 3 chars; the prior 4 underestimated usage and
+        // delayed compaction past safe headroom
 
         // ---- guards --------------------------------------------------------
         if ($this->auto_compact !== true) {
@@ -696,11 +696,20 @@ abstract class aihelper
         // anchor. this avoids re-running a (slow, expensive) compact on every
         // worker pickup. only runs once per process — auto_compact_summary !==
         // null after rehydration acts as the run-once flag.
-        if ($this->auto_compact_summary === null && $this->auto_compact_cache !== null && is_file($this->auto_compact_cache)) {
+        if (
+            $this->auto_compact_summary === null &&
+            $this->auto_compact_cache !== null &&
+            is_file($this->auto_compact_cache)
+        ) {
             $cache_raw = @file_get_contents($this->auto_compact_cache);
             if (is_string($cache_raw) && $cache_raw !== '') {
                 $cache_data = json_decode($cache_raw, true);
-                if (is_array($cache_data) && isset($cache_data['summary']) && isset($cache_data['session']) && is_array($cache_data['session'])) {
+                if (
+                    is_array($cache_data) &&
+                    isset($cache_data['summary']) &&
+                    isset($cache_data['session']) &&
+                    is_array($cache_data['session'])
+                ) {
                     // new JSON snapshot format
                     $snapshot = $cache_data['session'];
                     if (count($snapshot) > 0) {
@@ -711,11 +720,15 @@ abstract class aihelper
                         // /google) without depending on db ids.
                         $messageHash = function (array $m): string {
                             return md5(
-                                ($m['role'] ?? '') . '|' .
-                                json_encode($m['content'] ?? null) . '|' .
-                                json_encode($m['tool_calls'] ?? null) . '|' .
-                                json_encode($m['parts'] ?? null) . '|' .
-                                json_encode($m['tool_call_id'] ?? null)
+                                ($m['role'] ?? '') .
+                                    '|' .
+                                    json_encode($m['content'] ?? null) .
+                                    '|' .
+                                    json_encode($m['tool_calls'] ?? null) .
+                                    '|' .
+                                    json_encode($m['parts'] ?? null) .
+                                    '|' .
+                                    json_encode($m['tool_call_id'] ?? null)
                             );
                         };
                         $anchor = is_array($snapshot[count($snapshot) - 1])
@@ -743,8 +756,10 @@ abstract class aihelper
                             $this->auto_compact_summary = (string) $cache_data['summary'];
                             $this->log(
                                 '🔄 auto_compact: rehydrated snapshot — ' .
-                                    count($snapshot) . ' compacted msgs + ' .
-                                    count($tail_after_anchor) . ' new'
+                                    count($snapshot) .
+                                    ' compacted msgs + ' .
+                                    count($tail_after_anchor) .
+                                    ' new'
                             );
                         }
                         // anchor not found → snapshot is stale (db edited,
@@ -802,7 +817,9 @@ abstract class aihelper
         // also: if head currently ends WITH a tool message, that's already
         // matched on its left (preceding assistant tool_calls in head) and ok.
         while ($head_end < $tail_start) {
-            $last = is_array($session[$head_end - 1] ?? null) ? $session[$head_end - 1] : (array) ($session[$head_end - 1] ?? []);
+            $last = is_array($session[$head_end - 1] ?? null)
+                ? $session[$head_end - 1]
+                : (array) ($session[$head_end - 1] ?? []);
             $next = is_array($session[$head_end] ?? null) ? $session[$head_end] : (array) ($session[$head_end] ?? []);
             $last_has_tool_calls = ($last['role'] ?? '') === 'assistant' && !empty($last['tool_calls']);
             $next_is_tool = ($next['role'] ?? '') === 'tool';
@@ -817,7 +834,9 @@ abstract class aihelper
         // matching assistant tool_calls would be in the summary and template
         // would orphan it. shift left until tail starts on user/assistant.
         while ($tail_start > $head_end) {
-            $first = is_array($session[$tail_start] ?? null) ? $session[$tail_start] : (array) ($session[$tail_start] ?? []);
+            $first = is_array($session[$tail_start] ?? null)
+                ? $session[$tail_start]
+                : (array) ($session[$tail_start] ?? []);
             if (($first['role'] ?? '') === 'tool') {
                 $tail_start--;
                 continue;
@@ -2392,6 +2411,27 @@ abstract class aihelper
 
                             // add new content block
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_start') {
+                                // if the new block is a thinking block AND it already
+                                // ships initial thinking content (Anthropic sometimes
+                                // includes the first chunk in content_block_start
+                                // rather than a follow-up content_block_delta), emit
+                                // it as a reasoning event right away so downstream
+                                // consumers don't lose the opening sentence.
+                                $initial_block_type = $parsed['content_block']['type'] ?? null;
+                                $initial_thinking = $parsed['content_block']['thinking'] ?? '';
+                                if ($initial_block_type === 'thinking' && is_string($initial_thinking) && $initial_thinking !== '') {
+                                    echo "event: reasoning\n";
+                                    echo 'data: ' .
+                                        json_encode(
+                                            ['delta' => $initial_thinking],
+                                            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                                        ) .
+                                        "\n\n";
+                                    if (ob_get_level() > 0) {
+                                        ob_flush();
+                                    }
+                                    flush();
+                                }
                                 // if this is not the first block and previous was text, add separator
                                 if (
                                     $this->stream_current_block_type === 'text' &&
@@ -2473,18 +2513,36 @@ abstract class aihelper
                                     }
 
                                     // handle thinking delta
-                                    if (isset($parsed['delta']['thinking'])) {
-                                        if (!isset($block->thinking)) {
-                                            $block->thinking = '';
+                                    // Match the canonical Anthropic delta.type field
+                                    // first; fall back to checking the thinking key
+                                    // alone for tolerance with older response shapes.
+                                    // Without the type-check we'd false-positive on a
+                                    // hypothetical text_delta that happens to also
+                                    // carry a non-empty `thinking` field — keep the
+                                    // discrimination tight.
+                                    $delta_type = $parsed['delta']['type'] ?? null;
+                                    $is_thinking_delta = $delta_type === 'thinking_delta' ||
+                                        ($delta_type === null && isset($parsed['delta']['thinking']));
+                                    if ($is_thinking_delta && isset($parsed['delta']['thinking'])) {
+                                        $thinking_chunk = (string) $parsed['delta']['thinking'];
+                                        if ($thinking_chunk !== '') {
+                                            if (!isset($block->thinking)) {
+                                                $block->thinking = '';
+                                            }
+                                            $block->thinking .= $thinking_chunk;
+                                            echo "event: reasoning\n";
+                                            echo 'data: ' .
+                                                json_encode(
+                                                    ['delta' => $thinking_chunk],
+                                                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                                                ) .
+                                                "\n\n";
+                                            if (ob_get_level() > 0) {
+                                                ob_flush();
+                                            }
+                                            flush();
+                                            $this->stream_running = false;
                                         }
-                                        $block->thinking .= $parsed['delta']['thinking'];
-                                        echo "event: reasoning\n";
-                                        echo 'data: ' . json_encode(['delta' => $parsed['delta']['thinking']]) . "\n\n";
-                                        if (ob_get_level() > 0) {
-                                            ob_flush();
-                                        }
-                                        flush();
-                                        $this->stream_running = false;
                                     }
 
                                     // handle signature delta (required for multi-turn: thinking blocks must be resent with valid signature)
@@ -4808,14 +4866,10 @@ class ai_anthropic extends aihelper
     protected function modifyArgs(?array $args): ?array
     {
         $model_name = strtolower($this->model ?? '');
-        // Extended Thinking support: Sonnet + Opus across all generations,
-        // Haiku from 4.x onwards (Haiku 3.5 had no thinking; 4.x added it).
-        // Match `haiku-4`, `haiku-5`, … via regex so future generations are
-        // forward-compatible without code edits.
         $supports_thinking =
             str_contains($model_name, 'sonnet') ||
             str_contains($model_name, 'opus') ||
-            preg_match('/haiku-(\d+)/', $model_name, $_hm) === 1 && (int) $_hm[1] >= 4;
+            (preg_match('/haiku-(\d+)/', $model_name, $_hm) === 1 && (int) $_hm[1] >= 4);
         $adaptive_thinking_models = ['claude-opus-4-7'];
         $adaptive_thinking = in_array($model_name, $adaptive_thinking_models, true);
         // explicit enable_thinking=false overrides the default-on behavior for
