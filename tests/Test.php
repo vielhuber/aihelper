@@ -68,6 +68,10 @@ class Test extends \PHPUnit\Framework\TestCase
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
+            $this->test__ai_nvidia($stats, true);
+        }
+        for ($i = 1; $i <= $this->run_count; $i++) {
+            $this->log('run ' . $i . '/' . $this->run_count . '...');
             $this->test__ai_test($stats, true);
         }
         $this->log('stats (' . $this->run_count . ' runs):');
@@ -165,6 +169,15 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('lmstudio', $_SERVER['LLM_API_KEY'] ?? null, $_SERVER['LLM_URL'] ?? null, $stats);
+    }
+
+    function test__ai_nvidia(&$stats = [], $force = false)
+    {
+        if ($force === true) {
+            $this->log('test__ai_nvidia: disabled (NIM backend 502s)');
+            return;
+        }
+        $this->markTestSkipped('NVIDIA NIM excluded — backend instability (502 errors).');
     }
 
     function test__ai_test(&$stats = [], $force = false)
@@ -327,7 +340,8 @@ class Test extends \PHPUnit\Framework\TestCase
             'deepseek',
             'openrouter',
             'llamacpp',
-            'lmstudio'
+            'lmstudio',
+            'nvidia'
         ]);
         if ($supported === true) {
             $return = $ai->ping();
@@ -349,7 +363,8 @@ class Test extends \PHPUnit\Framework\TestCase
             'deepseek',
             'openrouter',
             'llamacpp',
-            'lmstudio'
+            'lmstudio',
+            'nvidia'
         ]);
         if ($supported === true) {
             $return = $ai->ask('Wer wurde 2018 Fußball-Weltmeister? Antworte bitte kurz.');
@@ -379,7 +394,8 @@ class Test extends \PHPUnit\Framework\TestCase
             'deepseek',
             'openrouter',
             'llamacpp',
-            'lmstudio'
+            'lmstudio',
+            'nvidia'
         ]);
         if ($supported === true) {
             $return = $ai->ask('Was habe ich vorher gefragt?');
@@ -411,7 +427,8 @@ class Test extends \PHPUnit\Framework\TestCase
             'deepseek',
             'openrouter',
             'llamacpp',
-            'lmstudio'
+            'lmstudio',
+            'nvidia'
         ]);
         if ($supported === true) {
             $return = $ai->ask('Welchen Satz hast Du exakt zuvor geschrieben?');
@@ -443,7 +460,8 @@ class Test extends \PHPUnit\Framework\TestCase
             'deepseek',
             'openrouter',
             'llamacpp',
-            'lmstudio'
+            'lmstudio',
+            'nvidia'
         ]);
         if ($supported === true) {
             $return = $ai->ask('Ich heiße David mit Vornamen. Bitte merk Dir das!');
@@ -484,7 +502,8 @@ class Test extends \PHPUnit\Framework\TestCase
             'deepseek',
             'openrouter',
             'llamacpp',
-            'lmstudio'
+            'lmstudio',
+            'nvidia'
         ]);
         if ($supported === true) {
             $ai = aihelper::create(
@@ -515,7 +534,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'openrouter']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'openrouter', 'nvidia']);
         if ($supported === true) {
             $return = $ai->ask('Was ist auf dem Bild zu sehen?', 'tests/assets/iptc_write.jpg');
 
@@ -539,7 +558,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'openrouter']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'openrouter', 'nvidia']);
         if ($supported === true) {
             $return = $ai->ask('Welches Bild habe ich im Gesprächsverlauf hochgeladen?');
 
@@ -563,7 +582,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'openrouter']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'openrouter', 'nvidia']);
         if ($supported === true) {
             $return = $ai->ask(
                 'Wie lautet die Kundennummer (Key: customer_nr)? Wann wurde der Brief verfasst (Key: date)? Von wem wurde der Brief verfasst (Key: author)? Bitte antworte nur im JSON-Format. Wenn Du unsicher bist, gib den wahrscheinlichsten Wert zurück. Wenn Du einen Wert gar nicht findest, gib einen leeren String zurück.',
@@ -594,7 +613,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'openrouter']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'openrouter', 'nvidia']);
         if ($supported === true) {
             $return = $ai->ask(
                 'Wie lautet die Kundennummer (Key: customer_nr)? Wie lautet die Zählernummer (Key: meter_number)? Welche Blume ist auf dem Bild zu sehen (Key: flower)? Bitte antworte nur im JSON-Format. Wenn Du unsicher bist, gib den wahrscheinlichsten Wert zurück. Wenn Du einen Wert gar nicht findest, gib einen leeren String zurück.',
@@ -637,7 +656,15 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['anthropic', 'openai', 'openrouter', 'llamacpp', 'lmstudio', 'test']);
+        $supported = in_array($provider, [
+            'anthropic',
+            'openai',
+            'openrouter',
+            'llamacpp',
+            'lmstudio',
+            'nvidia',
+            'test'
+        ]);
         if ($supported === true) {
             $ai_stream = aihelper::create(
                 provider: $provider,
@@ -667,7 +694,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['anthropic', 'openai', 'openrouter', 'llamacpp', 'lmstudio']);
+        $supported = in_array($provider, ['anthropic', 'openai', 'openrouter', 'llamacpp', 'lmstudio', 'nvidia']);
         if ($supported === true) {
             $ai_stream = aihelper::create(
                 provider: $provider,
@@ -1274,7 +1301,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $providers = aihelper::getProviders();
         $success = true;
         foreach ($providers as $providers__value) {
-            if (in_array($providers__value['name'], ['openrouter', 'llamacpp', 'lmstudio', 'test'])) {
+            if (in_array($providers__value['name'], ['openrouter', 'llamacpp', 'lmstudio', 'nvidia', 'test'])) {
                 continue;
             }
             $modelsApi = array_map(function ($m) {

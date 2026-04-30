@@ -206,6 +206,24 @@ abstract class aihelper
                 auto_compact: $auto_compact
             );
         }
+        if ($provider === 'nvidia') {
+            return new ai_nvidia(
+                model: $model,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream,
+                url: $url,
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact
+            );
+        }
         if ($provider === 'test') {
             return new ai_test(
                 model: $model,
@@ -240,6 +258,7 @@ abstract class aihelper
                 new ai_openrouter(),
                 new ai_llamacpp(),
                 new ai_lmstudio(),
+                new ai_nvidia(),
                 new ai_test()
             ]
             as $providers__value
@@ -1002,7 +1021,7 @@ abstract class aihelper
     {
         $is_anthropic = in_array($this->name, ['anthropic', 'xai', 'deepseek'], true);
         $is_google = $this->name === 'google';
-        $is_chat_completions = in_array($this->name, ['openrouter', 'llamacpp'], true);
+        $is_chat_completions = in_array($this->name, ['openrouter', 'llamacpp', 'nvidia'], true);
         $max_tool_rounds = 50;
         while ($max_tool_rounds > 0) {
             // extract pending tool calls from session
@@ -2915,7 +2934,7 @@ abstract class aihelper
             };
         }
 
-        if ($this->name === 'openrouter' || $this->name === 'llamacpp') {
+        if ($this->name === 'openrouter' || $this->name === 'llamacpp' || $this->name === 'nvidia') {
             // mimic non-stream result (chat completions format)
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -6170,6 +6189,76 @@ class ai_lmstudio extends ai_openai
     protected function modifyArgs(?array $args): ?array
     {
         return $this->modifyArgsLocal($args);
+    }
+}
+
+/* compatible with the openai api */
+class ai_nvidia extends ai_openrouter
+{
+    public ?string $provider = 'NVIDIA';
+
+    public ?string $title = 'NVIDIA';
+
+    public ?string $name = 'nvidia';
+
+    protected ?string $url = 'https://integrate.api.nvidia.com/v1';
+
+    public ?bool $support_mcp_remote = false;
+
+    public ?bool $support_stream = true;
+
+    // Static model catalog. NVIDIA's NIM API does expose GET /v1/models in
+    // OpenAI-compatible form (id is namespaced like "google/gemma-4-31b-it",
+    // matching what we use here), but the response only carries id / object /
+    // created / owned_by — no context_length, no max_output_tokens, no
+    // pricing. Rather than hard-defaulting those for the full 80+ NIM
+    // catalog, we hand-curate the entries we actually use with proper
+    // metadata. Extend as needed; switch to a dynamic fetchModels() if/when
+    // NVIDIA enriches the response shape.
+    public array $models = [
+        [
+            'name' => 'google/gemma-4-31b-it',
+            'context_length' => 256000,
+            'max_output_tokens' => 8192,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => true,
+            'test' => true
+        ],
+        [
+            'name' => 'google/gemma-4-26b-a4b-it',
+            'context_length' => 256000,
+            'max_output_tokens' => 8192,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ]
+    ];
+
+    public function fetchModels(): array
+    {
+        // NIM catalog discovery is opaque (no pricing, no consistent context
+        // metadata across model families). Return the static list above so
+        // callers always get usable model entries.
+        return $this->models;
+    }
+
+    public function ping(): bool
+    {
+        try {
+            $response = __::curl(
+                url: $this->url . '/models',
+                method: 'GET',
+                headers: ['Authorization' => 'Bearer ' . $this->api_key],
+                timeout: 30
+            );
+            return ($response->status ?? 0) >= 200 && ($response->status ?? 0) < 300;
+        } catch (\Exception) {
+            return false;
+        }
     }
 }
 
