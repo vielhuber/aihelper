@@ -1790,19 +1790,45 @@ abstract class aihelper
             // GLM-4.7-Flash tutorial does not document a thinking flag, so we
             // only emit chat_template_kwargs when the caller explicitly requests
             // an override AND we're on a hybrid-thinking model line.
+            //
+            // Anti-loop hardening (community-sourced, not in unsloth's official
+            // sampler profile but observed to mitigate the deterministic
+            // <think>-block runaway documented in
+            // https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/discussions/26
+            // and https://github.com/ggml-org/llama.cpp/issues/19613):
+            //   - top_k=40 caps the candidate pool, preventing the model from
+            //     getting stuck cycling between low-probability synonyms during
+            //     reasoning
+            //   - DRY (Don't Repeat Yourself) sampler bites n-gram repetitions
+            //     at the sampler level without disturbing the global token
+            //     distribution like repeat_penalty would
+            //   - thinking_budget_tokens=4000 is a per-request hint to llama.cpp
+            //     to inject </think> after N reasoning tokens; documented for
+            //     Qwen3.5+ in llama.cpp Discussion #21445, untested for GLM but
+            //     llama.cpp ignores unknown keys silently, so it costs nothing
             if ($uses_tools === true) {
                 $args['temperature'] = 0.7;
                 $args += [
                     'top_p' => 1.0,
+                    'top_k' => 40,
                     'min_p' => 0.01,
-                    'repeat_penalty' => 1.0
+                    'repeat_penalty' => 1.0,
+                    'dry_multiplier' => 0.8,
+                    'dry_base' => 1.75,
+                    'dry_allowed_length' => 2,
+                    'thinking_budget_tokens' => 4000
                 ];
             } else {
                 $args['temperature'] = 1.0;
                 $args += [
                     'top_p' => 0.95,
+                    'top_k' => 40,
                     'min_p' => 0.01,
-                    'repeat_penalty' => 1.0
+                    'repeat_penalty' => 1.0,
+                    'dry_multiplier' => 0.8,
+                    'dry_base' => 1.75,
+                    'dry_allowed_length' => 2,
+                    'thinking_budget_tokens' => 4000
                 ];
             }
             $glm_major = (int) $_glm[1];
