@@ -173,11 +173,10 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__ai_nvidia(&$stats = [], $force = false)
     {
-        if ($force === true) {
-            $this->log('test__ai_nvidia: disabled (NIM backend 502s)');
-            return;
+        if ($this->isCi() && $force !== true) {
+            $this->markTestSkipped('Skipped.');
         }
-        $this->markTestSkipped('NVIDIA NIM excluded — backend instability (502 errors).');
+        $this->ai_test_prepare('nvidia', $_SERVER['NVIDIA_API_KEY'] ?? null, null, $stats);
     }
 
     function test__ai_test(&$stats = [], $force = false)
@@ -534,7 +533,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'openrouter', 'nvidia']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'openrouter']);
         if ($supported === true) {
             $return = $ai->ask('Was ist auf dem Bild zu sehen?', 'tests/assets/iptc_write.jpg');
 
@@ -558,7 +557,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'openrouter', 'nvidia']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'openrouter']);
         if ($supported === true) {
             $return = $ai->ask('Welches Bild habe ich im Gesprächsverlauf hochgeladen?');
 
@@ -582,7 +581,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'openrouter', 'nvidia']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'openrouter']);
         if ($supported === true) {
             $return = $ai->ask(
                 'Wie lautet die Kundennummer (Key: customer_nr)? Wann wurde der Brief verfasst (Key: date)? Von wem wurde der Brief verfasst (Key: author)? Bitte antworte nur im JSON-Format. Wenn Du unsicher bist, gib den wahrscheinlichsten Wert zurück. Wenn Du einen Wert gar nicht findest, gib einen leeren String zurück.',
@@ -613,7 +612,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
         }
 
-        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'openrouter', 'nvidia']);
+        $supported = in_array($provider, ['anthropic', 'google', 'openai', 'openrouter']);
         if ($supported === true) {
             $return = $ai->ask(
                 'Wie lautet die Kundennummer (Key: customer_nr)? Wie lautet die Zählernummer (Key: meter_number)? Welche Blume ist auf dem Bild zu sehen (Key: flower)? Bitte antworte nur im JSON-Format. Wenn Du unsicher bist, gib den wahrscheinlichsten Wert zurück. Wenn Du einen Wert gar nicht findest, gib einen leeren String zurück.',

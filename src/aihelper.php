@@ -6218,19 +6218,11 @@ class ai_nvidia extends ai_openrouter
 
     public ?bool $support_stream = true;
 
-    // Static model catalog. NVIDIA's NIM API does expose GET /v1/models in
-    // OpenAI-compatible form (id is namespaced like "google/gemma-4-31b-it",
-    // matching what we use here), but the response only carries id / object /
-    // created / owned_by — no context_length, no max_output_tokens, no
-    // pricing. Rather than hard-defaulting those for the full 80+ NIM
-    // catalog, we hand-curate the entries we actually use with proper
-    // metadata. Extend as needed; switch to a dynamic fetchModels() if/when
-    // NVIDIA enriches the response shape.
     public array $models = [
         [
-            'name' => 'google/gemma-4-31b-it',
-            'context_length' => 256000,
-            'max_output_tokens' => 8192,
+            'name' => 'minimaxai/minimax-m2.5',
+            'context_length' => 192000,
+            'max_output_tokens' => 4096,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
@@ -6238,12 +6230,102 @@ class ai_nvidia extends ai_openrouter
             'test' => true
         ],
         [
-            'name' => 'google/gemma-4-26b-a4b-it',
+            'name' => 'qwen/qwen3-next-80b-a3b-instruct',
             'context_length' => 256000,
-            'max_output_tokens' => 8192,
+            'max_output_tokens' => 4096,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'qwen/qwen3-next-80b-a3b-thinking',
+            'context_length' => 256000,
+            'max_output_tokens' => 4096,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'qwen/qwen3.5-122b-a10b',
+            'context_length' => 256000,
+            'max_output_tokens' => 4096,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'qwen/qwen3.5-397b-a17b',
+            'context_length' => 256000,
+            'max_output_tokens' => 4096,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'qwen/qwen2.5-coder-32b-instruct',
+            'context_length' => 32000,
+            'max_output_tokens' => 4096,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => false,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'google/gemma-3-27b-it',
+            'context_length' => 128000,
+            'max_output_tokens' => 4096,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'google/gemma-3-4b-it',
+            'context_length' => 4000,
+            'max_output_tokens' => 4096,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => false,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'google/gemma-3n-e2b-it',
+            'context_length' => 32000,
+            'max_output_tokens' => 4096,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'google/gemma-3n-e4b-it',
+            'context_length' => 4000,
+            'max_output_tokens' => 4096,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'google/gemma-2-2b-it',
+            'context_length' => 4000,
+            'max_output_tokens' => 4096,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => true,
+            'supports_tools' => false,
             'default' => false,
             'test' => false
         ]
