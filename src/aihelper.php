@@ -2113,40 +2113,21 @@ abstract class aihelper
 
     protected function parseJson(mixed $msg): mixed
     {
-        // Fast path: direct decode for clean JSON strings (no fences, no
-        // surrounding prose). Preserves the existing behavior for callers
-        // that genuinely return parseable JSON.
         if (is_string($msg) && __::string_is_json(trim($msg))) {
             return json_decode(trim($msg));
         }
-        // Code-fence path: many models (esp. claude-haiku-4-5 with extended
-        // thinking) wrap JSON like ```json\n{…}\n```\n\n**Begründung:** …
-        // The previous ltrim-based stripping was both incorrect (ltrim with a
-        // charlist treats the mask as a SET of characters, not a literal
-        // prefix) and brittle against trailing prose — json_decode would
-        // return null and parseJson would silently lose the verdict.
-        // Match the first ```json|``` … ``` block and decode its inner body
-        // instead, leaving the original string intact if the inner block
-        // itself fails to decode.
         if (is_string($msg) && preg_match('/```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```/s', $msg, $m) === 1) {
             $decoded = json_decode($m[1]);
             if ($decoded !== null || strtolower(trim($m[1])) === 'null') {
                 return $decoded;
             }
         }
-        // Inline-JSON path: model emitted JSON without code fence but with
-        // surrounding prose ("My answer: {…}"). Extract the first balanced
-        // {…} or […] and try decoding it. PCRE recursion handles nested
-        // braces correctly.
         if (is_string($msg) && preg_match('/\{(?:[^{}]|(?R))*\}|\[(?:[^\[\]]|(?R))*\]/', $msg, $m) === 1) {
             $decoded = json_decode($m[0]);
             if ($decoded !== null || strtolower(trim($m[0])) === 'null') {
                 return $decoded;
             }
         }
-        // Fallback: return the original message untouched so callers always
-        // see something meaningful (the previous implementation returned null
-        // on any decode failure, which silently dropped the response).
         return $msg;
     }
 
@@ -5271,19 +5252,6 @@ class ai_google extends aihelper
             $budget = $this->enable_thinking === false ? 0 : 1024;
             $args['generationConfig']['thinkingConfig'] = ['thinkingBudget' => $budget];
         }
-        // Gemma 4 family (gemma-4-31b-it, gemma-4-26b-a4b-it, future variants):
-        //   - Official sampler recommendation (https://ai.google.dev/gemma/docs/core
-        //     and https://unsloth.ai/docs/models/gemma-4):
-        //     temperature=1.0, top_p=0.95, top_k=64, no penalty parameters.
-        //   - Temperature is forced to 1.0 even when the caller passed a lower
-        //     value (Gemma 4 was tuned for higher entropy; lower temps degrade
-        //     instruction-following per the model card).
-        //   - Thinking on Gemini-API-served Gemma 4 is controlled via
-        //     thinkingConfig.thinkingLevel ("low" | "medium" | "high"), NOT via
-        //     thinkingBudget which is gemini-2.5-only. Enable_thinking semantics:
-        //     null/true → high (we want thinking on for agentic workflows),
-        //     false → low (thinkingLevel cannot be turned fully off, but "low"
-        //     minimizes the budget).
         if (preg_match('/^gemma-4-/', $this->model) === 1) {
             if (!isset($args['generationConfig']) || !is_array($args['generationConfig'])) {
                 $args['generationConfig'] = [];
