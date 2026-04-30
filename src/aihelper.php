@@ -4808,7 +4808,14 @@ class ai_anthropic extends aihelper
     protected function modifyArgs(?array $args): ?array
     {
         $model_name = strtolower($this->model ?? '');
-        $supports_thinking = str_contains($model_name, 'sonnet') || str_contains($model_name, 'opus');
+        // Extended Thinking support: Sonnet + Opus across all generations,
+        // Haiku from 4.x onwards (Haiku 3.5 had no thinking; 4.x added it).
+        // Match `haiku-4`, `haiku-5`, … via regex so future generations are
+        // forward-compatible without code edits.
+        $supports_thinking =
+            str_contains($model_name, 'sonnet') ||
+            str_contains($model_name, 'opus') ||
+            preg_match('/haiku-(\d+)/', $model_name, $_hm) === 1 && (int) $_hm[1] >= 4;
         $adaptive_thinking_models = ['claude-opus-4-7'];
         $adaptive_thinking = in_array($model_name, $adaptive_thinking_models, true);
         // explicit enable_thinking=false overrides the default-on behavior for
