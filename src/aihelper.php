@@ -1043,10 +1043,7 @@ abstract class aihelper
         if ($args['name'] !== $tool_name) {
             return $args;
         }
-        $this->log(
-            'unwrapped envelope-mimicked tool args for "' . $tool_name . '"',
-            'local tool loop'
-        );
+        $this->log('unwrapped envelope-mimicked tool args for "' . $tool_name . '"', 'local tool loop');
         return $args['arguments'];
     }
 
@@ -6389,13 +6386,8 @@ class ai_nvidia extends ai_openrouter
     public function ping(): bool
     {
         try {
-            $response = __::curl(
-                url: $this->url . '/models',
-                method: 'GET',
-                headers: ['Authorization' => 'Bearer ' . $this->api_key],
-                timeout: 30
-            );
-            return ($response->status ?? 0) >= 200 && ($response->status ?? 0) < 300;
+            $response = $this->ask('Test');
+            return $response['success'];
         } catch (\Exception) {
             return false;
         }
