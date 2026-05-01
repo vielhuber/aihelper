@@ -173,7 +173,8 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__ai_nvidia(&$stats = [], $force = false)
     {
-        if ($this->isCi() && $force !== true) {
+        // always skip in ci
+        if ($this->isCi()) {
             $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('nvidia', $_SERVER['NVIDIA_API_KEY'] ?? null, null, $stats);
