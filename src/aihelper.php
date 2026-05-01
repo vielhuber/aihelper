@@ -1017,6 +1017,39 @@ abstract class aihelper
         }
     }
 
+    /**
+     * Unwrap weak-tool-caller envelope mimicry.
+     *
+     * Some open-weight models (observed: gemma-4-31b-it) over-mimic the openai
+     * tool-call schema example shown in the system prompt and emit the FULL
+     * wrapper {"name": "<tool>", "arguments": {...}} INSIDE the arguments
+     * payload, instead of just the inner args object. This helper detects the
+     * wrapped pattern and unwraps it once. It is conservative: it only unwraps
+     * when the outer args are exactly {name: <string>, arguments: <object>}
+     * AND the inner name matches the actual tool name (so legitimate tools
+     * with literal "name"/"arguments" parameters are not mis-unwrapped).
+     */
+    protected function unwrapMimickedToolArgs(string $tool_name, array $args): array
+    {
+        if (count($args) !== 2) {
+            return $args;
+        }
+        if (!array_key_exists('name', $args) || !array_key_exists('arguments', $args)) {
+            return $args;
+        }
+        if (!is_string($args['name']) || !is_array($args['arguments'])) {
+            return $args;
+        }
+        if ($args['name'] !== $tool_name) {
+            return $args;
+        }
+        $this->log(
+            'unwrapped envelope-mimicked tool args for "' . $tool_name . '"',
+            'local tool loop'
+        );
+        return $args['arguments'];
+    }
+
     protected function runLocalToolLoop(array $return): array
     {
         $is_anthropic = in_array($this->name, ['anthropic', 'xai', 'deepseek'], true);
@@ -1036,6 +1069,7 @@ abstract class aihelper
                         if ($fc !== null) {
                             $name = is_object($fc) ? $fc->name : $fc['name'];
                             $args = is_object($fc) ? (array) ($fc->args ?? []) : $fc['args'] ?? [];
+                            $args = $this->unwrapMimickedToolArgs($name, $args);
                             $tool_calls[] = [
                                 'id' => $name,
                                 'name' => $name,
@@ -1057,10 +1091,13 @@ abstract class aihelper
                     foreach ($last['content'] as $block) {
                         $type = is_object($block) ? $block->type ?? null : $block['type'] ?? null;
                         if ($type === 'tool_use') {
+                            $name = is_object($block) ? $block->name : $block['name'];
+                            $args = is_object($block) ? (array) ($block->input ?? []) : $block['input'] ?? [];
+                            $args = $this->unwrapMimickedToolArgs($name, $args);
                             $tool_calls[] = [
                                 'id' => is_object($block) ? $block->id : $block['id'],
-                                'name' => is_object($block) ? $block->name : $block['name'],
-                                'arguments' => is_object($block) ? (array) ($block->input ?? []) : $block['input'] ?? []
+                                'name' => $name,
+                                'arguments' => $args
                             ];
                         }
                     }
@@ -1076,10 +1113,17 @@ abstract class aihelper
                     is_array($last['tool_calls'])
                 ) {
                     foreach ($last['tool_calls'] as $tc) {
+                        $name = $tc['function']['name'] ?? '';
+                        $args = json_decode($tc['function']['arguments'] ?? '{}', true) ?: [];
+                        // unwrap envelope-mimicking args produced by some weak tool-callers
+                        // (observed with gemma-4): the model emits the FULL openai tool-call
+                        // wrapper {"name":"...","arguments":{...}} INSIDE the arguments string
+                        // instead of just the inner args object. detect and unwrap.
+                        $args = $this->unwrapMimickedToolArgs($name, $args);
                         $tool_calls[] = [
                             'id' => $tc['id'] ?? '',
-                            'name' => $tc['function']['name'] ?? '',
-                            'arguments' => json_decode($tc['function']['arguments'] ?? '{}', true) ?: []
+                            'name' => $name,
+                            'arguments' => $args
                         ];
                     }
                 }
@@ -1087,10 +1131,13 @@ abstract class aihelper
                 // responses api: function_call items as top-level session entries
                 for ($i = count($session) - 1; $i >= 0; $i--) {
                     if (isset($session[$i]['type']) && $session[$i]['type'] === 'function_call') {
+                        $name = $session[$i]['name'];
+                        $args = json_decode($session[$i]['arguments'], true) ?? [];
+                        $args = $this->unwrapMimickedToolArgs($name, $args);
                         $tool_calls[] = [
                             'id' => $session[$i]['call_id'],
-                            'name' => $session[$i]['name'],
-                            'arguments' => json_decode($session[$i]['arguments'], true) ?? []
+                            'name' => $name,
+                            'arguments' => $args
                         ];
                     } else {
                         break;
