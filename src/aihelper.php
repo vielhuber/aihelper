@@ -5585,6 +5585,19 @@ class ai_xai extends ai_anthropic
             'supports_tools' => false,
             'default' => false,
             'test' => false
+        ],
+        [
+            // grok-4.3 — released 2026-04-30. 1M context, $1.25/$2.50 per million.
+            // accepts text + image input, supports tool use per vercel ai gateway docs.
+            // cached input price not separately published; mirror input price.
+            'name' => 'grok-4.3',
+            'context_length' => 1000000,
+            'max_output_tokens' => 16000,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.00000125, 'output' => 0.0000025],
+            'supports_temperature' => true,
+            'supports_tools' => false,
+            'default' => false,
+            'test' => false
         ]
     ];
 }
