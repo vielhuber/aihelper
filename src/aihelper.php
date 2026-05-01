@@ -1053,6 +1053,12 @@ abstract class aihelper
         $is_google = $this->name === 'google';
         $is_chat_completions = in_array($this->name, ['openrouter', 'llamacpp', 'nvidia'], true);
         $max_tool_rounds = 50;
+        // loop-guard: track consecutive identical (name, args) tool calls and
+        // short-circuit after the threshold so that weak tool-callers (observed
+        // with gemma-4) don't spin on a "verification" tool until $max_tool_rounds.
+        $repeat_signature = null;
+        $repeat_count = 0;
+        $repeat_threshold = 3;
         while ($max_tool_rounds > 0) {
             // extract pending tool calls from session
             $tool_calls = [];
@@ -1147,6 +1153,31 @@ abstract class aihelper
             $this->log(count($tool_calls) . ' tool call(s)', 'local tool loop');
             $tool_results = [];
             foreach ($tool_calls as $tc) {
+                // loop-guard: if the same (name, args) is emitted N times in a row,
+                // refuse to execute and return a forceful stop-instruction to the model.
+                $signature = $tc['name'] . '|' . json_encode($tc['arguments'], JSON_UNESCAPED_UNICODE);
+                if ($signature === $repeat_signature) {
+                    $repeat_count++;
+                } else {
+                    $repeat_signature = $signature;
+                    $repeat_count = 1;
+                }
+                if ($repeat_count > $repeat_threshold) {
+                    $this->log(
+                        'loop-guard tripped for "' . $tc['name'] . '" after ' . $repeat_threshold . ' identical calls',
+                        'local tool loop'
+                    );
+                    $tool_results[] = [
+                        'id' => $tc['id'],
+                        'name' => $tc['name'],
+                        'output' =>
+                            'Error: this tool was already called ' .
+                            $repeat_threshold .
+                            ' times with identical arguments and produced the same result each time. ' .
+                            'STOP repeating this call. The previous result is final — proceed to the next step in the task, or finalize your answer.'
+                    ];
+                    continue;
+                }
                 if (!isset($this->mcp_servers_tools_map[$tc['name']])) {
                     $this->log('unknown tool: ' . $tc['name'], 'local tool loop');
                     $output = 'Error: unknown tool "' . $tc['name'] . '"';
