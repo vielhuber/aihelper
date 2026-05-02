@@ -1059,6 +1059,19 @@ abstract class aihelper
         $repeat_signature = null;
         $repeat_count = 0;
         $repeat_threshold = 3;
+        // cumulative loop-guard: count how often each (name, args) signature
+        // has appeared across this whole ask() call AND store a hash of every
+        // result it produced. when a signature has been seen >= cumulative
+        // threshold times AND every single one of those calls produced a
+        // byte-identical result, the model is clearly not making progress —
+        // this catches the alternating-pattern loops the consecutive guard
+        // above misses (e.g. click→snapshot→click→snapshot where the snapshot
+        // keeps returning the same page state because the click doesn't
+        // actually navigate). safe for long browser sessions: each new page
+        // yields a different snapshot result, so the *unique*-results count
+        // grows and the cumulative guard never trips.
+        $signature_results = [];
+        $cumulative_threshold = 5;
         while ($max_tool_rounds > 0) {
             // extract pending tool calls from session
             $tool_calls = [];
@@ -1178,6 +1191,30 @@ abstract class aihelper
                     ];
                     continue;
                 }
+                // cumulative guard: identical args + identical results
+                // accumulating without intermediate progress
+                $prev_hashes = $signature_results[$signature] ?? [];
+                if (count($prev_hashes) >= $cumulative_threshold && count(array_unique($prev_hashes)) === 1) {
+                    $this->log(
+                        'loop-guard tripped (cumulative): "' .
+                            $tc['name'] .
+                            '" called ' .
+                            count($prev_hashes) .
+                            ' times with identical args + identical results',
+                        'local tool loop'
+                    );
+                    $tool_results[] = [
+                        'id' => $tc['id'],
+                        'name' => $tc['name'],
+                        'output' =>
+                            'Error: this tool has already been called ' .
+                            count($prev_hashes) .
+                            ' times with identical arguments AND every call returned a byte-identical result. ' .
+                            'The page/system state is not changing — continuing with this approach will keep producing the same result. ' .
+                            'CHANGE STRATEGY: try a different tool, different parameters, or finalize your answer.'
+                    ];
+                    continue;
+                }
                 if (!isset($this->mcp_servers_tools_map[$tc['name']])) {
                     $this->log('unknown tool: ' . $tc['name'], 'local tool loop');
                     $output = 'Error: unknown tool "' . $tc['name'] . '"';
@@ -1257,6 +1294,11 @@ abstract class aihelper
                     }
                     $this->log(mb_substr($output, 0, 200), 'local tool result');
                 }
+                // record the hash of this round's output for the cumulative
+                // loop-guard. this happens unconditionally (also for unknown-
+                // tool errors) so a model that keeps calling a non-existent
+                // tool also gets caught after $cumulative_threshold attempts.
+                $signature_results[$signature][] = md5((string) $output);
                 $tool_results[] = ['id' => $tc['id'], 'name' => $tc['name'], 'output' => $output];
             }
             // append tool results in provider-specific format
