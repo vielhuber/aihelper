@@ -224,6 +224,24 @@ abstract class aihelper
                 auto_compact: $auto_compact
             );
         }
+        if ($provider === 'codex') {
+            return new ai_codex(
+                model: $model,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream,
+                url: $url,
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact
+            );
+        }
         if ($provider === 'test') {
             return new ai_test(
                 model: $model,
@@ -6665,4 +6683,12 @@ class ai_test extends ai_anthropic
 
         return (object) ['result' => (object) []];
     }
+}
+
+class ai_codex extends ai_openrouter
+{
+    public ?string $provider = 'OpenAI Codex';
+    public ?string $title = 'OpenAI Codex';
+    public ?string $name = 'codex';
+    protected ?string $url = 'http://127.0.0.1:8317/v1';
 }
