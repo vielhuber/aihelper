@@ -1069,7 +1069,7 @@ abstract class aihelper
     {
         $is_anthropic = in_array($this->name, ['anthropic', 'xai', 'deepseek'], true);
         $is_google = $this->name === 'google';
-        $is_chat_completions = in_array($this->name, ['openrouter', 'llamacpp', 'nvidia'], true);
+        $is_chat_completions = in_array($this->name, ['openrouter', 'llamacpp', 'nvidia', 'codex'], true);
         $max_tool_rounds = 50;
         // loop-guard: track consecutive identical (name, args) tool calls and
         // short-circuit after the threshold so that weak tool-callers (observed
@@ -3080,7 +3080,7 @@ abstract class aihelper
             };
         }
 
-        if ($this->name === 'openrouter' || $this->name === 'llamacpp' || $this->name === 'nvidia') {
+        if ($this->name === 'openrouter' || $this->name === 'llamacpp' || $this->name === 'nvidia' || $this->name === 'codex') {
             // mimic non-stream result (chat completions format)
             $this->stream_response = (object) [
                 'result' => (object) [
