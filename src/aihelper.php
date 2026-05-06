@@ -1070,7 +1070,7 @@ abstract class aihelper
         $is_anthropic = in_array($this->name, ['anthropic', 'xai', 'deepseek'], true);
         $is_google = $this->name === 'google';
         $is_chat_completions = in_array($this->name, ['openrouter', 'llamacpp', 'nvidia', 'codex'], true);
-        $max_tool_rounds = 50;
+        $max_tool_rounds = 200;
         // loop-guard: track consecutive identical (name, args) tool calls and
         // short-circuit after the threshold so that weak tool-callers (observed
         // with gemma-4) don't spin on a "verification" tool until $max_tool_rounds.
