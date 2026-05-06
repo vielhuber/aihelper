@@ -4221,6 +4221,7 @@ class ai_openai extends aihelper
                     }
                     if (
                         in_array($name, [
+                            'chat-latest',
                             'gpt-5-search-api',
                             'gpt-5-search-api-2025-10-14',
                             'o3-deep-research',
@@ -4719,6 +4720,7 @@ class ai_anthropic extends aihelper
                             'grok-2-image-1212',
                             'grok-imagine-image',
                             'grok-imagine-image-pro',
+                            'grok-imagine-image-quality',
                             'grok-imagine-video',
                             'grok-2-vision-1212'
                         ])
@@ -5178,66 +5180,6 @@ class ai_google extends aihelper
             'context_length' => 1048576,
             'max_output_tokens' => 65536,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemma-3-12b-it',
-            'context_length' => 131072,
-            'max_output_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemma-3-1b-it',
-            'context_length' => 32768,
-            'max_output_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemma-3-27b-it',
-            'context_length' => 131072,
-            'max_output_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemma-3-4b-it',
-            'context_length' => 131072,
-            'max_output_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemma-3n-e2b-it',
-            'context_length' => 128000,
-            'max_output_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemma-3n-e4b-it',
-            'context_length' => 128000,
-            'max_output_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
             'default' => false,
