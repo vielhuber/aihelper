@@ -274,6 +274,7 @@ abstract class aihelper
                 new ai_xai(),
                 new ai_deepseek(),
                 new ai_openrouter(),
+                new ai_codex(),
                 new ai_llamacpp(),
                 new ai_lmstudio(),
                 new ai_nvidia(),
