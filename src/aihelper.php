@@ -6643,10 +6643,21 @@ class ai_codex extends ai_openrouter
     public function fetchModels(): array
     {
         $models = parent::fetchModels();
-        foreach ($models as &$model) {
+        $efforts = ['low', 'medium', 'high', 'xhigh', 'auto', 'none'];
+        $expanded = [];
+        foreach ($models as $model) {
             $model['supports_tools'] = true;
             $model['supports_temperature'] = true;
+            $expanded[] = $model;
+            if (!str_starts_with((string) $model['name'], 'gpt-5')) {
+                continue;
+            }
+            foreach ($efforts as $effort) {
+                $variant = $model;
+                $variant['name'] = $model['name'] . '(' . $effort . ')';
+                $expanded[] = $variant;
+            }
         }
-        return $models;
+        return $expanded;
     }
 }
