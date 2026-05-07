@@ -3081,7 +3081,12 @@ abstract class aihelper
             };
         }
 
-        if ($this->name === 'openrouter' || $this->name === 'llamacpp' || $this->name === 'nvidia' || $this->name === 'codex') {
+        if (
+            $this->name === 'openrouter' ||
+            $this->name === 'llamacpp' ||
+            $this->name === 'nvidia' ||
+            $this->name === 'codex'
+        ) {
             // mimic non-stream result (chat completions format)
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -6637,16 +6642,6 @@ class ai_codex extends ai_openrouter
 
     public function fetchModels(): array
     {
-        // CLIProxyAPI's /v1/models response does NOT expose the OpenRouter-style
-        // "supported_parameters" array, so the parent fetchModels() ends up with
-        // supports_tools=false for every codex model. The constructor loop then
-        // sets $supports_tools=false → $supports_mcp=false → mcp_servers are
-        // silently dropped, the LLM gets zero tools, and tool-calling appears
-        // broken (visible only when the chat's model is the bare "gpt-5.5";
-        // suffix variants like "gpt-5.5(medium)" miss the loop and survive on
-        // the default true). Fix here: every model exposed via the codex proxy
-        // IS a GPT-5/5.5/o-class model with full tool-calling support, so
-        // hardcode the capability flags to true.
         $models = parent::fetchModels();
         foreach ($models as &$model) {
             $model['supports_tools'] = true;
