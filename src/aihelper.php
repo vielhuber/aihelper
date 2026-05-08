@@ -37,6 +37,7 @@ abstract class aihelper
     protected string $stream_reasoning_buffer = '';
     protected bool $stream_tool_call_strip_in_block = false;
     protected string $stream_tool_call_strip_tag_buf = '';
+    protected ?\Closure $stream_callback = null;
 
     protected ?string $session_id = null;
     protected static array $sessions = [];
@@ -2523,6 +2524,7 @@ abstract class aihelper
         $this->stream_running = false;
         $this->stream_in_think = false;
         $this->stream_think_tag_buf = '';
+        $this->stream_callback = null;
 
         if ($this->name === 'anthropic' || $this->name === 'test') {
             // mimic non stream result
@@ -2539,7 +2541,7 @@ abstract class aihelper
                 ]
             ];
 
-            $stream_callback = function ($chunk) {
+            $this->stream_callback = function ($chunk) {
                 /*
                 echo $chunk;
                 return strlen($chunk);
@@ -2859,7 +2861,7 @@ abstract class aihelper
                 ]
             ];
 
-            $stream_callback = function ($chunk) {
+            $this->stream_callback = function ($chunk) {
                 /*
                 echo $chunk;
                 return strlen($chunk);
@@ -3114,7 +3116,7 @@ abstract class aihelper
             $this->stream_reasoning_buffer = '';
             $this->resetToolCallStripState();
 
-            $stream_callback = function ($chunk) {
+            $this->stream_callback = function ($chunk) {
                 $this->log($chunk, 'chunk');
                 $this->stream_buffer_in .= $chunk;
 
@@ -3355,7 +3357,7 @@ abstract class aihelper
                 ]
             ];
 
-            $stream_callback = function ($chunk) {
+            $this->stream_callback = function ($chunk) {
                 $this->log($chunk, 'chunk');
                 $this->stream_buffer_in .= $chunk;
 
@@ -3510,7 +3512,7 @@ abstract class aihelper
         }
         flush();
 
-        return $stream_callback;
+        return $this->stream_callback;
     }
 }
 
@@ -4239,11 +4241,14 @@ class ai_openai extends aihelper
                             'o4-mini-deep-research',
                             'o4-mini-deep-research-2025-06-26',
                             'gpt-realtime',
+                            'gpt-realtime-2',
                             'gpt-realtime-2025-08-28',
                             'gpt-realtime-1.5',
                             'gpt-realtime-mini',
                             'gpt-realtime-mini-2025-10-06',
                             'gpt-realtime-mini-2025-12-15',
+                            'gpt-realtime-translate',
+                            'gpt-realtime-whisper',
                             'gpt-audio',
                             'gpt-audio-2025-08-28',
                             'gpt-audio-1.5',
@@ -5190,6 +5195,16 @@ class ai_google extends aihelper
             'context_length' => 1048576,
             'max_output_tokens' => 65536,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gemini-3.1-flash-lite',
+            'context_length' => 1048576,
+            'max_output_tokens' => 65536,
+            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.0000015],
             'supports_temperature' => true,
             'supports_tools' => true,
             'default' => false,

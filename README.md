@@ -123,7 +123,7 @@ if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled f
 <VirtualHost ...>
   ...
   <FilesMatch \.php$>
-    SetHandler "proxy:unix:/var/run/php/php8.3-fpm.sock|fcgi://localhost/"
+    SetHandler "proxy:unix:/var/run/php/php8.5-fpm.sock|fcgi://localhost/"
   </FilesMatch>
   ...
 </VirtualHost>
@@ -138,12 +138,12 @@ if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled f
   </Proxy>
   <FilesMatch \.php$>
     <If "%{HTTP:Accept} -strmatch '*text/event-stream*'">
-      SetHandler "proxy:unix:/var/run/php/php8.3-fpm.sock|fcgi://localhost-stream/"
+      SetHandler "proxy:unix:/var/run/php/php8.5-fpm.sock|fcgi://localhost-stream/"
       SetEnv no-gzip 1
       RequestHeader unset Accept-Encoding
     </If>
     <Else>
-      SetHandler "proxy:unix:/var/run/php/php8.3-fpm.sock|fcgi://localhost/"
+      SetHandler "proxy:unix:/var/run/php/php8.5-fpm.sock|fcgi://localhost/"
     </Else>
   </FilesMatch>
   ...
