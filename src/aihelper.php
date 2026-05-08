@@ -635,8 +635,10 @@ abstract class aihelper
         $max_tries = $this->max_tries;
         while ($return['success'] === false && $max_tries > 0) {
             if ($max_tries < $this->max_tries) {
-                $this->log('⚠️ tries left: ' . $max_tries);
-                usleep(3_000_000); // 3s backoff to survive slot-contention bursts
+                $attempt = $this->max_tries - $max_tries;
+                $backoff_s = 15 * (int) pow(2, $attempt - 1);
+                $this->log('⚠️ tries left: ' . $max_tries . ' — backoff ' . $backoff_s . 's');
+                sleep($backoff_s);
             }
             $return = $this->askThis(
                 prompt: $prompt,
@@ -1383,8 +1385,10 @@ abstract class aihelper
             $max_tries = $this->max_tries;
             while ($return['success'] === false && $max_tries > 0) {
                 if ($max_tries < $this->max_tries) {
-                    $this->log('⚠️ tries left: ' . $max_tries);
-                    usleep(3_000_000); // 3s backoff to survive slot-contention bursts
+                    $attempt = $this->max_tries - $max_tries;
+                    $backoff_s = 15 * (int) pow(2, $attempt - 1);
+                    $this->log('⚠️ tries left: ' . $max_tries . ' — backoff ' . $backoff_s . 's');
+                    sleep($backoff_s);
                 }
                 $return = $this->askThis(
                     prompt: null,
