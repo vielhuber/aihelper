@@ -1408,7 +1408,7 @@ abstract class aihelper
         return $return;
     }
 
-    protected function truncateOlderToolOutputs(int $max_chars = 2000): void
+    protected function truncateOlderToolOutputs(int $max_chars = 25000): void
     {
         $session = &self::$sessions[$this->session_id];
         // find tool output entries and truncate all except the last batch
