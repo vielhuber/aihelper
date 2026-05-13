@@ -3480,7 +3480,7 @@ abstract class aihelper
             };
         }
 
-        if (!headers_sent()) {
+        if (!headers_sent() && (ob_get_length() === false || ob_get_length() === 0)) {
             header('Content-Type: text/event-stream');
             header('Cache-Control: no-cache');
             header('Connection: keep-alive');
@@ -3492,7 +3492,7 @@ abstract class aihelper
             ob_end_clean();
         }
         // set php settings
-        if (!headers_sent()) {
+        if (!headers_sent() && (ob_get_length() === false || ob_get_length() === 0)) {
             try {
                 ini_set('zlib.output_compression', '0');
             } catch (\ValueError $e) {
