@@ -6055,7 +6055,33 @@ class ai_openrouter extends aihelper
             !empty($response->result->choices)
         ) {
             $finish_reason = $response->result->choices[0]->finish_reason ?? null;
-            if ($finish_reason === 'tool_calls') {
+            // accept when the provider sent the canonical "tool_calls" finish_reason,
+            // OR (fallback for codex/proxy edge case where the terminal finish_reason
+            // chunk is missing before [DONE]) when finish_reason is null but the
+            // message already carries fully-parseable tool_call arguments. This
+            // avoids retry-storms on deterministic stream-close bugs while still
+            // failing closed on truly truncated streams (broken JSON → no accept).
+            $message_tool_calls = $response->result->choices[0]->message->tool_calls ?? null;
+            $tool_calls_complete = false;
+            if ($finish_reason === null && is_array($message_tool_calls) && !empty($message_tool_calls)) {
+                $tool_calls_complete = true;
+                foreach ($message_tool_calls as $tc) {
+                    $args = $tc->function->arguments ?? null;
+                    if (!is_string($args)) {
+                        $tool_calls_complete = false;
+                        break;
+                    }
+                    // empty string is a valid no-arg call; otherwise must parse as JSON
+                    if ($args !== '' && json_decode($args) === null && json_last_error() !== JSON_ERROR_NONE) {
+                        $tool_calls_complete = false;
+                        break;
+                    }
+                }
+                if ($tool_calls_complete) {
+                    $this->log('finish_reason=null but tool_calls have valid JSON — accepting', 'tool_calls_salvage');
+                }
+            }
+            if ($finish_reason === 'tool_calls' || $tool_calls_complete) {
                 $this->addResponseToSession($response);
                 $return['response'] = $output_text ?: '';
                 $return['success'] = true;
