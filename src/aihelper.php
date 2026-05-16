@@ -921,11 +921,15 @@ abstract class aihelper
             }
             return trim(implode(' ', array_filter($parts, fn($p) => $p !== '')));
         };
+        $prior_summary_marker = '[Zusammenfassung des bisherigen Verlaufs';
         $transcript_lines = [];
         foreach ($middle as $msg) {
             $msg_arr = is_array($msg) ? $msg : (array) $msg;
             $role = $msg_arr['role'] ?? 'unknown';
             $text = $extract($msg_arr['content'] ?? ($msg_arr['parts'] ?? null));
+            if ($text !== '' && str_contains($text, $prior_summary_marker)) {
+                continue;
+            }
             if ($text === '') {
                 // tool-call envelope without text — preserve tool name/args so
                 // the summarizer knows what happened
