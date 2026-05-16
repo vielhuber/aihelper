@@ -5536,66 +5536,6 @@ class ai_xai extends ai_anthropic
 
     public array $models = [
         [
-            'name' => 'grok-3',
-            'context_length' => 131072,
-            'max_output_tokens' => 16000,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.000003, 'output' => 0.000015],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-3-mini',
-            'context_length' => 131072,
-            'max_output_tokens' => 16000,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-4-1-fast-non-reasoning',
-            'context_length' => 2000000,
-            'max_output_tokens' => 16000,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-4-1-fast-reasoning',
-            'context_length' => 2000000,
-            'max_output_tokens' => 16000,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => true,
-            'test' => true
-        ],
-        [
-            'name' => 'grok-4-fast-non-reasoning',
-            'context_length' => 256000,
-            'max_output_tokens' => 16000,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-4-fast-reasoning',
-            'context_length' => 256000,
-            'max_output_tokens' => 16000,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000005],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'grok-4.20-0309-non-reasoning',
             'context_length' => 256000,
             'max_output_tokens' => 16000,
@@ -5626,24 +5566,14 @@ class ai_xai extends ai_anthropic
             'test' => false
         ],
         [
-            'name' => 'grok-code-fast-1',
-            'context_length' => 131072,
-            'max_output_tokens' => 16000,
-            'costs' => ['input' => 0.0000002, 'input_cached' => 0.0000002, 'output' => 0.0000015],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'grok-4.3',
             'context_length' => 1000000,
             'max_output_tokens' => 16000,
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.00000125, 'output' => 0.0000025],
             'supports_temperature' => true,
             'supports_tools' => false,
-            'default' => false,
-            'test' => false
+            'default' => true,
+            'test' => true
         ]
     ];
 }
