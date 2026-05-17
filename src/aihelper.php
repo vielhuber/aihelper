@@ -697,6 +697,101 @@ abstract class aihelper
      * inlined and benefit from keeping the whole compaction flow in a single
      * readable place.
      */
+    /**
+     * Strip inline base64 image data URIs from a session payload before token
+     * estimation. Walks the structure recursively and replaces any
+     * `data:image/...;base64,…` URL with a tiny placeholder, while counting
+     * the strip-outs in `&$count`. Used by autoCompactSession() so the
+     * char-based token heuristic does not blow up on image-bearing turns.
+     */
+    private static function stripInlineImagesForTokenCount(mixed $node, int &$count): mixed
+    {
+        if (is_string($node)) {
+            if (str_starts_with($node, 'data:image/') && str_contains($node, ';base64,')) {
+                $count++;
+                return 'data:image/*;base64,STRIPPED';
+            }
+            return $node;
+        }
+        if (is_array($node)) {
+            $out = [];
+            foreach ($node as $k => $v) {
+                $out[$k] = self::stripInlineImagesForTokenCount($v, $count);
+            }
+            return $out;
+        }
+        if (is_object($node)) {
+            $out = clone $node;
+            foreach (get_object_vars($out) as $k => $v) {
+                $out->$k = self::stripInlineImagesForTokenCount($v, $count);
+            }
+            return $out;
+        }
+        return $node;
+    }
+
+    /**
+     * Replace inline image content blocks across all known provider shapes
+     * with a tiny text stub. Used after a successful compaction to evict
+     * base64-heavy attachments from `head` and `tail` so subsequent compacts
+     * see a realistic baseline. The summary call that ran beforehand already
+     * carried the model's interpretation of the image forward in prose.
+     *
+     * Recognises:
+     *  - OpenAI: ["type" => "image_url", "image_url" => ["url" => "data:..."]]
+     *  - Anthropic: ["type" => "image", "source" => ["type" => "base64", "data" => "..."]]
+     *  - Google: ["inline_data" => ["mime_type" => "image/...", "data" => "..."]]
+     *  - bare data URIs anywhere in the tree (fallback)
+     */
+    private static function replaceInlineImagesWithStubs(mixed $node, int &$count): mixed
+    {
+        $stub_text = '[Bild aus früherem Turn entfernt während Kontext-Kompression — Inhalt in Zusammenfassung erhalten]';
+
+        if (is_array($node)) {
+            // detect known image-container shapes and swap the whole block out
+            $is_openai_image = isset($node['type']) && $node['type'] === 'image_url' && isset($node['image_url']);
+            $is_anthropic_image = isset($node['type']) && $node['type'] === 'image' && isset($node['source']);
+            $is_google_image = isset($node['inline_data']) && is_array($node['inline_data']);
+            if ($is_openai_image || $is_anthropic_image) {
+                $count++;
+                return ['type' => 'text', 'text' => $stub_text];
+            }
+            if ($is_google_image) {
+                $count++;
+                return ['text' => $stub_text];
+            }
+            $out = [];
+            foreach ($node as $k => $v) {
+                $out[$k] = self::replaceInlineImagesWithStubs($v, $count);
+            }
+            return $out;
+        }
+        if (is_object($node)) {
+            $arr = (array) $node;
+            $is_openai_image = ($arr['type'] ?? null) === 'image_url' && isset($arr['image_url']);
+            $is_anthropic_image = ($arr['type'] ?? null) === 'image' && isset($arr['source']);
+            $is_google_image = isset($arr['inline_data']);
+            if ($is_openai_image || $is_anthropic_image) {
+                $count++;
+                return (object) ['type' => 'text', 'text' => $stub_text];
+            }
+            if ($is_google_image) {
+                $count++;
+                return (object) ['text' => $stub_text];
+            }
+            $out = clone $node;
+            foreach (get_object_vars($out) as $k => $v) {
+                $out->$k = self::replaceInlineImagesWithStubs($v, $count);
+            }
+            return $out;
+        }
+        if (is_string($node) && str_starts_with($node, 'data:image/') && str_contains($node, ';base64,')) {
+            $count++;
+            return $stub_text;
+        }
+        return $node;
+    }
+
     public function autoCompactSession(): void
     {
         // ---- tunables (inlined by design — callers only flip auto_compact) -
@@ -823,8 +918,18 @@ abstract class aihelper
         }
 
         // ---- threshold check ----------------------------------------------
-        $session_json = json_encode($session);
+        // base64 image payloads make the JSON length a *terrible* token proxy:
+        // a 370 KB png is ~500 KB base64 → char-heuristic claims ~167k tokens,
+        // while the provider actually bills 5–15k tokens for the same image.
+        // strip the inline data URIs before measuring, then add a fixed cost
+        // per image so the heuristic still reflects their presence without
+        // overshooting by 10–30×.
+        $image_token_cost = 1500; // conservative upper bound for high-detail
+        $images_in_session = 0;
+        $session_for_count = self::stripInlineImagesForTokenCount($session, $images_in_session);
+        $session_json = json_encode($session_for_count);
         $current_tokens = is_string($session_json) ? (int) ceil(strlen($session_json) / $chars_per_token) : 0;
+        $current_tokens += $images_in_session * $image_token_cost;
         $context_length = $this->getContextLengthForModel();
         $threshold_tokens = (int) ($context_length * $threshold);
         if ($current_tokens <= $threshold_tokens) {
@@ -1025,6 +1130,18 @@ abstract class aihelper
             "[Zusammenfassung des bisherigen Verlaufs — die zwischen den initialen Instruktionen und den letzten Turns liegenden Nachrichten wurden komprimiert]\n\n" .
             $new_summary;
         $summary_message = $this->bringPromptInFormat($summary_banner);
+        // strip inline image attachments from head + tail once the summary has
+        // captured what the model extracted from them. otherwise a single big
+        // image in the first user turn sits unreachable in `head` forever and
+        // every subsequent compact runs against the same bloated baseline
+        // (62-loop observed in the wild). the summary always carries forward
+        // whatever the assistant already pulled out of the image.
+        $images_removed = 0;
+        $head = self::replaceInlineImagesWithStubs($head, $images_removed);
+        $tail = self::replaceInlineImagesWithStubs($tail, $images_removed);
+        if ($images_removed > 0) {
+            $this->log('🖼️ auto_compact: stripped ' . $images_removed . ' image attachment(s) from head/tail');
+        }
         self::$sessions[$this->session_id] = array_merge($head, [$summary_message], $tail);
         // persist a full JSON snapshot (summary + compacted session). on the
         // next process boot the rehydration block at the top of this function
