@@ -14,7 +14,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function log($msg)
+    function log(mixed $msg): void
     {
         if (!is_string($msg)) {
             $msg = serialize($msg);
@@ -22,7 +22,7 @@ class Test extends \PHPUnit\Framework\TestCase
         fwrite(STDERR, print_r($msg . PHP_EOL, true));
     }
 
-    function isCi()
+    function isCi(): bool
     {
         return ($_SERVER['CI'] ?? '') == 'true' ||
             ($_ENV['CI'] ?? '') == 'true' ||
@@ -30,7 +30,7 @@ class Test extends \PHPUnit\Framework\TestCase
             getenv('ACT_TOOLSDIRECTORY') != '';
     }
 
-    function test__ai_all()
+    function test__ai_all(): void
     {
         $stats = [];
         file_put_contents('tests/aihelper.log', '');
@@ -107,7 +107,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function test__ai_anthropic(&$stats = [], $force = false)
+    function test__ai_anthropic(array &$stats = [], bool $force = false): void
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
@@ -115,7 +115,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('anthropic', $_SERVER['ANTHROPIC_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_google(&$stats = [], $force = false)
+    function test__ai_google(array &$stats = [], bool $force = false): void
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
@@ -123,7 +123,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('google', $_SERVER['GOOGLE_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_openai(&$stats = [], $force = false)
+    function test__ai_openai(array &$stats = [], bool $force = false): void
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
@@ -131,7 +131,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('openai', $_SERVER['OPENAI_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_xai(&$stats = [], $force = false)
+    function test__ai_xai(array &$stats = [], bool $force = false): void
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
@@ -139,7 +139,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('xai', $_SERVER['XAI_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_deepseek(&$stats = [], $force = false)
+    function test__ai_deepseek(array &$stats = [], bool $force = false): void
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
@@ -147,7 +147,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('deepseek', $_SERVER['DEEPSEEK_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_openrouter(&$stats = [], $force = false)
+    function test__ai_openrouter(array &$stats = [], bool $force = false): void
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
@@ -155,7 +155,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('openrouter', $_SERVER['OPENROUTER_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_llamacpp(&$stats = [], $force = false)
+    function test__ai_llamacpp(array &$stats = [], bool $force = false): void
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
@@ -163,7 +163,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('llamacpp', $_SERVER['LLM_API_KEY'] ?? null, $_SERVER['LLM_URL'] ?? null, $stats);
     }
 
-    function test__ai_lmstudio(&$stats = [], $force = false)
+    function test__ai_lmstudio(array &$stats = [], bool $force = false): void
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
@@ -171,7 +171,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('lmstudio', $_SERVER['LLM_API_KEY'] ?? null, $_SERVER['LLM_URL'] ?? null, $stats);
     }
 
-    function test__ai_nvidia(&$stats = [], $force = false)
+    function test__ai_nvidia(array &$stats = [], bool $force = false): void
     {
         // always skip in ci
         if ($this->isCi()) {
@@ -180,7 +180,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('nvidia', $_SERVER['NVIDIA_API_KEY'] ?? null, null, $stats);
     }
 
-    function test__ai_test(&$stats = [], $force = false)
+    function test__ai_test(array &$stats = [], bool $force = false): void
     {
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
@@ -188,7 +188,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->ai_test_prepare('test', null, null, $stats);
     }
 
-    function test__auto_compact()
+    function test__auto_compact(): void
     {
         $session_id = 'auto-compact-test-' . mt_rand(100000, 999999);
         $cache_file =
@@ -284,7 +284,7 @@ class Test extends \PHPUnit\Framework\TestCase
         @unlink($cache_file);
     }
 
-    function ai_test_prepare($provider, $api_key = null, $url = null, &$stats = [])
+    function ai_test_prepare(string $provider, ?string $api_key = null, ?string $url = null, array &$stats = []): void
     {
         $models = aihelper::create(
             provider: $provider,
@@ -313,7 +313,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function ai_test($provider, $model, $api_key, $url)
+    function ai_test(string $provider, string $model, ?string $api_key, ?string $url): array
     {
         $this->log('Testing ' . $provider . ' (' . $model . ')...');
 
@@ -795,7 +795,7 @@ class Test extends \PHPUnit\Framework\TestCase
         return [$costs, $success_count, $fail_count];
     }
 
-    function test__ai_wrong_api_key()
+    function test__ai_wrong_api_key(): void
     {
         $providers = aihelper::getProviders();
         foreach ([false, true] as $streams__value) {
@@ -833,7 +833,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function test__ai_mcp_meta_tools()
+    function test__ai_mcp_meta_tools(): void
     {
         if (($_SERVER['MCP_SERVER_TEST'] ?? '') != '1') {
             $this->markTestSkipped('Skipped.');
@@ -913,7 +913,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertNull($tool_response);
     }
 
-    function test__ai_mcp_response_times()
+    function test__ai_mcp_response_times(): void
     {
         if (($_SERVER['MCP_SERVER_TEST'] ?? '') != '1') {
             $this->markTestSkipped('Skipped.');
@@ -988,7 +988,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function test__ai_mcp_response_format()
+    function test__ai_mcp_response_format(): void
     {
         if (($_SERVER['MCP_SERVER_TEST'] ?? '') != '1') {
             $this->markTestSkipped('Skipped.');
@@ -1038,7 +1038,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertTrue(mb_strpos($return['response'], '11') !== false);
     }
 
-    function test__ai_mcp_long_running_task()
+    function test__ai_mcp_long_running_task(): void
     {
         if (($_SERVER['MCP_SERVER_TEST'] ?? '') != '1') {
             $this->markTestSkipped('Skipped.');
@@ -1143,7 +1143,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function test__ai_mcp_servers_call_type()
+    function test__ai_mcp_servers_call_type(): void
     {
         if (($_SERVER['MCP_SERVER_TEST'] ?? '') != '1') {
             $this->markTestSkipped('Skipped.');
@@ -1296,7 +1296,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertTrue($all_passed, 'Some test combinations failed — see log above');
     }
 
-    function test__ai_missing_or_wrong_models()
+    function test__ai_missing_or_wrong_models(): void
     {
         $providers = aihelper::getProviders();
         $success = true;
@@ -1338,6 +1338,14 @@ class Test extends \PHPUnit\Framework\TestCase
                 }
             }
             foreach ($providers__value['models'] as $models__value) {
+                // image/audio models speak different endpoints — chat-completion
+                // probe via ask() would always fail. costs are tracked anyway.
+                if (
+                    ($models__value['supports_image'] ?? false) === true ||
+                    ($models__value['supports_audio'] ?? false) === true
+                ) {
+                    continue;
+                }
                 for ($i = 1; $i <= 3; $i++) {
                     $ai = aihelper::create(
                         provider: $providers__value['name'],

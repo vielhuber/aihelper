@@ -61,6 +61,37 @@ $ai->ask(prompt: 'Fasse die folgenden Dokumente zusammen.', files: ['1.pdf', '2.
 $ai->ask(prompt: 'Was habe ich vorher gefragt?');
 // ['response' => 'Du hast gefragt: "Wie lautet das erste Wort in der PDF?"', 'success' => true, 'costs' => 0.001]
 
+$ai = aihelper::create(provider: 'openai', model: 'gpt-image-1', api_key: '**API Key**');
+
+$ai->image(
+    prompt: 'a red cat on a blue couch',  // text description of the desired image
+    size: '1024x1024',                    // e.g. '512x512'|'1024x1024'|'1792x1024'
+    n: 1,                                 // number of images to generate
+    input_file: null,                     // path|url|base64 — switches to edit/variation mode
+    output_file: null                     // path — when set, file is written and the path is returned instead base64
+);
+// ['response' => 'iVBORw0KGgo...', 'success' => true, 'costs' => 0.04]
+
+$ai->image(prompt: 'a red cat on a blue couch', output_file: '/tmp/cat.png');
+// ['response' => '/tmp/cat.png', 'success' => true, 'costs' => 0.04]
+
+$ai->image(prompt: 'a red cat on a blue couch', n: 3, output_file: '/tmp/cat.png');
+// ['response' => ['/tmp/cat-1.png', '/tmp/cat-2.png', '/tmp/cat-3.png'], 'success' => true, 'costs' => 0.12]
+
+$ai->image(prompt: 'add a hat', input_file: 'cat.png'); // edit / variation
+
+$ai = aihelper::create(provider: 'openai', model: 'gpt-4o-mini-tts', api_key: '**API Key**');
+
+$ai->audio(
+    prompt: 'Hallo, wie geht es dir?', // text to synthesize
+    voice: 'alloy',                    // provider voice id (e.g. 'alloy'|'echo'|'nova')
+    output_file: null                  // path — when set, file is written and the path is returned instead base64
+);
+// ['response' => 'SUQzBAA...', 'success' => true, 'costs' => 0.001]
+
+$ai->audio(prompt: 'Hallo, wie geht es dir?', output_file: '/tmp/hi.mp3');
+// ['response' => '/tmp/hi.mp3', 'success' => true, 'costs' => 0.001]
+
 aihelper::getProviders() // gets overview of providers and models with costs and additional infos
 
 aihelper::create(provider: '...', api_key: '...')->fetchModels() // dynamically get models of provider via api

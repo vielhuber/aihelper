@@ -1,4 +1,5 @@
 <?php
+declare(strict_types=1);
 namespace vielhuber\aihelper;
 
 use vielhuber\stringhelper\__;
@@ -11,8 +12,8 @@ abstract class aihelper
     public ?string $icon = null;
     protected ?string $url = null;
     public array $models = [];
-    public ?bool $support_mcp_remote = null;
-    public ?bool $support_stream = null;
+    public ?bool $supports_mcp_remote = null;
+    public ?bool $supports_stream = null;
 
     protected ?string $model = null;
     protected ?float $temperature = null;
@@ -582,7 +583,7 @@ abstract class aihelper
             $supports_tools = $models__value['supports_tools'] ?? true;
             break;
         }
-        $supports_mcp = $this->support_mcp_remote || $supports_tools;
+        $supports_mcp = $this->supports_mcp_remote || $supports_tools;
         if ($supports_mcp && $mcp_servers !== null && !empty($mcp_servers)) {
             if (is_array(current($mcp_servers))) {
                 $this->mcp_servers = $mcp_servers;
@@ -593,13 +594,13 @@ abstract class aihelper
         if ($supports_mcp && $this->mcp_servers !== null) {
             if ($mcp_servers_call_type === 'local' && $supports_tools) {
                 $this->mcp_servers_call_type = 'local';
-            } elseif ($this->support_mcp_remote) {
+            } elseif ($this->supports_mcp_remote) {
                 $this->mcp_servers_call_type = 'remote';
             } else {
                 $this->mcp_servers_call_type = 'local';
             }
         }
-        $this->stream = $this->support_stream && $stream === true ? true : false;
+        $this->stream = $this->supports_stream && $stream === true ? true : false;
 
         $this->model = $model;
         $this->temperature = $temperature;
@@ -670,6 +671,335 @@ abstract class aihelper
             $return = $this->runLocalToolLoop($return);
         }
         return $return;
+    }
+
+    public function image(
+        ?string $prompt = null,
+        int $n = 1,
+        ?string $size = null,
+        mixed $input_file = null,
+        ?string $output_file = null
+    ): array {
+        $supports = false;
+        foreach ($this->models as $models__value) {
+            if (($models__value['name'] ?? null) === $this->model) {
+                $supports = ($models__value['supports_image'] ?? false) === true;
+                break;
+            }
+        }
+        if ($supports !== true) {
+            throw new \BadMethodCallException(
+                'Model "' . $this->model . '" does not support image generation.'
+            );
+        }
+        return $this->imageThis(
+            prompt: $prompt,
+            n: $n,
+            size: $size,
+            input_file: $input_file,
+            output_file: $output_file
+        );
+    }
+
+    public function audio(
+        ?string $prompt = null,
+        ?string $voice = null,
+        ?string $output_file = null
+    ): array {
+        $supports = false;
+        foreach ($this->models as $models__value) {
+            if (($models__value['name'] ?? null) === $this->model) {
+                $supports = ($models__value['supports_audio'] ?? false) === true;
+                break;
+            }
+        }
+        if ($supports !== true) {
+            throw new \BadMethodCallException(
+                'Model "' . $this->model . '" does not support audio generation.'
+            );
+        }
+        return $this->audioThis(
+            prompt: $prompt,
+            voice: $voice,
+            output_file: $output_file
+        );
+    }
+
+    /**
+     * SSRF guard for caller-supplied http(s) URLs: only allow public IPs.
+     * Reject when DNS resolves to private/reserved/loopback/link-local ranges
+     * (FILTER_FLAG_NO_PRIV_RANGE | NO_RES_RANGE), or when the host cannot be
+     * resolved at all.
+     */
+    protected static function isPublicHttpUrl(string $url): bool
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        if (!is_string($host) || $host === '') {
+            return false;
+        }
+        $ip = filter_var($host, FILTER_VALIDATE_IP) ? $host : gethostbyname($host);
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+        return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+    }
+
+    /**
+     * Fetch a URL's body via curl with a fixed timeout and no redirects.
+     * Returns null on any failure (HTTP >= 400, transport error, empty body).
+     * Used in place of file_get_contents() to avoid the @-suppression and to
+     * keep redirects from defeating the SSRF guard.
+     */
+    protected static function fetchUrlBinary(string $url, int $timeout): ?string
+    {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_CONNECTTIMEOUT => $timeout,
+        ]);
+        $bin = curl_exec($ch);
+        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if (!is_string($bin) || $bin === '' || $http >= 400) {
+            return null;
+        }
+        return $bin;
+    }
+
+    protected function imageThis(
+        ?string $prompt = null,
+        int $n = 1,
+        ?string $size = null,
+        mixed $input_file = null,
+        ?string $output_file = null
+    ): array {
+        $is_edit = $input_file !== null;
+        // edits: OpenAI uses multipart `/images/edits`; xAI uses the same path
+        // but expects application/json with image:{url,type}. We branch below.
+        $endpoint = $this->url . '/images/' . ($is_edit ? 'edits' : 'generations');
+        $payload = ['model' => $this->model, 'prompt' => (string) $prompt, 'n' => $n];
+        if ($size !== null) {
+            $payload['size'] = $size;
+        }
+        // dall-e-2/3 require explicit response_format to get base64; gpt-image-*
+        // returns it by default and rejects the param.
+        if (str_starts_with((string) $this->model, 'dall-e')) {
+            $payload['response_format'] = 'b64_json';
+        }
+        $headers = ['Authorization: Bearer ' . $this->api_key];
+        $ch = curl_init($endpoint);
+        $tmp_input = null; // remember temp file so we can clean up after curl_exec
+        if ($is_edit && $this->name === 'xai') {
+            // xAI edit schema: JSON body with image:{url, type}. url can be a
+            // public http(s) url ("image_url") or a data: uri ("base64").
+            $img_url = null;
+            $type = 'base64';
+            if (is_string($input_file) && is_file($input_file)) {
+                $mime = mime_content_type($input_file);
+                if ($mime === false) {
+                    $mime = 'image/png';
+                }
+                $bin = file_get_contents($input_file);
+                if ($bin === false) {
+                    $this->log('⛔ image: failed to read input_file ' . $input_file);
+                    return ['response' => null, 'success' => false, 'costs' => 0.0];
+                }
+                $img_url = 'data:' . $mime . ';base64,' . base64_encode($bin);
+            } elseif (is_string($input_file) && (str_starts_with($input_file, 'http://') || str_starts_with($input_file, 'https://'))) {
+                if (!self::isPublicHttpUrl($input_file)) {
+                    $this->log('⛔ image: refused private/reserved url ' . $input_file);
+                    return ['response' => null, 'success' => false, 'costs' => 0.0];
+                }
+                $img_url = $input_file;
+                $type = 'image_url';
+            } elseif (is_string($input_file) && str_contains($input_file, ';base64,')) {
+                $img_url = $input_file;
+            } elseif (is_string($input_file)) {
+                $img_url = 'data:image/png;base64,' . $input_file;
+            }
+            if ($img_url === null) {
+                $this->log('⛔ image: invalid input_file for xai edit');
+                return ['response' => null, 'success' => false, 'costs' => 0.0];
+            }
+            $payload['image'] = ['url' => $img_url, 'type' => $type];
+            $headers[] = 'Content-Type: application/json';
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        } elseif ($is_edit) {
+            // OpenAI multipart edit
+            $curl_file = null;
+            if ($input_file instanceof \CURLFile) {
+                $curl_file = $input_file;
+            } elseif (is_string($input_file) && is_file($input_file)) {
+                $curl_file = new \CURLFile($input_file);
+            } else {
+                $tmp_input = tempnam(sys_get_temp_dir(), 'aih_');
+                if (is_string($input_file) && (str_starts_with($input_file, 'http://') || str_starts_with($input_file, 'https://'))) {
+                    if (!self::isPublicHttpUrl($input_file)) {
+                        unlink($tmp_input);
+                        $this->log('⛔ image: refused private/reserved url ' . $input_file);
+                        return ['response' => null, 'success' => false, 'costs' => 0.0];
+                    }
+                    $bin = self::fetchUrlBinary($input_file, (int) ($this->timeout ?? 30));
+                    if ($bin === null) {
+                        unlink($tmp_input);
+                        $this->log('⛔ image: failed to fetch input_file url ' . $input_file);
+                        return ['response' => null, 'success' => false, 'costs' => 0.0];
+                    }
+                    if (file_put_contents($tmp_input, $bin) === false) {
+                        unlink($tmp_input);
+                        $this->log('⛔ image: failed to write fetched input to tempfile');
+                        return ['response' => null, 'success' => false, 'costs' => 0.0];
+                    }
+                } else {
+                    $b64 = (is_string($input_file) && str_contains($input_file, ';base64,'))
+                        ? explode(';base64,', $input_file, 2)[1]
+                        : (string) $input_file;
+                    $decoded = base64_decode($b64, true);
+                    if ($decoded === false) {
+                        unlink($tmp_input);
+                        $this->log('⛔ image: invalid base64 input_file');
+                        return ['response' => null, 'success' => false, 'costs' => 0.0];
+                    }
+                    if (file_put_contents($tmp_input, $decoded) === false) {
+                        unlink($tmp_input);
+                        $this->log('⛔ image: failed to write decoded input to tempfile');
+                        return ['response' => null, 'success' => false, 'costs' => 0.0];
+                    }
+                }
+                $curl_file = new \CURLFile($tmp_input);
+            }
+            $payload['image'] = $curl_file;
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+        } else {
+            $headers[] = 'Content-Type: application/json';
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        }
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_TIMEOUT => $this->timeout ?? 300,
+        ]);
+        $raw = curl_exec($ch);
+        $err = curl_error($ch);
+        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($tmp_input !== null && is_file($tmp_input)) {
+            unlink($tmp_input);
+        }
+        if ($raw === false || $http >= 400) {
+            $this->log('⛔ image HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500));
+            return ['response' => null, 'success' => false, 'costs' => 0.0];
+        }
+        $data = json_decode((string) $raw, true);
+        $items = is_array($data) ? ($data['data'] ?? []) : [];
+        if (!is_array($items) || count($items) === 0) {
+            return ['response' => null, 'success' => false, 'costs' => 0.0];
+        }
+        // openai gpt-image-* returns b64_json inline; xai and dall-e default to a
+        // temporary url — download and re-encode so the caller always sees base64.
+        $download_timeout = (int) ($this->timeout ?? 30);
+        $download_failed = false;
+        $b64s = array_map(function ($it) use ($download_timeout, &$download_failed) {
+            if (!empty($it['b64_json'])) {
+                return (string) $it['b64_json'];
+            }
+            if (!empty($it['url'])) {
+                $bin = self::fetchUrlBinary((string) $it['url'], $download_timeout);
+                if ($bin === null) {
+                    $download_failed = true;
+                    return '';
+                }
+                return base64_encode($bin);
+            }
+            return '';
+        }, $items);
+        if ($download_failed || in_array('', $b64s, true)) {
+            $this->log('⛔ image: failed to download one or more result urls');
+            return ['response' => null, 'success' => false, 'costs' => 0.0];
+        }
+        if ($output_file !== null) {
+            $info = pathinfo($output_file);
+            $dir = $info['dirname'] ?? '.';
+            $base = $info['filename'] ?? 'out';
+            $ext = isset($info['extension']) ? '.' . $info['extension'] : '';
+            $paths = [];
+            foreach ($b64s as $i => $b64) {
+                $path = $n === 1 ? $output_file : ($dir . '/' . $base . '-' . ($i + 1) . $ext);
+                if (file_put_contents($path, base64_decode($b64)) === false) {
+                    $this->log('⛔ image: failed to write output_file ' . $path);
+                    return ['response' => null, 'success' => false, 'costs' => 0.0];
+                }
+                $paths[] = $path;
+            }
+            $response = $n === 1 ? $paths[0] : $paths;
+        } else {
+            $response = $n === 1 ? $b64s[0] : $b64s;
+        }
+        $cost_per = 0.0;
+        foreach ($this->models as $m) {
+            if (($m['name'] ?? null) === $this->model) {
+                $cost_per = (float) (($m['costs']['image'] ?? 0) ?: 0);
+                break;
+            }
+        }
+        return ['response' => $response, 'success' => true, 'costs' => $cost_per * $n];
+    }
+
+    protected function audioThis(
+        ?string $prompt = null,
+        ?string $voice = null,
+        ?string $output_file = null
+    ): array {
+        $endpoint = $this->url . '/audio/speech';
+        $payload = ['model' => $this->model, 'input' => (string) $prompt, 'voice' => $voice ?? 'alloy'];
+        if ($output_file !== null) {
+            $ext = strtolower((string) pathinfo($output_file, PATHINFO_EXTENSION));
+            if (in_array($ext, ['mp3', 'wav', 'opus', 'flac', 'aac', 'pcm'], true)) {
+                $payload['response_format'] = $ext;
+            }
+        }
+        $ch = curl_init($endpoint);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $this->api_key,
+                'Content-Type: application/json',
+            ],
+            CURLOPT_TIMEOUT => $this->timeout ?? 300,
+        ]);
+        $raw = curl_exec($ch);
+        $err = curl_error($ch);
+        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($raw === false || $http >= 400) {
+            $this->log('⛔ audio HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500));
+            return ['response' => null, 'success' => false, 'costs' => 0.0];
+        }
+        $costs = 0.0;
+        foreach ($this->models as $m) {
+            if (($m['name'] ?? null) === $this->model) {
+                // costs.audio is the $/character rate. Authoritative for the
+                // legacy character-billed tts-1 / tts-1-hd models. For the
+                // token-billed gpt-4o-mini-tts this is an approximation only
+                // (~1.3× off, since OpenAI bills text+audio tokens separately
+                // at ~$0.015/min of audio).
+                $costs = (float) (($m['costs']['audio'] ?? 0) ?: 0) * mb_strlen((string) $prompt);
+                break;
+            }
+        }
+        if ($output_file !== null) {
+            if (file_put_contents($output_file, $raw) === false) {
+                $this->log('⛔ audio: failed to write output_file ' . $output_file);
+                return ['response' => null, 'success' => false, 'costs' => 0.0];
+            }
+            return ['response' => $output_file, 'success' => true, 'costs' => $costs];
+        }
+        return ['response' => base64_encode((string) $raw), 'success' => true, 'costs' => $costs];
     }
 
     /**
@@ -2617,10 +2947,13 @@ abstract class aihelper
         $costs = 0;
         foreach ($this->models as $models__value) {
             if ($models__value['name'] === $this->model) {
+                // image/audio model entries carry costs.image|audio instead of
+                // input/output token rates — guard with ?? 0 so a stray ask()
+                // call on a non-text model does not warn.
                 $costs =
-                    $input_tokens * $models__value['costs']['input'] +
-                    $input_cached_tokens * $models__value['costs']['input_cached'] +
-                    $output_tokens * $models__value['costs']['output'];
+                    $input_tokens * ($models__value['costs']['input'] ?? 0) +
+                    $input_cached_tokens * ($models__value['costs']['input_cached'] ?? 0) +
+                    $output_tokens * ($models__value['costs']['output'] ?? 0);
                 break;
             }
         }
@@ -3653,9 +3986,9 @@ class ai_openai extends aihelper
 
     protected ?string $url = 'https://api.openai.com/v1';
 
-    public ?bool $support_mcp_remote = true;
+    public ?bool $supports_mcp_remote = true;
 
-    public ?bool $support_stream = true;
+    public ?bool $supports_stream = true;
 
     public array $models = [
         [
@@ -4327,7 +4660,17 @@ class ai_openai extends aihelper
             'supports_tools' => true,
             'default' => false,
             'test' => false
-        ]
+        ],
+        // image generation — costs per image (1024x1024 medium quality where applicable)
+        ['name' => 'gpt-image-1', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.042], 'default' => false, 'test' => false],
+        ['name' => 'gpt-image-1-mini', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.011], 'default' => false, 'test' => false],
+        ['name' => 'gpt-image-1.5', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.04], 'default' => false, 'test' => false],
+        ['name' => 'gpt-image-2', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.04], 'default' => false, 'test' => false],
+        ['name' => 'chatgpt-image-latest', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.04], 'default' => false, 'test' => false],
+        // audio (TTS) — costs per input character
+        ['name' => 'tts-1', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.000015], 'default' => false, 'test' => false],
+        ['name' => 'tts-1-hd', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.00003], 'default' => false, 'test' => false],
+        ['name' => 'gpt-4o-mini-tts', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.000015], 'default' => false, 'test' => false]
     ];
 
     public function fetchModels(): array
@@ -4387,7 +4730,6 @@ class ai_openai extends aihelper
                             'gpt-4o-mini-transcribe',
                             'gpt-4o-mini-transcribe-2025-03-20',
                             'gpt-4o-mini-transcribe-2025-12-15',
-                            'gpt-4o-mini-tts',
                             'gpt-4o-mini-tts-2025-03-20',
                             'gpt-4o-mini-tts-2025-12-15',
                             'gpt-3.5-turbo-instruct',
@@ -4395,11 +4737,6 @@ class ai_openai extends aihelper
                             'gpt-3.5-turbo-16k',
                             'davinci-002',
                             'babbage-002',
-                            'gpt-image-1',
-                            'gpt-image-1-mini',
-                            'gpt-image-1.5',
-                            'gpt-image-2',
-                            'chatgpt-image-latest',
                             'dall-e-3',
                             'dall-e-2',
                             'sora-2',
@@ -4409,8 +4746,6 @@ class ai_openai extends aihelper
                             'text-embedding-ada-002',
                             'omni-moderation-latest',
                             'omni-moderation-2024-09-26',
-                            'tts-1',
-                            'tts-1-hd',
                             'tts-1-1106',
                             'tts-1-hd-1106',
                             'whisper-1'
@@ -4418,14 +4753,19 @@ class ai_openai extends aihelper
                     ) {
                         continue;
                     }
-                    $context_length = 128000;
+                    $entry = ['name' => $name, 'context_length' => 128000];
                     foreach ($this->models as $definedModel) {
                         if ($definedModel['name'] === $name) {
-                            $context_length = $definedModel['context_length'];
+                            // merge static caps (supports_image/audio/costs/…) into the
+                            // dynamic entry so capability metadata survives fetchModels()
+                            $entry = array_merge($definedModel, ['name' => $name]);
+                            if (!isset($entry['context_length'])) {
+                                $entry['context_length'] = 128000;
+                            }
                             break;
                         }
                     }
-                    $models[] = ['name' => $name, 'context_length' => $context_length];
+                    $models[] = $entry;
                 }
             }
         }
@@ -4739,9 +5079,9 @@ class ai_anthropic extends aihelper
 
     protected ?string $url = 'https://api.anthropic.com/v1';
 
-    public ?bool $support_mcp_remote = true;
+    public ?bool $supports_mcp_remote = true;
 
-    public ?bool $support_stream = true;
+    public ?bool $supports_stream = true;
 
     public array $models = [
         [
@@ -4864,23 +5204,26 @@ class ai_anthropic extends aihelper
                         in_array($name, [
                             'grok-4-0',
                             'grok-2-image-1212',
-                            'grok-imagine-image',
                             'grok-imagine-image-pro',
-                            'grok-imagine-image-quality',
                             'grok-imagine-video',
                             'grok-2-vision-1212'
                         ])
                     ) {
                         continue;
                     }
-                    $context_length = 128000;
+                    $entry = ['name' => $name, 'context_length' => 128000];
                     foreach ($this->models as $definedModel) {
                         if ($definedModel['name'] === $name) {
-                            $context_length = $definedModel['context_length'];
+                            // merge static caps (supports_image/audio/costs/…) into the
+                            // dynamic entry so capability metadata survives fetchModels()
+                            $entry = array_merge($definedModel, ['name' => $name]);
+                            if (!isset($entry['context_length'])) {
+                                $entry['context_length'] = 128000;
+                            }
                             break;
                         }
                     }
-                    $models[] = ['name' => $name, 'context_length' => $context_length];
+                    $models[] = $entry;
                 }
             }
         }
@@ -5240,9 +5583,9 @@ class ai_google extends aihelper
 
     protected ?string $url = 'https://generativelanguage.googleapis.com/v1beta';
 
-    public ?bool $support_mcp_remote = false;
+    public ?bool $supports_mcp_remote = false;
 
-    public ?bool $support_stream = true;
+    public ?bool $supports_stream = true;
 
     public array $models = [
         [
@@ -5411,18 +5754,20 @@ class ai_google extends aihelper
                     ) {
                         continue;
                     }
-                    $context_length = 128000;
-                    if (!empty($models__value->inputTokenLimit)) {
-                        $context_length = (int) $models__value->inputTokenLimit;
-                    } else {
-                        foreach ($this->models as $definedModel) {
-                            if ($definedModel['name'] === $name) {
-                                $context_length = $definedModel['context_length'];
-                                break;
+                    $entry = ['name' => $name, 'context_length' => 128000];
+                    foreach ($this->models as $definedModel) {
+                        if ($definedModel['name'] === $name) {
+                            $entry = array_merge($definedModel, ['name' => $name]);
+                            if (!isset($entry['context_length'])) {
+                                $entry['context_length'] = 128000;
                             }
+                            break;
                         }
                     }
-                    $models[] = ['name' => $name, 'context_length' => $context_length];
+                    if (!empty($models__value->inputTokenLimit)) {
+                        $entry['context_length'] = (int) $models__value->inputTokenLimit;
+                    }
+                    $models[] = $entry;
                 }
             }
         }
@@ -5647,9 +5992,9 @@ class ai_xai extends ai_anthropic
 
     protected ?string $url = 'https://api.x.ai/v1';
 
-    public ?bool $support_mcp_remote = false;
+    public ?bool $supports_mcp_remote = false;
 
-    public ?bool $support_stream = false;
+    public ?bool $supports_stream = false;
 
     public array $models = [
         [
@@ -5691,7 +6036,10 @@ class ai_xai extends ai_anthropic
             'supports_tools' => false,
             'default' => true,
             'test' => true
-        ]
+        ],
+        // image generation — costs per image
+        ['name' => 'grok-imagine-image', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.02], 'default' => false, 'test' => false],
+        ['name' => 'grok-imagine-image-quality', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.07], 'default' => false, 'test' => false]
     ];
 }
 
@@ -5710,9 +6058,9 @@ class ai_deepseek extends ai_anthropic
 
     protected ?string $url = 'https://api.deepseek.com/anthropic';
 
-    public ?bool $support_mcp_remote = false;
+    public ?bool $supports_mcp_remote = false;
 
-    public ?bool $support_stream = false;
+    public ?bool $supports_stream = false;
 
     public array $models = [
         [
@@ -5754,14 +6102,19 @@ class ai_deepseek extends ai_anthropic
             foreach ($response->result->data as $data__value) {
                 if (__::x($data__value?->id ?? null)) {
                     $name = $data__value->id;
-                    $context_length = 128000;
+                    $entry = ['name' => $name, 'context_length' => 128000];
                     foreach ($this->models as $definedModel) {
                         if ($definedModel['name'] === $name) {
-                            $context_length = $definedModel['context_length'];
+                            // merge static caps (supports_image/audio/costs/…) into the
+                            // dynamic entry so capability metadata survives fetchModels()
+                            $entry = array_merge($definedModel, ['name' => $name]);
+                            if (!isset($entry['context_length'])) {
+                                $entry['context_length'] = 128000;
+                            }
                             break;
                         }
                     }
-                    $models[] = ['name' => $name, 'context_length' => $context_length];
+                    $models[] = $entry;
                 }
             }
         }
@@ -5784,9 +6137,9 @@ class ai_openrouter extends aihelper
 
     protected ?string $url = 'https://openrouter.ai/api/v1';
 
-    public ?bool $support_mcp_remote = false;
+    public ?bool $supports_mcp_remote = false;
 
-    public ?bool $support_stream = true;
+    public ?bool $supports_stream = true;
 
     public array $models = [];
 
@@ -6203,10 +6556,9 @@ class ai_llamacpp extends ai_openrouter
 
     protected ?string $url = 'http://localhost:8080/v1';
 
-    public ?bool $support_mcp_remote = false;
-    public bool $support_mcp_local = true;
+    public ?bool $supports_mcp_remote = false;
 
-    public ?bool $support_stream = true;
+    public ?bool $supports_stream = true;
 
     public array $models = [];
 
@@ -6296,9 +6648,9 @@ class ai_lmstudio extends ai_openai
 
     protected ?string $url = 'http://localhost:1234/v1';
 
-    public ?bool $support_mcp_remote = true;
+    public ?bool $supports_mcp_remote = true;
 
-    public ?bool $support_stream = true;
+    public ?bool $supports_stream = true;
 
     public array $models = [];
 
@@ -6441,9 +6793,9 @@ class ai_nvidia extends ai_openrouter
 
     protected ?string $url = 'https://integrate.api.nvidia.com/v1';
 
-    public ?bool $support_mcp_remote = false;
+    public ?bool $supports_mcp_remote = false;
 
-    public ?bool $support_stream = true;
+    public ?bool $supports_stream = true;
 
     public array $models = [
         [
@@ -6589,9 +6941,9 @@ class ai_test extends ai_anthropic
 
     protected ?string $url = null;
 
-    public ?bool $support_mcp_remote = false;
+    public ?bool $supports_mcp_remote = false;
 
-    public ?bool $support_stream = true;
+    public ?bool $supports_stream = true;
 
     public array $models = [
         [
@@ -6779,6 +7131,10 @@ class ai_codex extends ai_openrouter
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 260"><path d="M239.184 106.203a64.72 64.72 0 0 0-5.576-53.103C219.452 28.459 191 15.784 163.213 21.74A65.586 65.586 0 0 0 52.096 45.22a64.72 64.72 0 0 0-43.23 31.36c-14.31 24.602-11.061 55.634 8.033 76.74a64.67 64.67 0 0 0 5.525 53.102c14.174 24.65 42.644 37.324 70.446 31.36a64.72 64.72 0 0 0 48.754 21.744c28.481.025 53.714-18.361 62.414-45.481a64.77 64.77 0 0 0 43.229-31.36c14.137-24.558 10.875-55.423-8.083-76.483m-97.56 136.338a48.4 48.4 0 0 1-31.105-11.255l1.535-.87l51.67-29.825a8.6 8.6 0 0 0 4.247-7.367v-72.85l21.845 12.636c.218.111.37.32.409.563v60.367c-.056 26.818-21.783 48.545-48.601 48.601M37.158 197.93a48.35 48.35 0 0 1-5.781-32.589l1.534.921l51.722 29.826a8.34 8.34 0 0 0 8.441 0l63.181-36.425v25.221a.87.87 0 0 1-.358.665l-52.335 30.184c-23.257 13.398-52.97 5.431-66.404-17.803M23.549 85.38a48.5 48.5 0 0 1 25.58-21.333v61.39a8.29 8.29 0 0 0 4.195 7.316l62.874 36.272l-21.845 12.636a.82.82 0 0 1-.767 0L41.353 151.53c-23.211-13.454-31.171-43.144-17.804-66.405zm179.466 41.695l-63.08-36.63L161.73 77.86a.82.82 0 0 1 .768 0l52.233 30.184a48.6 48.6 0 0 1-7.316 87.635v-61.391a8.54 8.54 0 0 0-4.4-7.213m21.742-32.69l-1.535-.922l-51.619-30.081a8.39 8.39 0 0 0-8.492 0L99.98 99.808V74.587a.72.72 0 0 1 .307-.665l52.233-30.133a48.652 48.652 0 0 1 72.236 50.391zM88.061 139.097l-21.845-12.585a.87.87 0 0 1-.41-.614V65.685a48.652 48.652 0 0 1 79.757-37.346l-1.535.87l-51.67 29.825a8.6 8.6 0 0 0-4.246 7.367zm11.868-25.58L128.067 97.3l28.188 16.218v32.434l-28.086 16.218l-28.188-16.218z"/></svg>
     SVG;
     protected ?string $url = 'http://127.0.0.1:8317/v1';
+
+    public ?bool $supports_mcp_remote = false;
+
+    public ?bool $supports_stream = true;
 
     public function fetchModels(): array
     {
