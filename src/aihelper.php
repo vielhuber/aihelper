@@ -6988,6 +6988,8 @@ class ai_elevenlabs extends ai_openai
         $this->log($response);
         $list = $response?->result ?? null;
         if (!is_array($list)) {
+            $code = $response?->status ?? null;
+            $this->log('⚠️ elevenlabs fetchModels returned empty — HTTP ' . var_export($code, true) . ' (check api key / quota / connectivity)');
             return $models;
         }
         foreach ($list as $m) {

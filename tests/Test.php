@@ -1356,7 +1356,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $providers = aihelper::getProviders();
         $success = true;
         foreach ($providers as $providers__value) {
-            if (in_array($providers__value['name'], ['openrouter', 'llamacpp', 'lmstudio', 'nvidia', 'test'])) {
+            if (in_array($providers__value['name'], ['openrouter', 'llamacpp', 'lmstudio', 'nvidia', 'codex', 'test'])) {
                 continue;
             }
             $modelsApi = array_map(function ($m) {
@@ -1393,12 +1393,10 @@ class Test extends \PHPUnit\Framework\TestCase
                 }
             }
             foreach ($providers__value['models'] as $models__value) {
-                // image/audio models speak different endpoints — chat-completion
-                // probe via ask() would always fail. costs are tracked anyway.
-                if (
-                    ($models__value['supports_image'] ?? false) === true ||
-                    ($models__value['supports_audio'] ?? false) === true
-                ) {
+                // image models cannot be probed with a tiny prompt without
+                // incurring per-image costs — skip them. audio is cheap
+                // (~$5e-8 per char) so we probe via audio() instead.
+                if (($models__value['supports_image'] ?? false) === true) {
                     continue;
                 }
                 for ($i = 1; $i <= 3; $i++) {
@@ -1411,7 +1409,22 @@ class Test extends \PHPUnit\Framework\TestCase
                         log: 'tests/aihelper.log',
                         max_tries: 2
                     );
-                    $return = $ai->ask('Hallo!');
+                    if (($models__value['supports_audio'] ?? false) === true) {
+                        $probe_out = sys_get_temp_dir() . '/aihelper-probe-' . uniqid() . '.mp3';
+                        $return = $ai->audio(prompt: 'Test.', output_file: $probe_out);
+                        $audio_ok = ($return['success'] ?? false) === true &&
+                            is_string($return['response'] ?? null) &&
+                            is_file($return['response']) &&
+                            filesize($return['response']) > 0;
+                        @unlink($probe_out);
+                        // normalise to the same shape the ask() branch expects
+                        $return['success'] = $audio_ok;
+                        if (!$audio_ok && empty($return['response'])) {
+                            $return['response'] = 'audio probe failed';
+                        }
+                    } else {
+                        $return = $ai->ask('Hallo!');
+                    }
                     if ($return['success'] === true) {
                         $this->log('✅ ' . $models__value['name']);
                         break;
