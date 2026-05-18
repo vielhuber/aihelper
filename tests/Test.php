@@ -72,6 +72,10 @@ class Test extends \PHPUnit\Framework\TestCase
         }
         for ($i = 1; $i <= $this->run_count; $i++) {
             $this->log('run ' . $i . '/' . $this->run_count . '...');
+            $this->test__ai_elevenlabs($stats, true);
+        }
+        for ($i = 1; $i <= $this->run_count; $i++) {
+            $this->log('run ' . $i . '/' . $this->run_count . '...');
             $this->test__ai_test($stats, true);
         }
         $this->log('stats (' . $this->run_count . ' runs):');
@@ -186,6 +190,57 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->markTestSkipped('Skipped.');
         }
         $this->ai_test_prepare('test', null, null, $stats);
+    }
+
+    function test__ai_elevenlabs(array &$stats = [], bool $force = false): void
+    {
+        if ($this->isCi() && $force !== true) {
+            $this->markTestSkipped('Skipped.');
+        }
+        if (empty($_SERVER['ELEVENLABS_API_KEY'] ?? null)) {
+            $this->markTestSkipped('ELEVENLABS_API_KEY not configured.');
+        }
+        $provider = 'elevenlabs';
+        $api_models = aihelper::create(
+            provider: $provider,
+            api_key: $_SERVER['ELEVENLABS_API_KEY'],
+            log: 'tests/aihelper.log'
+        )->fetchModels();
+        $test_models = aihelper::create(
+            provider: $provider,
+            api_key: $_SERVER['ELEVENLABS_API_KEY'],
+            log: 'tests/aihelper.log'
+        )->getTestModels();
+        foreach ($test_models as $model) {
+            __::log_begin('ai');
+            $this->log('Testing ' . $provider . ' (' . $model . ')...');
+            $ai = aihelper::create(
+                provider: $provider,
+                model: $model,
+                api_key: $_SERVER['ELEVENLABS_API_KEY'],
+                log: 'tests/aihelper.log',
+                max_tries: 2
+            );
+            $out = sys_get_temp_dir() . '/aihelper-test-' . uniqid() . '.mp3';
+            $return = $ai->audio(prompt: 'Hallo, dies ist ein Test der Sprachsynthese.', output_file: $out);
+            $time = __::log_end('ai', false)['time'];
+            $success = ($return['success'] ?? false) === true && is_string($return['response']) && is_file($return['response']) && filesize($return['response']) > 0;
+            $this->log(($success ? '✅' : '⛔') . ' ' . $model . ' (' . round((float) ($return['costs'] ?? 0), 6) . '€, ' . $time . 's)');
+            @unlink($out);
+            if (!isset($stats[$provider])) {
+                $stats[$provider] = [];
+            }
+            if (!isset($stats[$provider][$model])) {
+                $stats[$provider][$model] = [];
+            }
+            $stats[$provider][$model][] = [
+                'time' => $time,
+                'costs' => (float) ($return['costs'] ?? 0),
+                'fail_count' => $success ? 0 : 1,
+                'success_count' => $success ? 1 : 0
+            ];
+        }
+        $this->assertGreaterThan(0, count($api_models));
     }
 
     function test__auto_compact(): void

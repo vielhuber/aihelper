@@ -245,6 +245,24 @@ abstract class aihelper
                 auto_compact: $auto_compact
             );
         }
+        if ($provider === 'elevenlabs') {
+            return new ai_elevenlabs(
+                model: $model,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream,
+                url: $url,
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact
+            );
+        }
         if ($provider === 'test') {
             return new ai_test(
                 model: $model,
@@ -281,6 +299,7 @@ abstract class aihelper
                 new ai_llamacpp(),
                 new ai_lmstudio(),
                 new ai_nvidia(),
+                new ai_elevenlabs(),
                 new ai_test()
             ]
             as $providers__value
@@ -624,8 +643,9 @@ abstract class aihelper
         if ($auto_compact === true) {
             $this->auto_compact = true;
             $cacheDir = sys_get_temp_dir() . '/aihelper-cache';
-            if (!is_dir($cacheDir)) {
-                @mkdir($cacheDir, 0777, true);
+            // trailing is_dir() handles the parallel-worker race
+            if (!is_dir($cacheDir) && !mkdir($cacheDir, 0777, true) && !is_dir($cacheDir)) {
+                $this->log('⚠️ auto_compact: failed to create cache dir ' . $cacheDir);
             }
             $this->auto_compact_cache =
                 $cacheDir . '/' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $this->session_id) . '.txt';
@@ -761,7 +781,6 @@ abstract class aihelper
         ]);
         $bin = curl_exec($ch);
         $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         if (!is_string($bin) || $bin === '' || $http >= 400) {
             return null;
         }
@@ -885,7 +904,6 @@ abstract class aihelper
         $raw = curl_exec($ch);
         $err = curl_error($ch);
         $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         if ($tmp_input !== null && is_file($tmp_input)) {
             unlink($tmp_input);
         }
@@ -975,7 +993,6 @@ abstract class aihelper
         $raw = curl_exec($ch);
         $err = curl_error($ch);
         $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         if ($raw === false || $http >= 400) {
             $this->log('⛔ audio HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500));
             return ['response' => null, 'success' => false, 'costs' => 0.0];
@@ -1167,9 +1184,10 @@ abstract class aihelper
         if (
             $this->auto_compact_summary === null &&
             $this->auto_compact_cache !== null &&
-            is_file($this->auto_compact_cache)
+            is_file($this->auto_compact_cache) &&
+            is_readable($this->auto_compact_cache)
         ) {
-            $cache_raw = @file_get_contents($this->auto_compact_cache);
+            $cache_raw = file_get_contents($this->auto_compact_cache);
             if (is_string($cache_raw) && $cache_raw !== '') {
                 $cache_data = json_decode($cache_raw, true);
                 if (
@@ -1479,16 +1497,16 @@ abstract class aihelper
         // loaded history, so the (slow) compact pass runs only when the
         // threshold is actually re-breached — not on every worker pickup.
         if ($this->auto_compact_cache !== null) {
-            @file_put_contents(
-                $this->auto_compact_cache,
-                json_encode(
-                    [
-                        'summary' => $new_summary,
-                        'session' => self::$sessions[$this->session_id]
-                    ],
-                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-                )
+            $cache_payload = json_encode(
+                [
+                    'summary' => $new_summary,
+                    'session' => self::$sessions[$this->session_id]
+                ],
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
             );
+            if ($cache_payload !== false && file_put_contents($this->auto_compact_cache, $cache_payload) === false) {
+                $this->log('⚠️ auto_compact: failed to persist cache to ' . $this->auto_compact_cache);
+            }
         }
     }
 
@@ -6926,6 +6944,131 @@ class ai_nvidia extends ai_openrouter
         } catch (\Exception) {
             return false;
         }
+    }
+}
+
+class ai_elevenlabs extends ai_openai
+{
+    public ?string $provider = 'ElevenLabs';
+
+    public ?string $title = 'ElevenLabs';
+
+    public ?string $name = 'elevenlabs';
+
+    public ?string $icon = <<<'SVG'
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M7 4h3v16H7zm7 0h3v16h-3z"/></svg>
+    SVG;
+
+    protected ?string $url = 'https://api.elevenlabs.io/v1';
+
+    public ?bool $supports_mcp_remote = false;
+
+    public ?bool $supports_stream = false;
+
+    public array $models = [
+        ['name' => 'eleven_v3', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.0003], 'default' => false, 'test' => false],
+        ['name' => 'eleven_turbo_v2_5', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.00005], 'default' => true, 'test' => true],
+        ['name' => 'eleven_turbo_v2', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.00005], 'default' => false, 'test' => false],
+        ['name' => 'eleven_flash_v2_5', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.000033], 'default' => false, 'test' => false],
+        ['name' => 'eleven_flash_v2', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.000033], 'default' => false, 'test' => false],
+        ['name' => 'eleven_multilingual_v2', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.00018], 'default' => false, 'test' => false],
+        ['name' => 'eleven_multilingual_v1', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.000165], 'default' => false, 'test' => false],
+        ['name' => 'eleven_monolingual_v1', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.000165], 'default' => false, 'test' => false]
+    ];
+
+    public function fetchModels(): array
+    {
+        $models = [];
+        $response = __::curl(
+            url: $this->url . '/models',
+            method: 'GET',
+            headers: ['xi-api-key' => $this->api_key],
+            timeout: $this->timeout
+        );
+        $this->log($response);
+        $list = $response?->result ?? null;
+        if (!is_array($list)) {
+            return $models;
+        }
+        foreach ($list as $m) {
+            $name = $m->model_id ?? null;
+            if (!is_string($name)) {
+                continue;
+            }
+            if (!($m->can_do_text_to_speech ?? false)) {
+                continue;
+            }
+            $entry = ['name' => $name, 'context_length' => 128000];
+            foreach ($this->models as $defined) {
+                if (($defined['name'] ?? null) === $name) {
+                    $entry = array_merge($defined, ['name' => $name]);
+                    if (!isset($entry['context_length'])) {
+                        $entry['context_length'] = 128000;
+                    }
+                    break;
+                }
+            }
+            $models[] = $entry;
+        }
+        return $models;
+    }
+
+    protected function audioThis(
+        ?string $prompt = null,
+        ?string $voice = null,
+        ?string $output_file = null
+    ): array {
+        // default voice: Rachel
+        $voice_id = ($voice !== null && $voice !== '') ? $voice : '21m00Tcm4TlvDq8ikWAM';
+        $format = 'mp3_44100_128';
+        if ($output_file !== null) {
+            $ext = strtolower((string) pathinfo($output_file, PATHINFO_EXTENSION));
+            // wav/flac intentionally not mapped — elevenlabs only emits raw pcm without container
+            $format_map = [
+                'mp3' => 'mp3_44100_128',
+                'opus' => 'opus_48000_128',
+                'pcm' => 'pcm_44100'
+            ];
+            if (isset($format_map[$ext])) {
+                $format = $format_map[$ext];
+            }
+        }
+        $endpoint = $this->url . '/text-to-speech/' . rawurlencode($voice_id) . '?output_format=' . urlencode($format);
+        $payload = ['text' => (string) $prompt, 'model_id' => $this->model];
+        $ch = curl_init($endpoint);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_HTTPHEADER => [
+                'xi-api-key: ' . $this->api_key,
+                'Content-Type: application/json',
+                'Accept: audio/mpeg'
+            ],
+            CURLOPT_TIMEOUT => $this->timeout ?? 300
+        ]);
+        $raw = curl_exec($ch);
+        $err = curl_error($ch);
+        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        if ($raw === false || $http >= 400) {
+            $this->log('⛔ elevenlabs audio HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500));
+            return ['response' => null, 'success' => false, 'costs' => 0.0];
+        }
+        $costs = 0.0;
+        foreach ($this->models as $m) {
+            if (($m['name'] ?? null) === $this->model) {
+                $costs = (float) (($m['costs']['audio'] ?? 0) ?: 0) * mb_strlen((string) $prompt);
+                break;
+            }
+        }
+        if ($output_file !== null) {
+            if (file_put_contents($output_file, $raw) === false) {
+                $this->log('⛔ elevenlabs audio: failed to write output_file ' . $output_file);
+                return ['response' => null, 'success' => false, 'costs' => 0.0];
+            }
+            return ['response' => $output_file, 'success' => true, 'costs' => $costs];
+        }
+        return ['response' => base64_encode((string) $raw), 'success' => true, 'costs' => $costs];
     }
 }
 
