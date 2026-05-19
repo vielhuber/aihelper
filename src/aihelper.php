@@ -2625,6 +2625,40 @@ abstract class aihelper
     }
 
     /**
+     * Whitespace-runaway detector for streamed buffers.
+     *
+     * Inspects the trailing whitespace run on every currently-growing stream
+     * buffer (reasoning + every assembling tool_call's arguments). Stateless —
+     * the buffers themselves are the source of truth. Throws when any trailing
+     * run exceeds the threshold — symptom of a sampling loop (observed on
+     * GPT-5.5 around JSON tool_call closing boundaries: model produces
+     * \n/\t/space tokens indefinitely instead of emitting the closing brace).
+     *
+     * @throws \RuntimeException when the trailing whitespace run exceeds the threshold.
+     */
+    protected function detectWhitespaceEndlessLoop(): void
+    {
+        $threshold = 500;
+        $buffers = [['reasoning', $this->stream_reasoning_buffer]];
+        $tcs = $this->stream_response->result->choices[0]->message->tool_calls ?? [];
+        foreach ($tcs as $tc) {
+            if (isset($tc['function']['arguments'])) {
+                $buffers[] = ['tool_call arguments', $tc['function']['arguments']];
+            }
+        }
+        foreach ($buffers as [$context, $buffer]) {
+            $trail = strlen($buffer) - strlen(rtrim($buffer, " \t\n\r"));
+            if ($trail > $threshold) {
+                throw new \RuntimeException(
+                    'whitespace runaway: ' . $trail .
+                    ' trailing whitespace chars in ' . $context .
+                    ' stream (threshold ' . $threshold . ') — likely sampling-loop'
+                );
+            }
+        }
+    }
+
+    /**
      * Stateful removal of <tool_call>...</tool_call> and <minimax:tool_call>...</minimax:tool_call>
      * blocks from a streamed text. Handles tags split across chunks by buffering partial tag prefixes.
      * Used to hide tool call XML from user-visible content/reasoning streams
@@ -3608,6 +3642,8 @@ abstract class aihelper
                     while (($pos = strpos($this->stream_buffer_in, "\n")) !== false) {
                         $line = rtrim(substr($this->stream_buffer_in, 0, $pos), "\r");
                         $this->stream_buffer_in = substr($this->stream_buffer_in, $pos + 1);
+
+                        $this->detectWhitespaceEndlessLoop();
 
                         if (strpos($line, 'data: ') !== 0) {
                             continue;
