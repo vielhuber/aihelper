@@ -908,8 +908,9 @@ abstract class aihelper
             unlink($tmp_input);
         }
         if ($raw === false || $http >= 400) {
-            $this->log('⛔ image HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500));
-            return ['response' => null, 'success' => false, 'costs' => 0.0];
+            $msg = 'image HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500);
+            $this->log('⛔ ' . $msg);
+            return ['response' => $msg, 'success' => false, 'costs' => 0.0];
         }
         $data = json_decode((string) $raw, true);
         $items = is_array($data) ? ($data['data'] ?? []) : [];
@@ -994,8 +995,9 @@ abstract class aihelper
         $err = curl_error($ch);
         $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         if ($raw === false || $http >= 400) {
-            $this->log('⛔ audio HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500));
-            return ['response' => null, 'success' => false, 'costs' => 0.0];
+            $msg = 'audio HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500);
+            $this->log('⛔ ' . $msg);
+            return ['response' => $msg, 'success' => false, 'costs' => 0.0];
         }
         $costs = 0.0;
         foreach ($this->models as $m) {
@@ -7089,8 +7091,9 @@ class ai_elevenlabs extends ai_openai
         $err = curl_error($ch);
         $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         if ($raw === false || $http >= 400) {
-            $this->log('⛔ elevenlabs audio HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500));
-            return ['response' => null, 'success' => false, 'costs' => 0.0];
+            $msg = 'elevenlabs audio HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500);
+            $this->log('⛔ ' . $msg);
+            return ['response' => $msg, 'success' => false, 'costs' => 0.0];
         }
         $costs = 0.0;
         foreach ($this->models as $m) {
