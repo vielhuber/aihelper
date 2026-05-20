@@ -696,7 +696,7 @@ abstract class aihelper
     public function image(
         ?string $prompt = null,
         int $n = 1,
-        ?string $size = null,
+        ?string $aspect_ratio = null,
         mixed $input_file = null,
         ?string $output_file = null
     ): array {
@@ -715,7 +715,7 @@ abstract class aihelper
         return $this->imageThis(
             prompt: $prompt,
             n: $n,
-            size: $size,
+            aspect_ratio: $aspect_ratio,
             input_file: $input_file,
             output_file: $output_file
         );
@@ -790,7 +790,7 @@ abstract class aihelper
     protected function imageThis(
         ?string $prompt = null,
         int $n = 1,
-        ?string $size = null,
+        ?string $aspect_ratio = null,
         mixed $input_file = null,
         ?string $output_file = null
     ): array {
@@ -799,8 +799,55 @@ abstract class aihelper
         // but expects application/json with image:{url,type}. We branch below.
         $endpoint = $this->url . '/images/' . ($is_edit ? 'edits' : 'generations');
         $payload = ['model' => $this->model, 'prompt' => (string) $prompt, 'n' => $n];
-        if ($size !== null) {
-            $payload['size'] = $size;
+        // Universal `aspect_ratio` ("16:9", "1:1", …) is translated per-provider:
+        // xAI accepts it natively as `aspect_ratio` (discrete enum); OpenAI only
+        // knows `size` and needs the ratio mapped to one of its pixel enums.
+        if (
+            $aspect_ratio !== null &&
+            $aspect_ratio !== '' &&
+            preg_match('/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/', $aspect_ratio, $aspect_ratio__match) === 1 &&
+            (float) $aspect_ratio__match[1] > 0 &&
+            (float) $aspect_ratio__match[2] > 0
+        ) {
+            $aspect_ratio__target = (float) $aspect_ratio__match[1] / (float) $aspect_ratio__match[2];
+            if ($this->name === 'xai') {
+                $aspect_ratio__candidates = [
+                    '1:1' => 1.0,
+                    '16:9' => 16 / 9, '9:16' => 9 / 16,
+                    '4:3' => 4 / 3, '3:4' => 3 / 4,
+                    '3:2' => 3 / 2, '2:3' => 2 / 3,
+                    '2:1' => 2.0, '1:2' => 0.5,
+                    '19.5:9' => 19.5 / 9, '9:19.5' => 9 / 19.5,
+                    '20:9' => 20 / 9, '9:20' => 9 / 20,
+                ];
+                $aspect_ratio__payload_key = 'aspect_ratio';
+                $aspect_ratio__fallback = '1:1';
+            } elseif (str_starts_with((string) $this->model, 'dall-e-2')) {
+                $aspect_ratio__candidates = ['256x256' => 1.0, '512x512' => 1.0, '1024x1024' => 1.0];
+                $aspect_ratio__payload_key = 'size';
+                $aspect_ratio__fallback = '1024x1024';
+            } elseif (str_starts_with((string) $this->model, 'dall-e-3')) {
+                $aspect_ratio__candidates = ['1024x1024' => 1.0, '1792x1024' => 1792 / 1024, '1024x1792' => 1024 / 1792];
+                $aspect_ratio__payload_key = 'size';
+                $aspect_ratio__fallback = '1024x1024';
+            } else {
+                // gpt-image-1 and successors — three supported pixel sizes
+                $aspect_ratio__candidates = ['1024x1024' => 1.0, '1536x1024' => 1536 / 1024, '1024x1536' => 1024 / 1536];
+                $aspect_ratio__payload_key = 'size';
+                $aspect_ratio__fallback = '1024x1024';
+            }
+            $aspect_ratio__best = $aspect_ratio__fallback;
+            $aspect_ratio__best_delta = PHP_FLOAT_MAX;
+            foreach ($aspect_ratio__candidates as $label => $val) {
+                $d = abs(log($aspect_ratio__target / $val));
+                if ($d < $aspect_ratio__best_delta) {
+                    $aspect_ratio__best_delta = $d;
+                    $aspect_ratio__best = $label;
+                }
+            }
+            $payload[$aspect_ratio__payload_key] = $aspect_ratio__best;
+        } elseif ($aspect_ratio === 'auto' && $this->name === 'xai') {
+            $payload['aspect_ratio'] = 'auto';
         }
         // dall-e-2/3 require explicit response_format to get base64; gpt-image-*
         // returns it by default and rejects the param.
@@ -5739,6 +5786,16 @@ class ai_google extends aihelper
             'context_length' => 1048576,
             'max_output_tokens' => 65536,
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.0000015],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gemini-3.5-flash',
+            'context_length' => 1048576,
+            'max_output_tokens' => 65536,
+            'costs' => ['input' => 0.0000015, 'input_cached' => 0.00000015, 'output' => 0.000009],
             'supports_temperature' => true,
             'supports_tools' => true,
             'default' => false,
