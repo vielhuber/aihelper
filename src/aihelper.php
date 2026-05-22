@@ -708,9 +708,7 @@ abstract class aihelper
             }
         }
         if ($supports !== true) {
-            throw new \BadMethodCallException(
-                'Model "' . $this->model . '" does not support image generation.'
-            );
+            throw new \BadMethodCallException('Model "' . $this->model . '" does not support image generation.');
         }
         return $this->imageThis(
             prompt: $prompt,
@@ -721,11 +719,8 @@ abstract class aihelper
         );
     }
 
-    public function audio(
-        ?string $prompt = null,
-        ?string $voice = null,
-        ?string $output_file = null
-    ): array {
+    public function audio(?string $prompt = null, ?string $voice = null, ?string $output_file = null): array
+    {
         $supports = false;
         foreach ($this->models as $models__value) {
             if (($models__value['name'] ?? null) === $this->model) {
@@ -734,15 +729,9 @@ abstract class aihelper
             }
         }
         if ($supports !== true) {
-            throw new \BadMethodCallException(
-                'Model "' . $this->model . '" does not support audio generation.'
-            );
+            throw new \BadMethodCallException('Model "' . $this->model . '" does not support audio generation.');
         }
-        return $this->audioThis(
-            prompt: $prompt,
-            voice: $voice,
-            output_file: $output_file
-        );
+        return $this->audioThis(prompt: $prompt, voice: $voice, output_file: $output_file);
     }
 
     /**
@@ -777,7 +766,7 @@ abstract class aihelper
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_TIMEOUT => $timeout,
-            CURLOPT_CONNECTTIMEOUT => $timeout,
+            CURLOPT_CONNECTTIMEOUT => $timeout
         ]);
         $bin = curl_exec($ch);
         $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -795,158 +784,232 @@ abstract class aihelper
         ?string $output_file = null
     ): array {
         $is_edit = $input_file !== null;
-        // edits: OpenAI uses multipart `/images/edits`; xAI uses the same path
-        // but expects application/json with image:{url,type}. We branch below.
-        $endpoint = $this->url . '/images/' . ($is_edit ? 'edits' : 'generations');
-        $payload = ['model' => $this->model, 'prompt' => (string) $prompt, 'n' => $n];
-        // Universal `aspect_ratio` ("16:9", "1:1", …) is translated per-provider:
-        // xAI accepts it natively as `aspect_ratio` (discrete enum); OpenAI only
-        // knows `size` and needs the ratio mapped to one of its pixel enums.
-        if (
-            $aspect_ratio !== null &&
-            $aspect_ratio !== '' &&
-            preg_match('/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/', $aspect_ratio, $aspect_ratio__match) === 1 &&
-            (float) $aspect_ratio__match[1] > 0 &&
-            (float) $aspect_ratio__match[2] > 0
-        ) {
-            $aspect_ratio__target = (float) $aspect_ratio__match[1] / (float) $aspect_ratio__match[2];
-            if ($this->name === 'xai') {
+        $headers = [];
+        $tmp_input = null;
+        if ($this->name === 'google') {
+            // Google Imagen via the `:predict` endpoint. Different URL pattern,
+            // different auth (query-param `?key=`), different body shape, and
+            // no edit support — `imagen-capability` would be a separate model.
+            if ($is_edit) {
+                $this->log('⛔ image: Imagen :predict does not support edit/input_file');
+                return [
+                    'response' => 'Imagen generate does not support image-to-image edit',
+                    'success' => false,
+                    'costs' => 0.0
+                ];
+            }
+            $aspect_payload = '1:1';
+            if (
+                $aspect_ratio !== null &&
+                $aspect_ratio !== '' &&
+                preg_match('/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/', $aspect_ratio, $aspect_ratio__match) === 1 &&
+                (float) $aspect_ratio__match[1] > 0 &&
+                (float) $aspect_ratio__match[2] > 0
+            ) {
+                $aspect_ratio__target = (float) $aspect_ratio__match[1] / (float) $aspect_ratio__match[2];
                 $aspect_ratio__candidates = [
                     '1:1' => 1.0,
-                    '16:9' => 16 / 9, '9:16' => 9 / 16,
-                    '4:3' => 4 / 3, '3:4' => 3 / 4,
-                    '3:2' => 3 / 2, '2:3' => 2 / 3,
-                    '2:1' => 2.0, '1:2' => 0.5,
-                    '19.5:9' => 19.5 / 9, '9:19.5' => 9 / 19.5,
-                    '20:9' => 20 / 9, '9:20' => 9 / 20,
+                    '16:9' => 16 / 9,
+                    '9:16' => 9 / 16,
+                    '4:3' => 4 / 3,
+                    '3:4' => 3 / 4
                 ];
-                $aspect_ratio__payload_key = 'aspect_ratio';
-                $aspect_ratio__fallback = '1:1';
-            } elseif (str_starts_with((string) $this->model, 'dall-e-2')) {
-                $aspect_ratio__candidates = ['256x256' => 1.0, '512x512' => 1.0, '1024x1024' => 1.0];
-                $aspect_ratio__payload_key = 'size';
-                $aspect_ratio__fallback = '1024x1024';
-            } elseif (str_starts_with((string) $this->model, 'dall-e-3')) {
-                $aspect_ratio__candidates = ['1024x1024' => 1.0, '1792x1024' => 1792 / 1024, '1024x1792' => 1024 / 1792];
-                $aspect_ratio__payload_key = 'size';
-                $aspect_ratio__fallback = '1024x1024';
-            } else {
-                // gpt-image-1 and successors — three supported pixel sizes
-                $aspect_ratio__candidates = ['1024x1024' => 1.0, '1536x1024' => 1536 / 1024, '1024x1536' => 1024 / 1536];
-                $aspect_ratio__payload_key = 'size';
-                $aspect_ratio__fallback = '1024x1024';
-            }
-            $aspect_ratio__best = $aspect_ratio__fallback;
-            $aspect_ratio__best_delta = PHP_FLOAT_MAX;
-            foreach ($aspect_ratio__candidates as $label => $val) {
-                $d = abs(log($aspect_ratio__target / $val));
-                if ($d < $aspect_ratio__best_delta) {
-                    $aspect_ratio__best_delta = $d;
-                    $aspect_ratio__best = $label;
+                $aspect_ratio__best_delta = PHP_FLOAT_MAX;
+                foreach ($aspect_ratio__candidates as $label => $val) {
+                    $d = abs(log($aspect_ratio__target / $val));
+                    if ($d < $aspect_ratio__best_delta) {
+                        $aspect_ratio__best_delta = $d;
+                        $aspect_payload = $label;
+                    }
                 }
             }
-            $payload[$aspect_ratio__payload_key] = $aspect_ratio__best;
-        } elseif ($aspect_ratio === 'auto' && $this->name === 'xai') {
-            $payload['aspect_ratio'] = 'auto';
-        }
-        // dall-e-2/3 require explicit response_format to get base64; gpt-image-*
-        // returns it by default and rejects the param.
-        if (str_starts_with((string) $this->model, 'dall-e')) {
-            $payload['response_format'] = 'b64_json';
-        }
-        $headers = ['Authorization: Bearer ' . $this->api_key];
-        $ch = curl_init($endpoint);
-        $tmp_input = null; // remember temp file so we can clean up after curl_exec
-        if ($is_edit && $this->name === 'xai') {
-            // xAI edit schema: JSON body with image:{url, type}. url can be a
-            // public http(s) url ("image_url") or a data: uri ("base64").
-            $img_url = null;
-            $type = 'base64';
-            if (is_string($input_file) && is_file($input_file)) {
-                $mime = mime_content_type($input_file);
-                if ($mime === false) {
-                    $mime = 'image/png';
+            $payload = [
+                'instances' => [['prompt' => (string) $prompt]],
+                'parameters' => [
+                    'sampleCount' => $n,
+                    'aspectRatio' => $aspect_payload,
+                    'personGeneration' => 'ALLOW_ADULT'
+                ]
+            ];
+            $endpoint = $this->url . '/models/' . $this->model . ':predict?key=' . $this->api_key;
+            $headers = ['Content-Type: application/json'];
+            $body = json_encode($payload);
+        } else {
+            // OpenAI / xAI / DALL-E shape. Edits: OpenAI uses multipart
+            // `/images/edits`, xAI uses the same path but expects JSON with
+            // image:{url,type}.
+            $endpoint = $this->url . '/images/' . ($is_edit ? 'edits' : 'generations');
+            $payload = ['model' => $this->model, 'prompt' => (string) $prompt, 'n' => $n];
+            // Universal `aspect_ratio` ("16:9", "1:1", …) is translated per-provider:
+            // xAI accepts it natively as `aspect_ratio` (discrete enum); OpenAI
+            // only knows `size` and needs the ratio mapped to one of its pixel enums.
+            if (
+                $aspect_ratio !== null &&
+                $aspect_ratio !== '' &&
+                preg_match('/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/', $aspect_ratio, $aspect_ratio__match) === 1 &&
+                (float) $aspect_ratio__match[1] > 0 &&
+                (float) $aspect_ratio__match[2] > 0
+            ) {
+                $aspect_ratio__target = (float) $aspect_ratio__match[1] / (float) $aspect_ratio__match[2];
+                if ($this->name === 'xai') {
+                    $aspect_ratio__candidates = [
+                        '1:1' => 1.0,
+                        '16:9' => 16 / 9,
+                        '9:16' => 9 / 16,
+                        '4:3' => 4 / 3,
+                        '3:4' => 3 / 4,
+                        '3:2' => 3 / 2,
+                        '2:3' => 2 / 3,
+                        '2:1' => 2.0,
+                        '1:2' => 0.5,
+                        '19.5:9' => 19.5 / 9,
+                        '9:19.5' => 9 / 19.5,
+                        '20:9' => 20 / 9,
+                        '9:20' => 9 / 20
+                    ];
+                    $aspect_ratio__payload_key = 'aspect_ratio';
+                    $aspect_ratio__fallback = '1:1';
+                } elseif (str_starts_with((string) $this->model, 'dall-e-2')) {
+                    $aspect_ratio__candidates = ['256x256' => 1.0, '512x512' => 1.0, '1024x1024' => 1.0];
+                    $aspect_ratio__payload_key = 'size';
+                    $aspect_ratio__fallback = '1024x1024';
+                } elseif (str_starts_with((string) $this->model, 'dall-e-3')) {
+                    $aspect_ratio__candidates = [
+                        '1024x1024' => 1.0,
+                        '1792x1024' => 1792 / 1024,
+                        '1024x1792' => 1024 / 1792
+                    ];
+                    $aspect_ratio__payload_key = 'size';
+                    $aspect_ratio__fallback = '1024x1024';
+                } else {
+                    // gpt-image-1 and successors — three supported pixel sizes
+                    $aspect_ratio__candidates = [
+                        '1024x1024' => 1.0,
+                        '1536x1024' => 1536 / 1024,
+                        '1024x1536' => 1024 / 1536
+                    ];
+                    $aspect_ratio__payload_key = 'size';
+                    $aspect_ratio__fallback = '1024x1024';
                 }
-                $bin = file_get_contents($input_file);
-                if ($bin === false) {
-                    $this->log('⛔ image: failed to read input_file ' . $input_file);
-                    return ['response' => null, 'success' => false, 'costs' => 0.0];
+                $aspect_ratio__best = $aspect_ratio__fallback;
+                $aspect_ratio__best_delta = PHP_FLOAT_MAX;
+                foreach ($aspect_ratio__candidates as $label => $val) {
+                    $d = abs(log($aspect_ratio__target / $val));
+                    if ($d < $aspect_ratio__best_delta) {
+                        $aspect_ratio__best_delta = $d;
+                        $aspect_ratio__best = $label;
+                    }
                 }
-                $img_url = 'data:' . $mime . ';base64,' . base64_encode($bin);
-            } elseif (is_string($input_file) && (str_starts_with($input_file, 'http://') || str_starts_with($input_file, 'https://'))) {
-                if (!self::isPublicHttpUrl($input_file)) {
-                    $this->log('⛔ image: refused private/reserved url ' . $input_file);
-                    return ['response' => null, 'success' => false, 'costs' => 0.0];
-                }
-                $img_url = $input_file;
-                $type = 'image_url';
-            } elseif (is_string($input_file) && str_contains($input_file, ';base64,')) {
-                $img_url = $input_file;
-            } elseif (is_string($input_file)) {
-                $img_url = 'data:image/png;base64,' . $input_file;
+                $payload[$aspect_ratio__payload_key] = $aspect_ratio__best;
+            } elseif ($aspect_ratio === 'auto' && $this->name === 'xai') {
+                $payload['aspect_ratio'] = 'auto';
             }
-            if ($img_url === null) {
-                $this->log('⛔ image: invalid input_file for xai edit');
-                return ['response' => null, 'success' => false, 'costs' => 0.0];
+            // dall-e-2/3 require explicit response_format to get base64;
+            // gpt-image-* returns it by default and rejects the param.
+            if (str_starts_with((string) $this->model, 'dall-e')) {
+                $payload['response_format'] = 'b64_json';
             }
-            $payload['image'] = ['url' => $img_url, 'type' => $type];
-            $headers[] = 'Content-Type: application/json';
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-        } elseif ($is_edit) {
-            // OpenAI multipart edit
-            $curl_file = null;
-            if ($input_file instanceof \CURLFile) {
-                $curl_file = $input_file;
-            } elseif (is_string($input_file) && is_file($input_file)) {
-                $curl_file = new \CURLFile($input_file);
-            } else {
-                $tmp_input = tempnam(sys_get_temp_dir(), 'aih_');
-                if (is_string($input_file) && (str_starts_with($input_file, 'http://') || str_starts_with($input_file, 'https://'))) {
+            $headers = ['Authorization: Bearer ' . $this->api_key];
+            if ($is_edit && $this->name === 'xai') {
+                // xAI edit schema: JSON body with image:{url, type}.
+                $img_url = null;
+                $type = 'base64';
+                if (is_string($input_file) && is_file($input_file)) {
+                    $mime = mime_content_type($input_file);
+                    if ($mime === false) {
+                        $mime = 'image/png';
+                    }
+                    $bin = file_get_contents($input_file);
+                    if ($bin === false) {
+                        $this->log('⛔ image: failed to read input_file ' . $input_file);
+                        return ['response' => null, 'success' => false, 'costs' => 0.0];
+                    }
+                    $img_url = 'data:' . $mime . ';base64,' . base64_encode($bin);
+                } elseif (
+                    is_string($input_file) &&
+                    (str_starts_with($input_file, 'http://') || str_starts_with($input_file, 'https://'))
+                ) {
                     if (!self::isPublicHttpUrl($input_file)) {
-                        unlink($tmp_input);
                         $this->log('⛔ image: refused private/reserved url ' . $input_file);
                         return ['response' => null, 'success' => false, 'costs' => 0.0];
                     }
-                    $bin = self::fetchUrlBinary($input_file, (int) ($this->timeout ?? 30));
-                    if ($bin === null) {
-                        unlink($tmp_input);
-                        $this->log('⛔ image: failed to fetch input_file url ' . $input_file);
-                        return ['response' => null, 'success' => false, 'costs' => 0.0];
-                    }
-                    if (file_put_contents($tmp_input, $bin) === false) {
-                        unlink($tmp_input);
-                        $this->log('⛔ image: failed to write fetched input to tempfile');
-                        return ['response' => null, 'success' => false, 'costs' => 0.0];
-                    }
-                } else {
-                    $b64 = (is_string($input_file) && str_contains($input_file, ';base64,'))
-                        ? explode(';base64,', $input_file, 2)[1]
-                        : (string) $input_file;
-                    $decoded = base64_decode($b64, true);
-                    if ($decoded === false) {
-                        unlink($tmp_input);
-                        $this->log('⛔ image: invalid base64 input_file');
-                        return ['response' => null, 'success' => false, 'costs' => 0.0];
-                    }
-                    if (file_put_contents($tmp_input, $decoded) === false) {
-                        unlink($tmp_input);
-                        $this->log('⛔ image: failed to write decoded input to tempfile');
-                        return ['response' => null, 'success' => false, 'costs' => 0.0];
-                    }
+                    $img_url = $input_file;
+                    $type = 'image_url';
+                } elseif (is_string($input_file) && str_contains($input_file, ';base64,')) {
+                    $img_url = $input_file;
+                } elseif (is_string($input_file)) {
+                    $img_url = 'data:image/png;base64,' . $input_file;
                 }
-                $curl_file = new \CURLFile($tmp_input);
+                if ($img_url === null) {
+                    $this->log('⛔ image: invalid input_file for xai edit');
+                    return ['response' => null, 'success' => false, 'costs' => 0.0];
+                }
+                $payload['image'] = ['url' => $img_url, 'type' => $type];
+                $headers[] = 'Content-Type: application/json';
+                $body = json_encode($payload);
+            } elseif ($is_edit) {
+                // OpenAI multipart edit
+                $curl_file = null;
+                if ($input_file instanceof \CURLFile) {
+                    $curl_file = $input_file;
+                } elseif (is_string($input_file) && is_file($input_file)) {
+                    $curl_file = new \CURLFile($input_file);
+                } else {
+                    $tmp_input = tempnam(sys_get_temp_dir(), 'aih_');
+                    if (
+                        is_string($input_file) &&
+                        (str_starts_with($input_file, 'http://') || str_starts_with($input_file, 'https://'))
+                    ) {
+                        if (!self::isPublicHttpUrl($input_file)) {
+                            unlink($tmp_input);
+                            $this->log('⛔ image: refused private/reserved url ' . $input_file);
+                            return ['response' => null, 'success' => false, 'costs' => 0.0];
+                        }
+                        $bin = self::fetchUrlBinary($input_file, (int) ($this->timeout ?? 30));
+                        if ($bin === null) {
+                            unlink($tmp_input);
+                            $this->log('⛔ image: failed to fetch input_file url ' . $input_file);
+                            return ['response' => null, 'success' => false, 'costs' => 0.0];
+                        }
+                        if (file_put_contents($tmp_input, $bin) === false) {
+                            unlink($tmp_input);
+                            $this->log('⛔ image: failed to write fetched input to tempfile');
+                            return ['response' => null, 'success' => false, 'costs' => 0.0];
+                        }
+                    } else {
+                        $b64 =
+                            is_string($input_file) && str_contains($input_file, ';base64,')
+                                ? explode(';base64,', $input_file, 2)[1]
+                                : (string) $input_file;
+                        $decoded = base64_decode($b64, true);
+                        if ($decoded === false) {
+                            unlink($tmp_input);
+                            $this->log('⛔ image: invalid base64 input_file');
+                            return ['response' => null, 'success' => false, 'costs' => 0.0];
+                        }
+                        if (file_put_contents($tmp_input, $decoded) === false) {
+                            unlink($tmp_input);
+                            $this->log('⛔ image: failed to write decoded input to tempfile');
+                            return ['response' => null, 'success' => false, 'costs' => 0.0];
+                        }
+                    }
+                    $curl_file = new \CURLFile($tmp_input);
+                }
+                $payload['image'] = $curl_file;
+                // multipart — pass the array directly so curl picks Content-Type
+                $body = $payload;
+            } else {
+                $headers[] = 'Content-Type: application/json';
+                $body = json_encode($payload);
             }
-            $payload['image'] = $curl_file;
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
-        } else {
-            $headers[] = 'Content-Type: application/json';
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
         }
+        $ch = curl_init($endpoint);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
             CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_TIMEOUT => $this->timeout ?? 300,
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_TIMEOUT => $this->timeout ?? 300
         ]);
         $raw = curl_exec($ch);
         $err = curl_error($ch);
@@ -960,31 +1023,47 @@ abstract class aihelper
             return ['response' => $msg, 'success' => false, 'costs' => 0.0];
         }
         $data = json_decode((string) $raw, true);
-        $items = is_array($data) ? ($data['data'] ?? []) : [];
-        if (!is_array($items) || count($items) === 0) {
-            return ['response' => null, 'success' => false, 'costs' => 0.0];
-        }
-        // openai gpt-image-* returns b64_json inline; xai and dall-e default to a
-        // temporary url — download and re-encode so the caller always sees base64.
-        $download_timeout = (int) ($this->timeout ?? 30);
-        $download_failed = false;
-        $b64s = array_map(function ($it) use ($download_timeout, &$download_failed) {
-            if (!empty($it['b64_json'])) {
-                return (string) $it['b64_json'];
+        if ($this->name === 'google') {
+            // Imagen response shape: predictions[].bytesBase64Encoded
+            $items = is_array($data) ? $data['predictions'] ?? [] : [];
+            if (!is_array($items) || count($items) === 0) {
+                return ['response' => null, 'success' => false, 'costs' => 0.0];
             }
-            if (!empty($it['url'])) {
-                $bin = self::fetchUrlBinary((string) $it['url'], $download_timeout);
-                if ($bin === null) {
-                    $download_failed = true;
-                    return '';
+            $b64s = [];
+            foreach ($items as $it) {
+                if (!empty($it['bytesBase64Encoded'])) {
+                    $b64s[] = (string) $it['bytesBase64Encoded'];
                 }
-                return base64_encode($bin);
             }
-            return '';
-        }, $items);
-        if ($download_failed || in_array('', $b64s, true)) {
-            $this->log('⛔ image: failed to download one or more result urls');
-            return ['response' => null, 'success' => false, 'costs' => 0.0];
+            if ($b64s === []) {
+                return ['response' => null, 'success' => false, 'costs' => 0.0];
+            }
+        } else {
+            // OpenAI/xAI shape: data[].b64_json or data[].url (download + encode)
+            $items = is_array($data) ? $data['data'] ?? [] : [];
+            if (!is_array($items) || count($items) === 0) {
+                return ['response' => null, 'success' => false, 'costs' => 0.0];
+            }
+            $download_timeout = (int) ($this->timeout ?? 30);
+            $download_failed = false;
+            $b64s = array_map(function ($it) use ($download_timeout, &$download_failed) {
+                if (!empty($it['b64_json'])) {
+                    return (string) $it['b64_json'];
+                }
+                if (!empty($it['url'])) {
+                    $bin = self::fetchUrlBinary((string) $it['url'], $download_timeout);
+                    if ($bin === null) {
+                        $download_failed = true;
+                        return '';
+                    }
+                    return base64_encode($bin);
+                }
+                return '';
+            }, $items);
+            if ($download_failed || in_array('', $b64s, true)) {
+                $this->log('⛔ image: failed to download one or more result urls');
+                return ['response' => null, 'success' => false, 'costs' => 0.0];
+            }
         }
         if ($output_file !== null) {
             $info = pathinfo($output_file);
@@ -993,7 +1072,7 @@ abstract class aihelper
             $ext = isset($info['extension']) ? '.' . $info['extension'] : '';
             $paths = [];
             foreach ($b64s as $i => $b64) {
-                $path = $n === 1 ? $output_file : ($dir . '/' . $base . '-' . ($i + 1) . $ext);
+                $path = $n === 1 ? $output_file : $dir . '/' . $base . '-' . ($i + 1) . $ext;
                 if (file_put_contents($path, base64_decode($b64)) === false) {
                     $this->log('⛔ image: failed to write output_file ' . $path);
                     return ['response' => null, 'success' => false, 'costs' => 0.0];
@@ -1007,18 +1086,15 @@ abstract class aihelper
         $cost_per = 0.0;
         foreach ($this->models as $m) {
             if (($m['name'] ?? null) === $this->model) {
-                $cost_per = (float) (($m['costs']['image'] ?? 0) ?: 0);
+                $cost_per = (float) ($m['costs']['image'] ?? 0 ?: 0);
                 break;
             }
         }
-        return ['response' => $response, 'success' => true, 'costs' => $cost_per * $n];
+        return ['response' => $response, 'success' => true, 'costs' => $cost_per * count($b64s)];
     }
 
-    protected function audioThis(
-        ?string $prompt = null,
-        ?string $voice = null,
-        ?string $output_file = null
-    ): array {
+    protected function audioThis(?string $prompt = null, ?string $voice = null, ?string $output_file = null): array
+    {
         $endpoint = $this->url . '/audio/speech';
         $payload = ['model' => $this->model, 'input' => (string) $prompt, 'voice' => $voice ?? 'alloy'];
         if ($output_file !== null) {
@@ -1032,11 +1108,8 @@ abstract class aihelper
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => json_encode($payload),
-            CURLOPT_HTTPHEADER => [
-                'Authorization: Bearer ' . $this->api_key,
-                'Content-Type: application/json',
-            ],
-            CURLOPT_TIMEOUT => $this->timeout ?? 300,
+            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $this->api_key, 'Content-Type: application/json'],
+            CURLOPT_TIMEOUT => $this->timeout ?? 300
         ]);
         $raw = curl_exec($ch);
         $err = curl_error($ch);
@@ -1054,7 +1127,7 @@ abstract class aihelper
                 // token-billed gpt-4o-mini-tts this is an approximation only
                 // (~1.3× off, since OpenAI bills text+audio tokens separately
                 // at ~$0.015/min of audio).
-                $costs = (float) (($m['costs']['audio'] ?? 0) ?: 0) * mb_strlen((string) $prompt);
+                $costs = (float) ($m['costs']['audio'] ?? 0 ?: 0) * mb_strlen((string) $prompt);
                 break;
             }
         }
@@ -1141,7 +1214,8 @@ abstract class aihelper
      */
     private static function replaceInlineImagesWithStubs(mixed $node, int &$count): mixed
     {
-        $stub_text = '[Bild aus früherem Turn entfernt während Kontext-Kompression — Inhalt in Zusammenfassung erhalten]';
+        $stub_text =
+            '[Bild aus früherem Turn entfernt während Kontext-Kompression — Inhalt in Zusammenfassung erhalten]';
 
         if (is_array($node)) {
             // detect known image-container shapes and swap the whole block out
@@ -2699,9 +2773,13 @@ abstract class aihelper
             $trail = strlen($buffer) - strlen(rtrim($buffer, " \t\n\r"));
             if ($trail > $threshold) {
                 throw new \RuntimeException(
-                    'whitespace runaway: ' . $trail .
-                    ' trailing whitespace chars in ' . $context .
-                    ' stream (threshold ' . $threshold . ') — likely sampling-loop'
+                    'whitespace runaway: ' .
+                        $trail .
+                        ' trailing whitespace chars in ' .
+                        $context .
+                        ' stream (threshold ' .
+                        $threshold .
+                        ') — likely sampling-loop'
                 );
             }
         }
@@ -4765,15 +4843,71 @@ class ai_openai extends aihelper
             'test' => false
         ],
         // image generation — costs per image (1024x1024 medium quality where applicable)
-        ['name' => 'gpt-image-1', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.042], 'default' => false, 'test' => false],
-        ['name' => 'gpt-image-1-mini', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.011], 'default' => false, 'test' => false],
-        ['name' => 'gpt-image-1.5', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.04], 'default' => false, 'test' => false],
-        ['name' => 'gpt-image-2', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.04], 'default' => false, 'test' => false],
-        ['name' => 'chatgpt-image-latest', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.04], 'default' => false, 'test' => false],
+        [
+            'name' => 'gpt-image-1',
+            'supports_image' => true,
+            'supports_tools' => false,
+            'costs' => ['image' => 0.042],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-image-1-mini',
+            'supports_image' => true,
+            'supports_tools' => false,
+            'costs' => ['image' => 0.011],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-image-1.5',
+            'supports_image' => true,
+            'supports_tools' => false,
+            'costs' => ['image' => 0.04],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-image-2',
+            'supports_image' => true,
+            'supports_tools' => false,
+            'costs' => ['image' => 0.04],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'chatgpt-image-latest',
+            'supports_image' => true,
+            'supports_tools' => false,
+            'costs' => ['image' => 0.04],
+            'default' => false,
+            'test' => false
+        ],
         // audio (TTS) — costs per input character
-        ['name' => 'tts-1', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.000015], 'default' => false, 'test' => false],
-        ['name' => 'tts-1-hd', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.00003], 'default' => false, 'test' => false],
-        ['name' => 'gpt-4o-mini-tts', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.000015], 'default' => false, 'test' => false]
+        [
+            'name' => 'tts-1',
+            'supports_audio' => true,
+            'supports_tools' => false,
+            'costs' => ['audio' => 0.000015],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'tts-1-hd',
+            'supports_audio' => true,
+            'supports_tools' => false,
+            'costs' => ['audio' => 0.00003],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gpt-4o-mini-tts',
+            'supports_audio' => true,
+            'supports_tools' => false,
+            'costs' => ['audio' => 0.000015],
+            'default' => false,
+            'test' => false
+        ]
     ];
 
     public function fetchModels(): array
@@ -5820,6 +5954,30 @@ class ai_google extends aihelper
             'supports_tools' => true,
             'default' => false,
             'test' => false
+        ],
+        [
+            'name' => 'imagen-4.0-generate-001',
+            'supports_image' => true,
+            'supports_tools' => false,
+            'costs' => ['image' => 0.04],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'imagen-4.0-fast-generate-001',
+            'supports_image' => true,
+            'supports_tools' => false,
+            'costs' => ['image' => 0.02],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'imagen-4.0-ultra-generate-001',
+            'supports_image' => true,
+            'supports_tools' => false,
+            'costs' => ['image' => 0.06],
+            'default' => false,
+            'test' => false
         ]
     ];
 
@@ -5857,9 +6015,6 @@ class ai_google extends aihelper
                             'gemini-embedding-001',
                             'gemini-embedding-2',
                             'aqa',
-                            'imagen-4.0-generate-001',
-                            'imagen-4.0-ultra-generate-001',
-                            'imagen-4.0-fast-generate-001',
                             'veo-2.0-generate-001',
                             'veo-3.0-generate-001',
                             'veo-3.0-fast-generate-001'
@@ -6151,8 +6306,22 @@ class ai_xai extends ai_anthropic
             'test' => true
         ],
         // image generation — costs per image
-        ['name' => 'grok-imagine-image', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.02], 'default' => false, 'test' => false],
-        ['name' => 'grok-imagine-image-quality', 'supports_image' => true, 'supports_tools' => false, 'costs' => ['image' => 0.07], 'default' => false, 'test' => false]
+        [
+            'name' => 'grok-imagine-image',
+            'supports_image' => true,
+            'supports_tools' => false,
+            'costs' => ['image' => 0.02],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'grok-imagine-image-quality',
+            'supports_image' => true,
+            'supports_tools' => false,
+            'costs' => ['image' => 0.07],
+            'default' => false,
+            'test' => false
+        ]
     ];
 }
 
@@ -7061,14 +7230,70 @@ class ai_elevenlabs extends ai_openai
     public ?bool $supports_stream = false;
 
     public array $models = [
-        ['name' => 'eleven_v3', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.0003], 'default' => false, 'test' => false],
-        ['name' => 'eleven_turbo_v2_5', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.00005], 'default' => true, 'test' => true],
-        ['name' => 'eleven_turbo_v2', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.00005], 'default' => false, 'test' => false],
-        ['name' => 'eleven_flash_v2_5', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.000033], 'default' => false, 'test' => false],
-        ['name' => 'eleven_flash_v2', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.000033], 'default' => false, 'test' => false],
-        ['name' => 'eleven_multilingual_v2', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.00018], 'default' => false, 'test' => false],
-        ['name' => 'eleven_multilingual_v1', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.000165], 'default' => false, 'test' => false],
-        ['name' => 'eleven_monolingual_v1', 'supports_audio' => true, 'supports_tools' => false, 'costs' => ['audio' => 0.000165], 'default' => false, 'test' => false]
+        [
+            'name' => 'eleven_v3',
+            'supports_audio' => true,
+            'supports_tools' => false,
+            'costs' => ['audio' => 0.0003],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'eleven_turbo_v2_5',
+            'supports_audio' => true,
+            'supports_tools' => false,
+            'costs' => ['audio' => 0.00005],
+            'default' => true,
+            'test' => true
+        ],
+        [
+            'name' => 'eleven_turbo_v2',
+            'supports_audio' => true,
+            'supports_tools' => false,
+            'costs' => ['audio' => 0.00005],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'eleven_flash_v2_5',
+            'supports_audio' => true,
+            'supports_tools' => false,
+            'costs' => ['audio' => 0.000033],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'eleven_flash_v2',
+            'supports_audio' => true,
+            'supports_tools' => false,
+            'costs' => ['audio' => 0.000033],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'eleven_multilingual_v2',
+            'supports_audio' => true,
+            'supports_tools' => false,
+            'costs' => ['audio' => 0.00018],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'eleven_multilingual_v1',
+            'supports_audio' => true,
+            'supports_tools' => false,
+            'costs' => ['audio' => 0.000165],
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'eleven_monolingual_v1',
+            'supports_audio' => true,
+            'supports_tools' => false,
+            'costs' => ['audio' => 0.000165],
+            'default' => false,
+            'test' => false
+        ]
     ];
 
     public function fetchModels(): array
@@ -7084,7 +7309,11 @@ class ai_elevenlabs extends ai_openai
         $list = $response?->result ?? null;
         if (!is_array($list)) {
             $code = $response?->status ?? null;
-            $this->log('⚠️ elevenlabs fetchModels returned empty — HTTP ' . var_export($code, true) . ' (check api key / quota / connectivity)');
+            $this->log(
+                '⚠️ elevenlabs fetchModels returned empty — HTTP ' .
+                    var_export($code, true) .
+                    ' (check api key / quota / connectivity)'
+            );
             return $models;
         }
         foreach ($list as $m) {
@@ -7110,13 +7339,10 @@ class ai_elevenlabs extends ai_openai
         return $models;
     }
 
-    protected function audioThis(
-        ?string $prompt = null,
-        ?string $voice = null,
-        ?string $output_file = null
-    ): array {
+    protected function audioThis(?string $prompt = null, ?string $voice = null, ?string $output_file = null): array
+    {
         // default voice: Rachel
-        $voice_id = ($voice !== null && $voice !== '') ? $voice : '21m00Tcm4TlvDq8ikWAM';
+        $voice_id = $voice !== null && $voice !== '' ? $voice : '21m00Tcm4TlvDq8ikWAM';
         $format = 'mp3_44100_128';
         if ($output_file !== null) {
             $ext = strtolower((string) pathinfo($output_file, PATHINFO_EXTENSION));
@@ -7155,7 +7381,7 @@ class ai_elevenlabs extends ai_openai
         $costs = 0.0;
         foreach ($this->models as $m) {
             if (($m['name'] ?? null) === $this->model) {
-                $costs = (float) (($m['costs']['audio'] ?? 0) ?: 0) * mb_strlen((string) $prompt);
+                $costs = (float) ($m['costs']['audio'] ?? 0 ?: 0) * mb_strlen((string) $prompt);
                 break;
             }
         }
