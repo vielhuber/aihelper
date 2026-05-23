@@ -6296,6 +6296,16 @@ class ai_xai extends ai_anthropic
             'test' => false
         ],
         [
+            'name' => 'grok-build-0.1',
+            'context_length' => 256000,
+            'max_output_tokens' => 16000,
+            'costs' => ['input' => 0.000001, 'input_cached' => 0.0000002, 'output' => 0.000002],
+            'supports_temperature' => true,
+            'supports_tools' => false,
+            'default' => false,
+            'test' => false
+        ],
+        [
             'name' => 'grok-4.3',
             'context_length' => 1000000,
             'max_output_tokens' => 16000,
