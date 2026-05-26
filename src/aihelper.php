@@ -719,7 +719,7 @@ abstract class aihelper
         );
     }
 
-    public function audio(?string $prompt = null, ?string $voice = null, ?string $output_file = null): array
+    public function audio(?string $prompt = null, ?string $voice = null, ?float $speed = null, ?string $output_file = null): array
     {
         $supports = false;
         foreach ($this->models as $models__value) {
@@ -731,7 +731,7 @@ abstract class aihelper
         if ($supports !== true) {
             throw new \BadMethodCallException('Model "' . $this->model . '" does not support audio generation.');
         }
-        return $this->audioThis(prompt: $prompt, voice: $voice, output_file: $output_file);
+        return $this->audioThis(prompt: $prompt, voice: $voice, speed: $speed, output_file: $output_file);
     }
 
     /**
@@ -1093,10 +1093,11 @@ abstract class aihelper
         return ['response' => $response, 'success' => true, 'costs' => $cost_per * count($b64s)];
     }
 
-    protected function audioThis(?string $prompt = null, ?string $voice = null, ?string $output_file = null): array
+    protected function audioThis(?string $prompt = null, ?string $voice = null, ?float $speed = null, ?string $output_file = null): array
     {
         $endpoint = $this->url . '/audio/speech';
         $payload = ['model' => $this->model, 'input' => (string) $prompt, 'voice' => $voice ?? 'alloy'];
+        if ($speed !== null) { $payload['speed'] = $speed; }
         if ($output_file !== null) {
             $ext = strtolower((string) pathinfo($output_file, PATHINFO_EXTENSION));
             if (in_array($ext, ['mp3', 'wav', 'opus', 'flac', 'aac', 'pcm'], true)) {
@@ -7349,7 +7350,7 @@ class ai_elevenlabs extends ai_openai
         return $models;
     }
 
-    protected function audioThis(?string $prompt = null, ?string $voice = null, ?string $output_file = null): array
+    protected function audioThis(?string $prompt = null, ?string $voice = null, ?float $speed = null, ?string $output_file = null): array
     {
         // default voice: Rachel
         $voice_id = $voice !== null && $voice !== '' ? $voice : '21m00Tcm4TlvDq8ikWAM';
@@ -7368,6 +7369,7 @@ class ai_elevenlabs extends ai_openai
         }
         $endpoint = $this->url . '/text-to-speech/' . rawurlencode($voice_id) . '?output_format=' . urlencode($format);
         $payload = ['text' => (string) $prompt, 'model_id' => $this->model];
+        if ($speed !== null) { $payload['voice_settings'] = ['speed' => $speed]; }
         $ch = curl_init($endpoint);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,

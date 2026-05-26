@@ -85,6 +85,7 @@ $ai = aihelper::create(provider: 'openai', model: 'gpt-4o-mini-tts', api_key: '*
 $ai->audio(
     prompt: 'Hallo, wie geht es dir?', // text to synthesize
     voice: 'alloy',                    // provider voice id (e.g. 'alloy'|'echo'|'nova')
+    speed: null,                       // optional, e.g 1.2
     output_file: null                  // path — when set, file is written and the path is returned instead base64
 );
 // ['response' => 'SUQzBAA...', 'success' => true, 'costs' => 0.001]
