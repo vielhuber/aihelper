@@ -664,13 +664,26 @@ abstract class aihelper
                 $this->log('⚠️ tries left: ' . $max_tries . ' — backoff ' . $backoff_s . 's');
                 sleep($backoff_s);
             }
-            $return = $this->askThis(
-                prompt: $prompt,
-                files: $files,
-                add_prompt_to_session: $max_tries === $this->max_tries,
-                prev_output_text: null,
-                prev_costs: $return['costs']
-            );
+            try {
+                $return = $this->askThis(
+                    prompt: $prompt,
+                    files: $files,
+                    add_prompt_to_session: $max_tries === $this->max_tries,
+                    prev_output_text: null,
+                    prev_costs: $return['costs']
+                );
+            } catch (\RuntimeException $e) {
+                if (str_starts_with($e->getMessage(), 'whitespace runaway')) {
+                    $this->log('⚠️ caught whitespace runaway — converting to retry: ' . $e->getMessage());
+                    $return = [
+                        'response' => 'whitespace runaway detected, retrying',
+                        'success' => false,
+                        'costs' => $return['costs'] ?? 0.0
+                    ];
+                } else {
+                    throw $e;
+                }
+            }
             $this->log($return, 'return');
             $max_tries--;
         }
@@ -719,8 +732,12 @@ abstract class aihelper
         );
     }
 
-    public function audio(?string $prompt = null, ?string $voice = null, ?float $speed = null, ?string $output_file = null): array
-    {
+    public function audio(
+        ?string $prompt = null,
+        ?string $voice = null,
+        ?float $speed = null,
+        ?string $output_file = null
+    ): array {
         $supports = false;
         foreach ($this->models as $models__value) {
             if (($models__value['name'] ?? null) === $this->model) {
@@ -1093,11 +1110,17 @@ abstract class aihelper
         return ['response' => $response, 'success' => true, 'costs' => $cost_per * count($b64s)];
     }
 
-    protected function audioThis(?string $prompt = null, ?string $voice = null, ?float $speed = null, ?string $output_file = null): array
-    {
+    protected function audioThis(
+        ?string $prompt = null,
+        ?string $voice = null,
+        ?float $speed = null,
+        ?string $output_file = null
+    ): array {
         $endpoint = $this->url . '/audio/speech';
         $payload = ['model' => $this->model, 'input' => (string) $prompt, 'voice' => $voice ?? 'alloy'];
-        if ($speed !== null) { $payload['speed'] = $speed; }
+        if ($speed !== null) {
+            $payload['speed'] = $speed;
+        }
         if ($output_file !== null) {
             $ext = strtolower((string) pathinfo($output_file, PATHINFO_EXTENSION));
             if (in_array($ext, ['mp3', 'wav', 'opus', 'flac', 'aac', 'pcm'], true)) {
@@ -1986,13 +2009,28 @@ abstract class aihelper
                     $this->log('⚠️ tries left: ' . $max_tries . ' — backoff ' . $backoff_s . 's');
                     sleep($backoff_s);
                 }
-                $return = $this->askThis(
-                    prompt: null,
-                    files: null,
-                    add_prompt_to_session: false,
-                    prev_output_text: null,
-                    prev_costs: $return['costs']
-                );
+                try {
+                    $return = $this->askThis(
+                        prompt: null,
+                        files: null,
+                        add_prompt_to_session: false,
+                        prev_output_text: null,
+                        prev_costs: $return['costs']
+                    );
+                } catch (\RuntimeException $e) {
+                    if (str_starts_with($e->getMessage(), 'whitespace runaway')) {
+                        $this->log(
+                            '⚠️ caught whitespace runaway (tool-loop) — converting to retry: ' . $e->getMessage()
+                        );
+                        $return = [
+                            'response' => 'whitespace runaway detected, retrying',
+                            'success' => false,
+                            'costs' => $return['costs'] ?? 0.0
+                        ];
+                    } else {
+                        throw $e;
+                    }
+                }
                 $this->log($return, 'local tool loop return');
                 $max_tries--;
             }
@@ -7350,8 +7388,12 @@ class ai_elevenlabs extends ai_openai
         return $models;
     }
 
-    protected function audioThis(?string $prompt = null, ?string $voice = null, ?float $speed = null, ?string $output_file = null): array
-    {
+    protected function audioThis(
+        ?string $prompt = null,
+        ?string $voice = null,
+        ?float $speed = null,
+        ?string $output_file = null
+    ): array {
         // default voice: Rachel
         $voice_id = $voice !== null && $voice !== '' ? $voice : '21m00Tcm4TlvDq8ikWAM';
         $format = 'mp3_44100_128';
@@ -7369,7 +7411,9 @@ class ai_elevenlabs extends ai_openai
         }
         $endpoint = $this->url . '/text-to-speech/' . rawurlencode($voice_id) . '?output_format=' . urlencode($format);
         $payload = ['text' => (string) $prompt, 'model_id' => $this->model];
-        if ($speed !== null) { $payload['voice_settings'] = ['speed' => $speed]; }
+        if ($speed !== null) {
+            $payload['voice_settings'] = ['speed' => $speed];
+        }
         $ch = curl_init($endpoint);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
