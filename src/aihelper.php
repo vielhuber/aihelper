@@ -5829,7 +5829,7 @@ class ai_anthropic extends aihelper
             str_contains($model_name, 'sonnet') ||
             str_contains($model_name, 'opus') ||
             (preg_match('/haiku-(\d+)/', $model_name, $_hm) === 1 && (int) $_hm[1] >= 4);
-        $adaptive_thinking_models = ['claude-opus-4-7'];
+        $adaptive_thinking_models = ['claude-opus-4-7', 'claude-opus-4-8'];
         $adaptive_thinking = in_array($model_name, $adaptive_thinking_models, true);
         // explicit enable_thinking=false overrides the default-on behavior for
         // sonnet/opus models; null keeps the existing default (thinking on where
