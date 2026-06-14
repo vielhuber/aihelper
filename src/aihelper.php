@@ -5371,6 +5371,17 @@ class ai_anthropic extends aihelper
             'test' => true
         ],
         [
+            'name' => 'claude-fable-5',
+            'context_length' => 1000000,
+            'max_output_tokens' => 64000,
+            'costs' => ['input' => 0.00001, 'input_cached' => 0.000001, 'output' => 0.00005],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'supports_image' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
             'name' => 'claude-opus-4-0',
             'context_length' => 200000,
             'max_output_tokens' => 32000,
@@ -5412,6 +5423,16 @@ class ai_anthropic extends aihelper
         ],
         [
             'name' => 'claude-opus-4-7',
+            'context_length' => 1000000,
+            'max_output_tokens' => 32000,
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'claude-opus-4-8',
             'context_length' => 1000000,
             'max_output_tokens' => 32000,
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
@@ -5482,6 +5503,8 @@ class ai_anthropic extends aihelper
                             'grok-2-image-1212',
                             'grok-imagine-image-pro',
                             'grok-imagine-video',
+                            'grok-imagine-video-1.5-preview',
+                            'grok-imagine-video-1.5-2026-05-30',
                             'grok-2-vision-1212'
                         ])
                     ) {
@@ -5865,26 +5888,6 @@ class ai_google extends aihelper
 
     public array $models = [
         [
-            'name' => 'gemini-2.0-flash',
-            'context_length' => 1048576,
-            'max_output_tokens' => 8192,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-2.0-flash-lite',
-            'context_length' => 1048576,
-            'max_output_tokens' => 8192,
-            'costs' => ['input' => 0.000000075, 'input_cached' => 0.000000075, 'output' => 0.0000003],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
             'name' => 'gemini-2.5-flash',
             'context_length' => 1048576,
             'max_output_tokens' => 65536,
@@ -5961,6 +5964,28 @@ class ai_google extends aihelper
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.0000015],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gemini-3.1-flash-image',
+            'context_length' => 1048576,
+            'max_output_tokens' => 65536,
+            'costs' => ['input' => 0.0000005, 'input_cached' => 0.00000005, 'output' => 0.000003, 'image' => 0.067],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'supports_image' => true,
+            'default' => false,
+            'test' => false
+        ],
+        [
+            'name' => 'gemini-3-pro-image',
+            'context_length' => 1048576,
+            'max_output_tokens' => 65536,
+            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000012, 'image' => 0.134],
+            'supports_temperature' => true,
+            'supports_tools' => true,
+            'supports_image' => true,
             'default' => false,
             'test' => false
         ],
@@ -6049,6 +6074,8 @@ class ai_google extends aihelper
                     if (
                         in_array($name, [
                             'gemini-2.5-flash-native-audio-latest',
+                            'gemini-2.0-flash',
+                            'gemini-2.0-flash-lite',
                             'gemini-2.0-flash-001',
                             'gemini-2.0-flash-lite-001',
                             'gemini-embedding-001',
