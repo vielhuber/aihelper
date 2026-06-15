@@ -1440,6 +1440,13 @@ class Test extends \PHPUnit\Framework\TestCase
                         if (!$audio_ok && empty($return['response'])) {
                             $return['response'] = 'audio probe failed';
                         }
+                    } elseif (
+                        ($models__value['supports_audio_to_text'] ?? false) === true &&
+                        ($models__value['supports_tools'] ?? false) !== true
+                    ) {
+                        // dedicated speech-to-text model (e.g. Scribe) — can't
+                        // chat, so probe by transcribing the audio fixture
+                        $return = $ai->ask('Transkribiere die Audiodatei.', ['tests/assets/lorem.mp3']);
                     } else {
                         $return = $ai->ask('Hallo!');
                     }

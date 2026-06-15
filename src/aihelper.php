@@ -7920,6 +7920,33 @@ class ai_elevenlabs extends ai_openai
             }
             $models[] = $entry;
         }
+        // the /models endpoint only lists text-to-speech models — append
+        // statically-defined speech-to-text models (Scribe) so they stay
+        // discoverable and consistent with the static catalog.
+        foreach ($this->models as $defined) {
+            if (($defined['supports_audio_to_text'] ?? false) !== true) {
+                continue;
+            }
+            $name = $defined['name'] ?? null;
+            if (!is_string($name)) {
+                continue;
+            }
+            $already = false;
+            foreach ($models as $existing) {
+                if (($existing['name'] ?? null) === $name) {
+                    $already = true;
+                    break;
+                }
+            }
+            if ($already) {
+                continue;
+            }
+            $entry = $defined;
+            if (!isset($entry['context_length'])) {
+                $entry['context_length'] = 128000;
+            }
+            $models[] = $entry;
+        }
         return $models;
     }
 
