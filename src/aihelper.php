@@ -7935,7 +7935,7 @@ class ai_elevenlabs extends ai_openai
         }
         if ($audio === null) {
             return [
-                'response' => 'elevenlabs ask() is speech-to-text only — pass an audio file via the $files argument.',
+                'response' => 'elevenlabs ask() error: provider is speech-to-text only — pass an audio file via the $files argument.',
                 'success' => false,
                 'costs' => 0.0
             ];
