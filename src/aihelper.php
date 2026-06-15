@@ -716,7 +716,7 @@ abstract class aihelper
         $supports = false;
         foreach ($this->models as $models__value) {
             if (($models__value['name'] ?? null) === $this->model) {
-                $supports = ($models__value['supports_image'] ?? false) === true;
+                $supports = ($models__value['supports_text_to_image'] ?? false) === true;
                 break;
             }
         }
@@ -741,7 +741,7 @@ abstract class aihelper
         $supports = false;
         foreach ($this->models as $models__value) {
             if (($models__value['name'] ?? null) === $this->model) {
-                $supports = ($models__value['supports_audio'] ?? false) === true;
+                $supports = ($models__value['supports_text_to_audio'] ?? false) === true;
                 break;
             }
         }
@@ -4218,6 +4218,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4228,6 +4232,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4238,6 +4246,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000001, 'input_cached' => 0.000001, 'output' => 0.000002],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4248,6 +4260,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4258,6 +4274,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4268,6 +4288,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4278,6 +4302,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4288,6 +4316,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4298,6 +4330,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4308,6 +4344,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4318,6 +4358,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4328,6 +4372,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4338,6 +4386,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4348,6 +4400,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4358,6 +4414,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4368,6 +4428,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4378,6 +4442,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4388,6 +4456,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4398,6 +4470,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4408,6 +4484,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => true,
             'test' => false
         ],
@@ -4418,6 +4498,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4428,6 +4512,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4438,6 +4526,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4448,6 +4540,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => true
         ],
@@ -4458,6 +4554,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4468,6 +4568,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4478,6 +4582,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4488,6 +4596,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4498,6 +4610,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4508,6 +4624,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4518,6 +4638,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4528,6 +4652,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4538,6 +4666,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4548,6 +4680,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4558,6 +4694,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4568,6 +4708,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4578,6 +4722,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4588,6 +4736,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4598,6 +4750,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4608,6 +4764,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4618,6 +4778,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4628,6 +4792,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4638,6 +4806,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4648,6 +4820,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4658,6 +4834,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4668,6 +4848,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4678,6 +4862,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4688,6 +4876,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4698,6 +4890,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4708,6 +4904,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4718,6 +4918,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4728,6 +4932,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.00003],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4738,6 +4946,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.00003],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4748,6 +4960,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00018],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4758,6 +4974,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00018],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4768,6 +4988,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4778,6 +5002,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4788,6 +5016,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4798,6 +5030,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4808,6 +5044,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4818,6 +5058,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4828,6 +5072,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4838,6 +5086,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4848,6 +5100,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4858,6 +5114,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4868,6 +5128,10 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -4878,72 +5142,100 @@ class ai_openai extends aihelper
             'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
             'supports_temperature' => false,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         // image generation — costs per image (1024x1024 medium quality where applicable)
         [
             'name' => 'gpt-image-1',
-            'supports_image' => true,
             'supports_tools' => false,
             'costs' => ['image' => 0.042],
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-image-1-mini',
-            'supports_image' => true,
             'supports_tools' => false,
             'costs' => ['image' => 0.011],
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-image-1.5',
-            'supports_image' => true,
             'supports_tools' => false,
             'costs' => ['image' => 0.04],
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-image-2',
-            'supports_image' => true,
             'supports_tools' => false,
             'costs' => ['image' => 0.04],
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'chatgpt-image-latest',
-            'supports_image' => true,
             'supports_tools' => false,
             'costs' => ['image' => 0.04],
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         // audio (TTS) — costs per input character
         [
             'name' => 'tts-1',
-            'supports_audio' => true,
             'supports_tools' => false,
             'costs' => ['audio' => 0.000015],
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => true,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'tts-1-hd',
-            'supports_audio' => true,
             'supports_tools' => false,
             'costs' => ['audio' => 0.00003],
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => true,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'gpt-4o-mini-tts',
-            'supports_audio' => true,
             'supports_tools' => false,
             'costs' => ['audio' => 0.000015],
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => true,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ]
@@ -5032,7 +5324,7 @@ class ai_openai extends aihelper
                     $entry = ['name' => $name, 'context_length' => 128000];
                     foreach ($this->models as $definedModel) {
                         if ($definedModel['name'] === $name) {
-                            // merge static caps (supports_image/audio/costs/…) into the
+                            // merge static caps (supports_*/costs/…) into the
                             // dynamic entry so capability metadata survives fetchModels()
                             $entry = array_merge($definedModel, ['name' => $name]);
                             if (!isset($entry['context_length'])) {
@@ -5367,6 +5659,10 @@ class ai_anthropic extends aihelper
             'costs' => ['input' => 0.000001, 'input_cached' => 0.0000001, 'output' => 0.000005],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => true
         ],
@@ -5377,7 +5673,10 @@ class ai_anthropic extends aihelper
             'costs' => ['input' => 0.00001, 'input_cached' => 0.000001, 'output' => 0.00005],
             'supports_temperature' => true,
             'supports_tools' => true,
-            'supports_image' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -5388,6 +5687,10 @@ class ai_anthropic extends aihelper
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -5398,6 +5701,10 @@ class ai_anthropic extends aihelper
             'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -5408,6 +5715,10 @@ class ai_anthropic extends aihelper
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -5418,6 +5729,10 @@ class ai_anthropic extends aihelper
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -5428,6 +5743,10 @@ class ai_anthropic extends aihelper
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -5438,6 +5757,10 @@ class ai_anthropic extends aihelper
             'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -5448,6 +5771,10 @@ class ai_anthropic extends aihelper
             'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -5458,6 +5785,10 @@ class ai_anthropic extends aihelper
             'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -5468,6 +5799,10 @@ class ai_anthropic extends aihelper
             'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => true,
             'test' => false
         ]
@@ -5513,7 +5848,7 @@ class ai_anthropic extends aihelper
                     $entry = ['name' => $name, 'context_length' => 128000];
                     foreach ($this->models as $definedModel) {
                         if ($definedModel['name'] === $name) {
-                            // merge static caps (supports_image/audio/costs/…) into the
+                            // merge static caps (supports_*/costs/…) into the
                             // dynamic entry so capability metadata survives fetchModels()
                             $entry = array_merge($definedModel, ['name' => $name]);
                             if (!isset($entry['context_length'])) {
@@ -5894,6 +6229,10 @@ class ai_google extends aihelper
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => true,
             'default' => false,
             'test' => true
         ],
@@ -5904,6 +6243,10 @@ class ai_google extends aihelper
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -5914,6 +6257,10 @@ class ai_google extends aihelper
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => true,
             'default' => false,
             'test' => false
         ],
@@ -5924,6 +6271,10 @@ class ai_google extends aihelper
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => true,
             'default' => true,
             'test' => false
         ],
@@ -5934,6 +6285,10 @@ class ai_google extends aihelper
             'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => true,
             'default' => false,
             'test' => false
         ],
@@ -5944,6 +6299,10 @@ class ai_google extends aihelper
             'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => true,
             'default' => false,
             'test' => false
         ],
@@ -5954,6 +6313,10 @@ class ai_google extends aihelper
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => true,
             'default' => false,
             'test' => false
         ],
@@ -5964,6 +6327,10 @@ class ai_google extends aihelper
             'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.0000015],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => true,
             'default' => false,
             'test' => false
         ],
@@ -5974,7 +6341,10 @@ class ai_google extends aihelper
             'costs' => ['input' => 0.0000005, 'input_cached' => 0.00000005, 'output' => 0.000003, 'image' => 0.067],
             'supports_temperature' => true,
             'supports_tools' => true,
-            'supports_image' => true,
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -5985,7 +6355,10 @@ class ai_google extends aihelper
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000012, 'image' => 0.134],
             'supports_temperature' => true,
             'supports_tools' => true,
-            'supports_image' => true,
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -5996,6 +6369,10 @@ class ai_google extends aihelper
             'costs' => ['input' => 0.0000015, 'input_cached' => 0.00000015, 'output' => 0.000009],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => true,
             'default' => false,
             'test' => false
         ],
@@ -6006,6 +6383,10 @@ class ai_google extends aihelper
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -6016,30 +6397,43 @@ class ai_google extends aihelper
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'imagen-4.0-generate-001',
-            'supports_image' => true,
             'supports_tools' => false,
             'costs' => ['image' => 0.04],
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'imagen-4.0-fast-generate-001',
-            'supports_image' => true,
             'supports_tools' => false,
             'costs' => ['image' => 0.02],
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'imagen-4.0-ultra-generate-001',
-            'supports_image' => true,
             'supports_tools' => false,
             'costs' => ['image' => 0.06],
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ]
@@ -6338,6 +6732,10 @@ class ai_xai extends ai_anthropic
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000006],
             'supports_temperature' => true,
             'supports_tools' => false,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -6348,6 +6746,10 @@ class ai_xai extends ai_anthropic
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000006],
             'supports_temperature' => true,
             'supports_tools' => false,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -6358,6 +6760,10 @@ class ai_xai extends ai_anthropic
             'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000006],
             'supports_temperature' => true,
             'supports_tools' => false,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -6368,6 +6774,10 @@ class ai_xai extends ai_anthropic
             'costs' => ['input' => 0.000001, 'input_cached' => 0.0000002, 'output' => 0.000002],
             'supports_temperature' => true,
             'supports_tools' => false,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -6378,23 +6788,33 @@ class ai_xai extends ai_anthropic
             'costs' => ['input' => 0.00000125, 'input_cached' => 0.00000125, 'output' => 0.0000025],
             'supports_temperature' => true,
             'supports_tools' => false,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => true,
             'test' => true
         ],
         // image generation — costs per image
         [
             'name' => 'grok-imagine-image',
-            'supports_image' => true,
             'supports_tools' => false,
             'costs' => ['image' => 0.02],
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'grok-imagine-image-quality',
-            'supports_image' => true,
             'supports_tools' => false,
             'costs' => ['image' => 0.07],
+            'supports_text_to_image' => true,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ]
@@ -6428,6 +6848,10 @@ class ai_deepseek extends ai_anthropic
             'costs' => ['input' => 0.00000004, 'input_cached' => 0.000000004, 'output' => 0.0000001],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => true,
             'test' => true
         ],
@@ -6438,6 +6862,10 @@ class ai_deepseek extends ai_anthropic
             'costs' => ['input' => 0.00000027, 'input_cached' => 0.000000027, 'output' => 0.00000042],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ]
@@ -6463,7 +6891,7 @@ class ai_deepseek extends ai_anthropic
                     $entry = ['name' => $name, 'context_length' => 128000];
                     foreach ($this->models as $definedModel) {
                         if ($definedModel['name'] === $name) {
-                            // merge static caps (supports_image/audio/costs/…) into the
+                            // merge static caps (supports_*/costs/…) into the
                             // dynamic entry so capability metadata survives fetchModels()
                             $entry = array_merge($definedModel, ['name' => $name]);
                             if (!isset($entry['context_length'])) {
@@ -7163,6 +7591,10 @@ class ai_nvidia extends ai_openrouter
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => true,
             'test' => true
         ],
@@ -7173,6 +7605,10 @@ class ai_nvidia extends ai_openrouter
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -7183,6 +7619,10 @@ class ai_nvidia extends ai_openrouter
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -7193,6 +7633,10 @@ class ai_nvidia extends ai_openrouter
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -7203,6 +7647,10 @@ class ai_nvidia extends ai_openrouter
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -7213,6 +7661,10 @@ class ai_nvidia extends ai_openrouter
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => false,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -7223,6 +7675,10 @@ class ai_nvidia extends ai_openrouter
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -7233,6 +7689,10 @@ class ai_nvidia extends ai_openrouter
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => false,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -7243,6 +7703,10 @@ class ai_nvidia extends ai_openrouter
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -7253,6 +7717,10 @@ class ai_nvidia extends ai_openrouter
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
@@ -7263,6 +7731,10 @@ class ai_nvidia extends ai_openrouter
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => false,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ]
@@ -7308,67 +7780,103 @@ class ai_elevenlabs extends ai_openai
     public array $models = [
         [
             'name' => 'eleven_v3',
-            'supports_audio' => true,
             'supports_tools' => false,
             'costs' => ['audio' => 0.0003],
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => true,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'eleven_turbo_v2_5',
-            'supports_audio' => true,
             'supports_tools' => false,
             'costs' => ['audio' => 0.00005],
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => true,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => true,
             'test' => true
         ],
         [
             'name' => 'eleven_turbo_v2',
-            'supports_audio' => true,
             'supports_tools' => false,
             'costs' => ['audio' => 0.00005],
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => true,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'eleven_flash_v2_5',
-            'supports_audio' => true,
             'supports_tools' => false,
             'costs' => ['audio' => 0.000033],
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => true,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'eleven_flash_v2',
-            'supports_audio' => true,
             'supports_tools' => false,
             'costs' => ['audio' => 0.000033],
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => true,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'eleven_multilingual_v2',
-            'supports_audio' => true,
             'supports_tools' => false,
             'costs' => ['audio' => 0.00018],
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => true,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'eleven_multilingual_v1',
-            'supports_audio' => true,
             'supports_tools' => false,
             'costs' => ['audio' => 0.000165],
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => true,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
         ],
         [
             'name' => 'eleven_monolingual_v1',
-            'supports_audio' => true,
             'supports_tools' => false,
             'costs' => ['audio' => 0.000165],
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => true,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => false,
             'test' => false
+        ],
+        [
+            // speech-to-text (Scribe) — used via ask() with an audio attachment
+            'name' => 'scribe_v1',
+            'supports_tools' => false,
+            'costs' => ['audio' => 0],
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => true,
+            'default' => false,
+            'test' => true
         ]
     ];
 
@@ -7413,6 +7921,47 @@ class ai_elevenlabs extends ai_openai
             $models[] = $entry;
         }
         return $models;
+    }
+
+    public function ask(?string $prompt = null, mixed $files = null): array
+    {
+        $list = is_array($files) ? $files : ($files !== null ? [$files] : []);
+        $audio = null;
+        foreach ($list as $f) {
+            if (is_string($f) && file_exists($f) && strpos((string) mime_content_type($f), 'audio/') === 0) {
+                $audio = $f;
+                break;
+            }
+        }
+        if ($audio === null) {
+            return [
+                'response' => 'elevenlabs ask() is speech-to-text only — pass an audio file via the $files argument.',
+                'success' => false,
+                'costs' => 0.0
+            ];
+        }
+        $ch = curl_init($this->url . '/speech-to-text');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => [
+                'model_id' => $this->model,
+                'file' => new \CURLFile($audio, (string) mime_content_type($audio), basename($audio))
+            ],
+            CURLOPT_HTTPHEADER => ['xi-api-key: ' . $this->api_key],
+            CURLOPT_TIMEOUT => $this->timeout ?? 300
+        ]);
+        $raw = curl_exec($ch);
+        $err = curl_error($ch);
+        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        if ($raw === false || $http >= 400) {
+            $msg = 'elevenlabs stt HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500);
+            $this->log('⛔ ' . $msg);
+            return ['response' => $msg, 'success' => false, 'costs' => 0.0];
+        }
+        $json = json_decode((string) $raw, true);
+        $text = is_array($json) ? (string) ($json['text'] ?? '') : '';
+        return ['response' => $text, 'success' => true, 'costs' => 0.0];
     }
 
     protected function audioThis(
@@ -7503,6 +8052,10 @@ class ai_test extends ai_anthropic
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
             'supports_temperature' => true,
             'supports_tools' => false,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
             'default' => true,
             'test' => true
         ]

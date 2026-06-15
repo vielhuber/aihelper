@@ -52,6 +52,9 @@ $ai->ask(prompt: 'Wer wurde 2018 Fußball-Weltmeister?');
 $ai->ask(prompt: 'Was ist auf dem Bild zu sehen?', files: 'lorem.jpg');
 // ['response' => 'Auf dem Bild ist eine Katze zu sehen.', 'success' => true, 'costs' => 0.001]
 
+$ai->ask(prompt: 'Was wird in der Audiodatei gesagt?', files: 'lorem.mp3');
+// ['response' => 'In der Aufnahme wird gesagt: "Hallo, wie geht es dir?"', 'success' => true, 'costs' => 0.001]
+
 $ai->ask(prompt: 'Wie lautet das erste Wort in der PDF?', files: 'lorem.pdf');
 // ['response' => 'Das erste Wort lautet "Lorem".', 'success' => true, 'costs' => 0.001]
 

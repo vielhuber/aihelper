@@ -197,50 +197,7 @@ class Test extends \PHPUnit\Framework\TestCase
         if ($this->isCi() && $force !== true) {
             $this->markTestSkipped('Skipped.');
         }
-        if (empty($_SERVER['ELEVENLABS_API_KEY'] ?? null)) {
-            $this->markTestSkipped('ELEVENLABS_API_KEY not configured.');
-        }
-        $provider = 'elevenlabs';
-        $api_models = aihelper::create(
-            provider: $provider,
-            api_key: $_SERVER['ELEVENLABS_API_KEY'],
-            log: 'tests/aihelper.log'
-        )->fetchModels();
-        $test_models = aihelper::create(
-            provider: $provider,
-            api_key: $_SERVER['ELEVENLABS_API_KEY'],
-            log: 'tests/aihelper.log'
-        )->getTestModels();
-        foreach ($test_models as $model) {
-            __::log_begin('ai');
-            $this->log('Testing ' . $provider . ' (' . $model . ')...');
-            $ai = aihelper::create(
-                provider: $provider,
-                model: $model,
-                api_key: $_SERVER['ELEVENLABS_API_KEY'],
-                log: 'tests/aihelper.log',
-                max_tries: 2
-            );
-            $out = sys_get_temp_dir() . '/aihelper-test-' . uniqid() . '.mp3';
-            $return = $ai->audio(prompt: 'Hallo, dies ist ein Test der Sprachsynthese.', output_file: $out);
-            $time = __::log_end('ai', false)['time'];
-            $success = ($return['success'] ?? false) === true && is_string($return['response']) && is_file($return['response']) && filesize($return['response']) > 0;
-            $this->log(($success ? '✅' : '⛔') . ' ' . $model . ' (' . round((float) ($return['costs'] ?? 0), 6) . '€, ' . $time . 's)');
-            @unlink($out);
-            if (!isset($stats[$provider])) {
-                $stats[$provider] = [];
-            }
-            if (!isset($stats[$provider][$model])) {
-                $stats[$provider][$model] = [];
-            }
-            $stats[$provider][$model][] = [
-                'time' => $time,
-                'costs' => (float) ($return['costs'] ?? 0),
-                'fail_count' => $success ? 0 : 1,
-                'success_count' => $success ? 1 : 0
-            ];
-        }
-        $this->assertGreaterThan(0, count($api_models));
+        $this->ai_test_prepare('elevenlabs', $_SERVER['ELEVENLABS_API_KEY'] ?? null, null, $stats);
     }
 
     function test__auto_compact(): void
@@ -366,6 +323,16 @@ class Test extends \PHPUnit\Framework\TestCase
                 ];
             }
         }
+    }
+
+    function modelSupports(aihelper $ai, string $model, string $cap): bool
+    {
+        foreach ($ai->models as $m) {
+            if (($m['name'] ?? null) === $model) {
+                return ($m[$cap] ?? false) === true;
+            }
+        }
+        return false;
     }
 
     function ai_test(string $provider, string $model, ?string $api_key, ?string $url): array
@@ -843,6 +810,54 @@ class Test extends \PHPUnit\Framework\TestCase
                     }
                     $i_prompt++;
                 }
+            }
+        }
+
+        // text_to_audio
+        if ($this->modelSupports($ai, $model, 'supports_text_to_audio')) {
+            $out = sys_get_temp_dir() . '/aihelper-test-' . uniqid() . '.mp3';
+            $return = $ai->audio(prompt: 'Hallo, dies ist ein Test der Sprachsynthese.', output_file: $out);
+            $success_this =
+                ($return['success'] ?? false) === true &&
+                is_string($return['response'] ?? null) &&
+                is_file($return['response']) &&
+                filesize($return['response']) > 0;
+            @unlink($out);
+            if ($success_this) {
+                $success_count++;
+            } else {
+                $fail_count++;
+            }
+            $costs += (float) ($return['costs'] ?? 0);
+            $this->log(($success_this ? '✅' : '⛔') . ' #12 (text_to_audio)');
+            if ($success_this === false) {
+                $this->log([$return]);
+            }
+        }
+
+        // audio_to_text
+        if ($this->modelSupports($ai, $model, 'supports_audio_to_text')) {
+            $ai_audio = aihelper::create(
+                provider: $provider,
+                model: $model,
+                max_tries: 2,
+                api_key: $api_key,
+                log: 'tests/aihelper.log',
+                url: $url
+            );
+            $return = $ai_audio->ask('Was wird in der Audiodatei gesagt? Antworte knapp.', 'tests/assets/lorem.mp3');
+            $success_this =
+                ($return['success'] ?? false) === true &&
+                stripos((string) ($return['response'] ?? ''), 'Paris') !== false;
+            if ($success_this) {
+                $success_count++;
+            } else {
+                $fail_count++;
+            }
+            $costs += (float) ($return['costs'] ?? 0);
+            $this->log(($success_this ? '✅' : '⛔') . ' #13 (audio_to_text)');
+            if ($success_this === false) {
+                $this->log([$return]);
             }
         }
 
@@ -1356,7 +1371,9 @@ class Test extends \PHPUnit\Framework\TestCase
         $providers = aihelper::getProviders();
         $success = true;
         foreach ($providers as $providers__value) {
-            if (in_array($providers__value['name'], ['openrouter', 'llamacpp', 'lmstudio', 'nvidia', 'codex', 'test'])) {
+            if (
+                in_array($providers__value['name'], ['openrouter', 'llamacpp', 'lmstudio', 'nvidia', 'codex', 'test'])
+            ) {
                 continue;
             }
             $modelsApi = array_map(function ($m) {
@@ -1396,7 +1413,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 // image models cannot be probed with a tiny prompt without
                 // incurring per-image costs — skip them. audio is cheap
                 // (~$5e-8 per char) so we probe via audio() instead.
-                if (($models__value['supports_image'] ?? false) === true) {
+                if (($models__value['supports_text_to_image'] ?? false) === true) {
                     continue;
                 }
                 for ($i = 1; $i <= 3; $i++) {
@@ -1409,10 +1426,11 @@ class Test extends \PHPUnit\Framework\TestCase
                         log: 'tests/aihelper.log',
                         max_tries: 2
                     );
-                    if (($models__value['supports_audio'] ?? false) === true) {
+                    if (($models__value['supports_text_to_audio'] ?? false) === true) {
                         $probe_out = sys_get_temp_dir() . '/aihelper-probe-' . uniqid() . '.mp3';
                         $return = $ai->audio(prompt: 'Test.', output_file: $probe_out);
-                        $audio_ok = ($return['success'] ?? false) === true &&
+                        $audio_ok =
+                            ($return['success'] ?? false) === true &&
                             is_string($return['response'] ?? null) &&
                             is_file($return['response']) &&
                             filesize($return['response']) > 0;
