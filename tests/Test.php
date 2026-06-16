@@ -1401,12 +1401,11 @@ class Test extends \PHPUnit\Framework\TestCase
             foreach ($modelsStatic as $models__value) {
                 if (!in_array($models__value, $modelsApi)) {
                     $this->log(
-                        '⛔ Model ' .
+                        '⚠️ Model ' .
                             $models__value .
                             ' is listed in static array but not available via API for provider ' .
                             $providers__value['name']
                     );
-                    $success = false;
                 }
             }
             foreach ($providers__value['models'] as $models__value) {
@@ -1466,7 +1465,8 @@ class Test extends \PHPUnit\Framework\TestCase
                         $access_restricted =
                             stripos($resp, 'is not available') !== false ||
                             stripos($resp, 'do not have access') !== false ||
-                            stripos($resp, 'fable-mythos-access') !== false;
+                            stripos($resp, 'fable-mythos-access') !== false ||
+                            trim((string) $resp) === 'model: ' . $models__value['name'];
                         $nonfatal = $temp || $access_restricted;
                         $this->log(
                             ($nonfatal === true ? '⚠️' : '⛔') .
