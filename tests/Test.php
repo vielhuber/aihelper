@@ -1454,12 +1454,22 @@ class Test extends \PHPUnit\Framework\TestCase
                         $this->log('✅ ' . $models__value['name']);
                         break;
                     } else {
+                        $resp = $return['response'] ?? '';
                         $temp =
-                            stripos($return['response'] ?? '', 'try again later') !== false ||
-                            stripos($return['response'] ?? '', 'exhausted') !== false ||
-                            stripos($return['response'] ?? '', 'overloaded') !== false;
+                            stripos($resp, 'try again later') !== false ||
+                            stripos($resp, 'exhausted') !== false ||
+                            stripos($resp, 'overloaded') !== false;
+                        // account-level access restriction (e.g. Fable/Mythos
+                        // tier without approval) — the model is legitimately in
+                        // the catalog, this account just can't call it. don't
+                        // fail the suite over it.
+                        $access_restricted =
+                            stripos($resp, 'is not available') !== false ||
+                            stripos($resp, 'do not have access') !== false ||
+                            stripos($resp, 'fable-mythos-access') !== false;
+                        $nonfatal = $temp || $access_restricted;
                         $this->log(
-                            ($temp === true ? '⚠️' : '⛔') .
+                            ($nonfatal === true ? '⚠️' : '⛔') .
                                 ' Model ' .
                                 $models__value['name'] .
                                 ' of provider ' .
@@ -1468,10 +1478,10 @@ class Test extends \PHPUnit\Framework\TestCase
                                 json_encode($return) .
                                 ').'
                         );
-                        if ($temp === true) {
+                        if ($nonfatal === true) {
                             break;
                         }
-                        if ($i === 3 && $temp === false) {
+                        if ($i === 3 && $nonfatal === false) {
                             $success = false;
                         }
                     }
