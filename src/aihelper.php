@@ -1044,7 +1044,9 @@ abstract class aihelper
             // Imagen response shape: predictions[].bytesBase64Encoded
             $items = is_array($data) ? $data['predictions'] ?? [] : [];
             if (!is_array($items) || count($items) === 0) {
-                return ['response' => null, 'success' => false, 'costs' => 0.0];
+                $msg = 'image: provider returned no image (empty response) — the prompt was most likely rejected by the content/safety filter';
+                $this->log('⛔ ' . $msg);
+                return ['response' => $msg, 'success' => false, 'costs' => 0.0];
             }
             $b64s = [];
             foreach ($items as $it) {
@@ -1053,13 +1055,17 @@ abstract class aihelper
                 }
             }
             if ($b64s === []) {
-                return ['response' => null, 'success' => false, 'costs' => 0.0];
+                $msg = 'image: provider returned no image data — the prompt was most likely rejected by the content/safety filter';
+                $this->log('⛔ ' . $msg);
+                return ['response' => $msg, 'success' => false, 'costs' => 0.0];
             }
         } else {
             // OpenAI/xAI shape: data[].b64_json or data[].url (download + encode)
             $items = is_array($data) ? $data['data'] ?? [] : [];
             if (!is_array($items) || count($items) === 0) {
-                return ['response' => null, 'success' => false, 'costs' => 0.0];
+                $msg = 'image: provider returned no image (empty response) — the prompt was most likely rejected by the content/safety filter';
+                $this->log('⛔ ' . $msg);
+                return ['response' => $msg, 'success' => false, 'costs' => 0.0];
             }
             $download_timeout = (int) ($this->timeout ?? 30);
             $download_failed = false;
@@ -1078,8 +1084,9 @@ abstract class aihelper
                 return '';
             }, $items);
             if ($download_failed || in_array('', $b64s, true)) {
-                $this->log('⛔ image: failed to download one or more result urls');
-                return ['response' => null, 'success' => false, 'costs' => 0.0];
+                $msg = 'image: failed to download one or more result urls';
+                $this->log('⛔ ' . $msg);
+                return ['response' => $msg, 'success' => false, 'costs' => 0.0];
             }
         }
         if ($output_file !== null) {
@@ -1091,8 +1098,9 @@ abstract class aihelper
             foreach ($b64s as $i => $b64) {
                 $path = $n === 1 ? $output_file : $dir . '/' . $base . '-' . ($i + 1) . $ext;
                 if (file_put_contents($path, base64_decode($b64)) === false) {
-                    $this->log('⛔ image: failed to write output_file ' . $path);
-                    return ['response' => null, 'success' => false, 'costs' => 0.0];
+                    $msg = 'image: failed to write output_file ' . $path;
+                    $this->log('⛔ ' . $msg);
+                    return ['response' => $msg, 'success' => false, 'costs' => 0.0];
                 }
                 $paths[] = $path;
             }
@@ -1143,6 +1151,11 @@ abstract class aihelper
             $this->log('⛔ ' . $msg);
             return ['response' => $msg, 'success' => false, 'costs' => 0.0];
         }
+        if ((string) $raw === '') {
+            $msg = 'audio: provider returned no audio (empty response)';
+            $this->log('⛔ ' . $msg);
+            return ['response' => $msg, 'success' => false, 'costs' => 0.0];
+        }
         $costs = 0.0;
         foreach ($this->models as $m) {
             if (($m['name'] ?? null) === $this->model) {
@@ -1157,8 +1170,9 @@ abstract class aihelper
         }
         if ($output_file !== null) {
             if (file_put_contents($output_file, $raw) === false) {
-                $this->log('⛔ audio: failed to write output_file ' . $output_file);
-                return ['response' => null, 'success' => false, 'costs' => 0.0];
+                $msg = 'audio: failed to write output_file ' . $output_file;
+                $this->log('⛔ ' . $msg);
+                return ['response' => $msg, 'success' => false, 'costs' => 0.0];
             }
             return ['response' => $output_file, 'success' => true, 'costs' => $costs];
         }
@@ -7988,6 +8002,11 @@ class ai_elevenlabs extends ai_openai
         }
         $json = json_decode((string) $raw, true);
         $text = is_array($json) ? (string) ($json['text'] ?? '') : '';
+        if (trim($text) === '') {
+            $msg = 'elevenlabs stt: provider returned an empty transcript';
+            $this->log('⛔ ' . $msg);
+            return ['response' => $msg, 'success' => false, 'costs' => 0.0];
+        }
         return ['response' => $text, 'success' => true, 'costs' => 0.0];
     }
 
@@ -8037,6 +8056,11 @@ class ai_elevenlabs extends ai_openai
             $this->log('⛔ ' . $msg);
             return ['response' => $msg, 'success' => false, 'costs' => 0.0];
         }
+        if ((string) $raw === '') {
+            $msg = 'elevenlabs audio: provider returned no audio (empty response)';
+            $this->log('⛔ ' . $msg);
+            return ['response' => $msg, 'success' => false, 'costs' => 0.0];
+        }
         $costs = 0.0;
         foreach ($this->models as $m) {
             if (($m['name'] ?? null) === $this->model) {
@@ -8046,8 +8070,9 @@ class ai_elevenlabs extends ai_openai
         }
         if ($output_file !== null) {
             if (file_put_contents($output_file, $raw) === false) {
-                $this->log('⛔ elevenlabs audio: failed to write output_file ' . $output_file);
-                return ['response' => null, 'success' => false, 'costs' => 0.0];
+                $msg = 'elevenlabs audio: failed to write output_file ' . $output_file;
+                $this->log('⛔ ' . $msg);
+                return ['response' => $msg, 'success' => false, 'costs' => 0.0];
             }
             return ['response' => $output_file, 'success' => true, 'costs' => $costs];
         }
