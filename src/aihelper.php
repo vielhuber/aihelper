@@ -2485,7 +2485,9 @@ abstract class aihelper
                 foreach ($response->result->data as $model_data) {
                     foreach ([$model_data->slug ?? '', $model_data->name ?? ''] as $value) {
                         foreach ($this->getModelMatchingKeys((string) $value) as $model_key) {
-                            self::$artificial_analysis_models[$model_key] = $model_data;
+                            if (!isset(self::$artificial_analysis_models[$model_key])) {
+                                self::$artificial_analysis_models[$model_key] = $model_data;
+                            }
                         }
                     }
                 }
@@ -2529,13 +2531,13 @@ abstract class aihelper
     {
         $model = strtolower($model);
         $model = preg_replace('/:[a-z0-9_-]+$/i', '', $model) ?? $model;
-        $model = preg_replace('/\s*\((high|medium|low|minimal|max|adaptive[^)]*)\)$/i', '', $model) ?? $model;
         $values = [$model];
         if (str_contains($model, '/')) {
             $values[] = substr($model, (int) strrpos($model, '/') + 1);
         }
         $values[] = preg_replace('/-\d{4}-\d{2}-\d{2}$/', '', end($values)) ?? end($values);
         $values[] = preg_replace('/-(high|medium|low|minimal|max)$/', '', end($values)) ?? end($values);
+        $values[] = preg_replace('/\s*\((xhigh|high|medium|low|minimal|max|adaptive[^)]*)\)$/i', '', $model) ?? $model;
 
         $keys = [];
         foreach ($values as $value) {
