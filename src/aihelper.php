@@ -16,6 +16,7 @@ abstract class aihelper
     public ?bool $supports_stream = null;
 
     protected ?string $model = null;
+    protected ?string $effort = null;
     protected ?float $temperature = null;
     protected ?int $timeout = null;
     protected ?string $api_key = null;
@@ -52,6 +53,7 @@ abstract class aihelper
     public static function create(
         string $provider,
         ?string $model = null,
+        ?string $effort = null,
         ?float $temperature = null,
         ?int $timeout = null,
         ?string $api_key = null,
@@ -69,6 +71,7 @@ abstract class aihelper
         if ($provider === 'openai') {
             return new ai_openai(
                 model: $model,
+                effort: $effort,
                 temperature: $temperature,
                 timeout: $timeout,
                 api_key: $api_key,
@@ -87,6 +90,7 @@ abstract class aihelper
         if ($provider === 'anthropic') {
             return new ai_anthropic(
                 model: $model,
+                effort: $effort,
                 temperature: $temperature,
                 timeout: $timeout,
                 api_key: $api_key,
@@ -105,6 +109,7 @@ abstract class aihelper
         if ($provider === 'google') {
             return new ai_google(
                 model: $model,
+                effort: $effort,
                 temperature: $temperature,
                 timeout: $timeout,
                 api_key: $api_key,
@@ -123,6 +128,7 @@ abstract class aihelper
         if ($provider === 'xai') {
             return new ai_xai(
                 model: $model,
+                effort: $effort,
                 temperature: $temperature,
                 timeout: $timeout,
                 api_key: $api_key,
@@ -141,6 +147,7 @@ abstract class aihelper
         if ($provider === 'deepseek') {
             return new ai_deepseek(
                 model: $model,
+                effort: $effort,
                 temperature: $temperature,
                 timeout: $timeout,
                 api_key: $api_key,
@@ -159,6 +166,7 @@ abstract class aihelper
         if ($provider === 'openrouter') {
             return new ai_openrouter(
                 model: $model,
+                effort: $effort,
                 temperature: $temperature,
                 timeout: $timeout,
                 api_key: $api_key,
@@ -177,6 +185,7 @@ abstract class aihelper
         if ($provider === 'llamacpp') {
             return new ai_llamacpp(
                 model: $model,
+                effort: $effort,
                 temperature: $temperature,
                 timeout: $timeout,
                 api_key: $api_key,
@@ -195,6 +204,7 @@ abstract class aihelper
         if ($provider === 'lmstudio') {
             return new ai_lmstudio(
                 model: $model,
+                effort: $effort,
                 temperature: $temperature,
                 timeout: $timeout,
                 api_key: $api_key,
@@ -213,6 +223,7 @@ abstract class aihelper
         if ($provider === 'nvidia') {
             return new ai_nvidia(
                 model: $model,
+                effort: $effort,
                 temperature: $temperature,
                 timeout: $timeout,
                 api_key: $api_key,
@@ -231,6 +242,7 @@ abstract class aihelper
         if ($provider === 'codex') {
             return new ai_codex(
                 model: $model,
+                effort: $effort,
                 temperature: $temperature,
                 timeout: $timeout,
                 api_key: $api_key,
@@ -249,6 +261,7 @@ abstract class aihelper
         if ($provider === 'elevenlabs') {
             return new ai_elevenlabs(
                 model: $model,
+                effort: $effort,
                 temperature: $temperature,
                 timeout: $timeout,
                 api_key: $api_key,
@@ -267,6 +280,7 @@ abstract class aihelper
         if ($provider === 'test') {
             return new ai_test(
                 model: $model,
+                effort: $effort,
                 temperature: $temperature,
                 timeout: $timeout,
                 api_key: $api_key,
@@ -543,6 +557,7 @@ abstract class aihelper
 
     public function __construct(
         ?string $model = null,
+        ?string $effort = null,
         ?float $temperature = null,
         ?int $timeout = null,
         ?string $api_key = null,
@@ -569,6 +584,9 @@ abstract class aihelper
         }
         if ($url !== null) {
             $this->url = $url;
+        }
+        if ($effort !== null && in_array($effort, ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], true)) {
+            $this->effort = $effort;
         }
         if ($enable_thinking !== null) {
             $this->enable_thinking = $enable_thinking;
@@ -692,6 +710,36 @@ abstract class aihelper
 
             $input_modalities = array_values((array) ($model->modalities->input ?? []));
             $output_modalities = array_values((array) ($model->modalities->output ?? []));
+            $efforts = [];
+            $supports_reasoning_control = false;
+            $effort_budget_min = null;
+            $effort_budget_max = null;
+            foreach ((array) ($model->reasoning_options ?? []) as $reasoning_option) {
+                if (in_array($reasoning_option->type ?? null, ['budget_tokens', 'toggle'], true)) {
+                    $supports_reasoning_control = true;
+                }
+                if (($reasoning_option->type ?? null) === 'budget_tokens') {
+                    if (isset($reasoning_option->min) && is_numeric($reasoning_option->min)) {
+                        $effort_budget_min = (int) $reasoning_option->min;
+                    }
+                    if (isset($reasoning_option->max) && is_numeric($reasoning_option->max)) {
+                        $effort_budget_max = (int) $reasoning_option->max;
+                    }
+                }
+                if (($reasoning_option->type ?? null) !== 'effort' || !is_array($reasoning_option->values ?? null)) {
+                    continue;
+                }
+                $efforts = array_values(
+                    array_filter(
+                        (array) $reasoning_option->values,
+                        fn($value) => is_string($value) && in_array($value, $this->getEffortValues(), true)
+                    )
+                );
+                $supports_reasoning_control = true;
+            }
+            if (empty($efforts) && $supports_reasoning_control) {
+                $efforts = $this->getEffortValues();
+            }
             $cost = $model->cost ?? null;
             $model_date = (string) ($model->release_date ?? ($model->last_updated ?? ''));
             $model_key = count($models);
@@ -710,6 +758,10 @@ abstract class aihelper
                 'supports_text_to_audio' => in_array('audio', $output_modalities, true),
                 'supports_image_to_text' => in_array('image', $input_modalities, true),
                 'supports_audio_to_text' => $provider !== 'openrouter' && in_array('audio', $input_modalities, true),
+                'supports_effort' => (bool) ($model->reasoning ?? false) && $supports_reasoning_control,
+                'efforts' => $efforts,
+                'effort_budget_min' => $effort_budget_min,
+                'effort_budget_max' => $effort_budget_max,
                 'open_weights' => (bool) ($model->open_weights ?? false),
                 'default' => false,
                 'test' => false
@@ -2447,7 +2499,12 @@ abstract class aihelper
                 'supports_text_to_audio' => $model['supports_text_to_audio'] ?? false,
                 'supports_image_to_text' => $model['supports_image_to_text'] ?? false,
                 'supports_audio_to_text' => $model['supports_audio_to_text'] ?? false,
+                'supports_effort' => $model['supports_effort'] ?? false,
+                'efforts' => $model['efforts'] ?? [],
+                'effort_budget_min' => $model['effort_budget_min'] ?? null,
+                'effort_budget_max' => $model['effort_budget_max'] ?? null,
                 'open_weights' => isset($model['open_weights']) ? (bool) $model['open_weights'] : false,
+                'supported_parameters' => $model['supported_parameters'] ?? [],
                 'artificial_analysis_intelligence_index' => $model['artificial_analysis_intelligence_index'] ?? null,
                 'artificial_analysis_coding_index' => $model['artificial_analysis_coding_index'] ?? null,
                 'artificial_analysis_agentic_index' => $model['artificial_analysis_agentic_index'] ?? null,
@@ -2638,6 +2695,75 @@ abstract class aihelper
         return $args;
     }
 
+    protected function getEffortValues(): array
+    {
+        return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+    }
+
+    protected function getEffortForRequest(): ?string
+    {
+        if ($this->effort === null) {
+            return null;
+        }
+        foreach ($this->models as $model) {
+            if (($model['name'] ?? null) !== $this->model) {
+                continue;
+            }
+            if (($model['supports_effort'] ?? false) !== true) {
+                return null;
+            }
+            $efforts = $model['efforts'] ?? [];
+            if (!empty($efforts) && !in_array($this->effort, $efforts, true)) {
+                return null;
+            }
+            return $this->effort;
+        }
+        return null;
+    }
+
+    protected function getEffortLevel(?string $effort = null): string
+    {
+        $effort = $effort ?? $this->effort;
+        return match ($effort) {
+            'none', 'minimal', 'low' => 'low',
+            'medium' => 'medium',
+            default => 'high'
+        };
+    }
+
+    protected function getEffortBudgetTokens(?string $effort = null): int
+    {
+        $effort = $effort ?? $this->effort;
+        return match ($effort) {
+            'none' => 0,
+            'minimal' => 512,
+            'low' => 1024,
+            'medium' => 4096,
+            'high' => 10000,
+            'xhigh' => 20000,
+            'max' => 32000,
+            default => 1024
+        };
+    }
+
+    protected function getEffortBudgetTokensForRequest(?string $effort = null): int
+    {
+        $budget = $this->getEffortBudgetTokens($effort);
+        foreach ($this->models as $model) {
+            if (($model['name'] ?? null) !== $this->model) {
+                continue;
+            }
+            if ($budget > 0 && isset($model['effort_budget_min']) && $model['effort_budget_min'] !== null) {
+                $budget = max((int) $model['effort_budget_min'], $budget);
+            }
+            if (isset($model['effort_budget_max']) && $model['effort_budget_max'] !== null) {
+                $budget = min((int) $model['effort_budget_max'], $budget);
+            }
+            break;
+        }
+        return $budget;
+    }
+
     protected function trimPrompt(string $prompt): string
     {
         return __::trim_whitespace(__::trim_indentation($prompt));
@@ -2691,6 +2817,10 @@ abstract class aihelper
     {
         $model_name = strtolower($this->model ?? '');
         $enable_thinking = $this->enable_thinking;
+        $configured_effort = $this->effort;
+        if ($configured_effort !== null) {
+            $enable_thinking = $configured_effort !== 'none';
+        }
         $uses_tools = !empty($args['tools']) && is_array($args['tools']);
 
         // --- detect profile ---
@@ -2816,7 +2946,12 @@ abstract class aihelper
                 // hard server-side cap), so the model self-conditions rather
                 // than getting truncated mid-thought
                 if ($enable_thinking === true) {
-                    $args['chat_template_kwargs'] += ['thinking_budget' => 2000];
+                    $args['chat_template_kwargs'] += [
+                        'thinking_budget' =>
+                            $configured_effort !== null
+                                ? $this->getEffortBudgetTokensForRequest($configured_effort)
+                                : 2000
+                    ];
                 }
             }
         } elseif (str_contains($model_name, 'qwen3')) {
@@ -2897,7 +3032,8 @@ abstract class aihelper
                     'dry_multiplier' => 0.8,
                     'dry_base' => 1.75,
                     'dry_allowed_length' => 2,
-                    'thinking_budget_tokens' => 4000
+                    'thinking_budget_tokens' =>
+                        $configured_effort !== null ? $this->getEffortBudgetTokensForRequest($configured_effort) : 4000
                 ];
             } else {
                 $args['temperature'] = 1.0;
@@ -2909,7 +3045,8 @@ abstract class aihelper
                     'dry_multiplier' => 0.8,
                     'dry_base' => 1.75,
                     'dry_allowed_length' => 2,
-                    'thinking_budget_tokens' => 4000
+                    'thinking_budget_tokens' =>
+                        $configured_effort !== null ? $this->getEffortBudgetTokensForRequest($configured_effort) : 4000
                 ];
             }
             $glm_major = (int) $_glm[1];
@@ -4561,7 +4698,13 @@ class ai_openai extends aihelper
                     ) {
                         continue;
                     }
-                    $models[] = ['name' => $name, 'context_length' => 128000];
+                    $supports_effort = preg_match('/^(gpt-5|o1|o3|o4)(-|\.|$)/', strtolower($name)) === 1;
+                    $models[] = [
+                        'name' => $name,
+                        'context_length' => 128000,
+                        'supports_effort' => $supports_effort,
+                        'efforts' => $supports_effort ? $this->getEffortValues() : []
+                    ];
                 }
             }
         }
@@ -4832,6 +4975,11 @@ class ai_openai extends aihelper
 
     protected function modifyArgs(?array $args): ?array
     {
+        $configured_effort = $this->getEffortForRequest();
+        if ($configured_effort !== null) {
+            $args['reasoning'] = ['effort' => $configured_effort, 'summary' => 'detailed'];
+            return $args;
+        }
         $model_name = strtolower($this->model ?? '');
         $is_o_model = preg_match('/^(o1|o3|o4)(-|$)/', $model_name) === 1;
         $is_o1_pro = preg_match('/^o1-pro/', $model_name) === 1;
@@ -5221,6 +5369,7 @@ class ai_anthropic extends aihelper
     protected function modifyArgs(?array $args): ?array
     {
         $model_name = strtolower($this->model ?? '');
+        $configured_effort = $this->getEffortForRequest();
         $supports_thinking =
             str_contains($model_name, 'sonnet') ||
             str_contains($model_name, 'opus') ||
@@ -5230,15 +5379,23 @@ class ai_anthropic extends aihelper
         // explicit enable_thinking=false overrides the default-on behavior for
         // sonnet/opus models; null keeps the existing default (thinking on where
         // supported); true enables it even if a future model doesn't default to it.
-        $want_thinking = $this->enable_thinking !== false && ($this->enable_thinking === true || $supports_thinking);
+        $want_thinking =
+            $configured_effort !== null
+                ? $configured_effort !== 'none'
+                : $this->enable_thinking !== false && ($this->enable_thinking === true || $supports_thinking);
 
-        if ($supports_thinking && $want_thinking) {
+        if (($supports_thinking || $configured_effort !== null) && $want_thinking) {
             if ($adaptive_thinking) {
                 // new API: use adaptive thinking + effort level instead of enabled/budget_tokens
                 $args['thinking'] = ['type' => 'adaptive'];
-                $args['output_config'] = ['effort' => 'high'];
+                $args['output_config'] = ['effort' => $this->getEffortLevel($configured_effort)];
             } else {
-                $args['thinking'] = ['type' => 'enabled', 'budget_tokens' => 10000];
+                $args['thinking'] = [
+                    'type' => 'enabled',
+                    'budget_tokens' => $configured_effort !== null
+                        ? max(1024, $this->getEffortBudgetTokensForRequest($configured_effort))
+                        : 10000
+                ];
             }
             // temperature must be 1 when thinking is enabled
             $args['temperature'] = 1.0;
@@ -5422,11 +5579,21 @@ class ai_google extends aihelper
             'contents' => self::$sessions[$this->session_id]
         ];
         $args = $this->applyTemperatureParameter($args, 'generationConfig');
+        $configured_effort = $this->getEffortForRequest();
         // Gemini 2.5 thinking budget. null = default (1024), true = default (1024),
         // false = explicitly off (0). No-op on models without thinking support.
         if (in_array($this->model, ['gemini-2.5-pro', 'gemini-2.5-flash'], true)) {
-            $budget = $this->enable_thinking === false ? 0 : 1024;
+            $budget =
+                $configured_effort !== null
+                    ? $this->getEffortBudgetTokensForRequest($configured_effort)
+                    : ($this->enable_thinking === false ? 0 : 1024);
             $args['generationConfig']['thinkingConfig'] = ['thinkingBudget' => $budget];
+        }
+        if (preg_match('/^gemini-3/', $this->model) === 1 && $configured_effort !== null) {
+            if (!isset($args['generationConfig']) || !is_array($args['generationConfig'])) {
+                $args['generationConfig'] = [];
+            }
+            $args['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $this->getEffortLevel($configured_effort)];
         }
         if (preg_match('/^gemma-4-/', $this->model) === 1) {
             if (!isset($args['generationConfig']) || !is_array($args['generationConfig'])) {
@@ -5435,7 +5602,10 @@ class ai_google extends aihelper
             $args['generationConfig']['temperature'] = 1.0;
             $args['generationConfig']['topP'] = 0.95;
             $args['generationConfig']['topK'] = 64;
-            $thinking_level = $this->enable_thinking === false ? 'low' : 'high';
+            $thinking_level =
+                $configured_effort !== null
+                    ? $this->getEffortLevel($configured_effort)
+                    : ($this->enable_thinking === false ? 'low' : 'high');
             $args['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $thinking_level];
         }
 
@@ -5676,6 +5846,15 @@ class ai_openrouter extends aihelper
                         'costs' => ['input' => $input_cost, 'input_cached' => $input_cost, 'output' => $output_cost],
                         'supports_temperature' => in_array('temperature', $supported_params, true),
                         'supports_tools' => in_array('tools', $supported_params, true),
+                        'supports_effort' =>
+                            in_array('reasoning', $supported_params, true) ||
+                            in_array('reasoning_effort', $supported_params, true),
+                        'efforts' =>
+                            in_array('reasoning', $supported_params, true) ||
+                            in_array('reasoning_effort', $supported_params, true)
+                                ? $this->getEffortValues()
+                                : [],
+                        'supported_parameters' => $supported_params,
                         'open_weights' =>
                             $openrouter_open_weights_by_model[$model_id] ??
                             ($openrouter_open_weights_by_model[$canonical_slug] ??
@@ -6042,7 +6221,12 @@ class ai_openrouter extends aihelper
 
     protected function modifyArgs(?array $args): ?array
     {
-        return $this->modifyArgsLocal($args);
+        $args = $this->modifyArgsLocal($args);
+        $configured_effort = $this->getEffortForRequest();
+        if ($configured_effort !== null) {
+            $args['reasoning'] = ['effort' => $configured_effort];
+        }
+        return $args;
     }
 }
 
@@ -6100,7 +6284,9 @@ class ai_llamacpp extends ai_openrouter
                     $models[] = [
                         'name' => $name,
                         'context_length' => $context_length,
-                        'supports_tools' => true
+                        'supports_tools' => true,
+                        'supports_effort' => true,
+                        'efforts' => $this->getEffortValues()
                     ];
                 }
             }
@@ -6187,7 +6373,9 @@ class ai_lmstudio extends ai_openai
                     $models[] = [
                         'name' => $models__value->key,
                         'context_length' => $context_length,
-                        'supports_tools' => true
+                        'supports_tools' => true,
+                        'supports_effort' => true,
+                        'efforts' => $this->getEffortValues()
                     ];
                 }
             }
@@ -6210,7 +6398,9 @@ class ai_lmstudio extends ai_openai
                     $models[] = [
                         'name' => $models__value->id,
                         'context_length' => $context_length,
-                        'supports_tools' => true
+                        'supports_tools' => true,
+                        'supports_effort' => true,
+                        'efforts' => $this->getEffortValues()
                     ];
                 }
             }
@@ -6852,22 +7042,25 @@ class ai_codex extends ai_openrouter
     public function fetchModelsFromProvider(): array
     {
         $models = parent::fetchModelsFromProvider();
-        $efforts = ['low', 'medium', 'high', 'xhigh', 'auto', 'none'];
-        $expanded = [];
-        foreach ($models as $model) {
-            $model['supports_tools'] = true;
-            $model['supports_temperature'] = true;
-            $expanded[] = $model;
+        foreach ($models as $model_key => $model) {
+            $models[$model_key]['supports_tools'] = true;
+            $models[$model_key]['supports_temperature'] = true;
             if (!str_starts_with((string) $model['name'], 'gpt-5')) {
                 continue;
             }
-            foreach ($efforts as $effort) {
-                $variant = $model;
-                $variant['name'] = $model['name'] . '(' . $effort . ')';
-                $expanded[] = $variant;
-            }
+            $models[$model_key]['supports_effort'] = true;
+            $models[$model_key]['efforts'] = $this->getEffortValues();
         }
-        return $expanded;
+        return $models;
+    }
+
+    protected function modifyArgs(?array $args): ?array
+    {
+        $args = $this->modifyArgsLocal($args);
+        if ($this->effort !== null) {
+            $args['reasoning'] = ['effort' => $this->effort];
+        }
+        return $args;
     }
 
     public function ping(): bool
