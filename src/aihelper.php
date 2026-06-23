@@ -709,6 +709,7 @@ abstract class aihelper
                 'supports_text_to_audio' => in_array('audio', $output_modalities, true),
                 'supports_image_to_text' => in_array('image', $input_modalities, true),
                 'supports_audio_to_text' => $provider !== 'openrouter' && in_array('audio', $input_modalities, true),
+                'open_weights' => (bool) ($model->open_weights ?? false),
                 'default' => false,
                 'test' => false
             ];
@@ -2442,6 +2443,7 @@ abstract class aihelper
                 'supports_text_to_audio' => $model['supports_text_to_audio'] ?? false,
                 'supports_image_to_text' => $model['supports_image_to_text'] ?? false,
                 'supports_audio_to_text' => $model['supports_audio_to_text'] ?? false,
+                'open_weights' => isset($model['open_weights']) ? (bool) $model['open_weights'] : false,
                 'default' => isset($model['default']) ? $model['default'] : false,
                 'test' => isset($model['test']) ? $model['test'] : false
             ];
