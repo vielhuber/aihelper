@@ -289,21 +289,22 @@ abstract class aihelper
         $data = [];
         foreach (
             [
-                new ai_anthropic(),
-                new ai_google(),
-                new ai_openai(),
-                new ai_xai(),
-                new ai_deepseek(),
-                new ai_openrouter(),
-                new ai_codex(),
-                new ai_llamacpp(),
-                new ai_lmstudio(),
-                new ai_nvidia(),
-                new ai_elevenlabs(),
-                new ai_test()
+                ai_anthropic::class,
+                ai_google::class,
+                ai_openai::class,
+                ai_xai::class,
+                ai_deepseek::class,
+                ai_openrouter::class,
+                ai_codex::class,
+                ai_llamacpp::class,
+                ai_lmstudio::class,
+                ai_nvidia::class,
+                ai_elevenlabs::class,
+                ai_test::class
             ]
-            as $providers__value
+            as $providerClass
         ) {
+            $providers__value = new $providerClass();
             $data[] = [
                 'provider' => $providers__value->provider,
                 'title' => $providers__value->title,
@@ -561,6 +562,7 @@ abstract class aihelper
         if ($timeout === null) {
             $timeout = 300;
         }
+        $this->timeout = $timeout;
         if ($log !== null) {
             $this->log = $log;
         }
@@ -573,20 +575,7 @@ abstract class aihelper
         if ($api_key !== null) {
             $this->api_key = $api_key;
         }
-        if (empty($this->models) && method_exists($this, 'fetchModels')) {
-            foreach ($this->fetchModels() as $models__value) {
-                $this->models[] = [
-                    'name' => $models__value['name'],
-                    'context_length' => $models__value['context_length'] ?? 128000,
-                    'max_output_tokens' => $models__value['max_output_tokens'] ?? 16384,
-                    'costs' => $models__value['costs'] ?? ['input' => 0, 'input_cached' => 0, 'output' => 0],
-                    'supports_temperature' => $models__value['supports_temperature'] ?? true,
-                    'supports_tools' => $models__value['supports_tools'] ?? true,
-                    'default' => isset($models__value['default']) ? $models__value['default'] : false,
-                    'test' => isset($models__value['test']) ? $models__value['test'] : false
-                ];
-            }
-        }
+        $this->models = $this->fetchModels();
         if ($model === null) {
             $model = $this->getDefaultModel();
         }
@@ -623,7 +612,6 @@ abstract class aihelper
 
         $this->model = $model;
         $this->temperature = $temperature;
-        $this->timeout = $timeout;
         if (__::nx($session_id)) {
             $this->session_id = md5(uniqid());
         } else {
@@ -650,6 +638,132 @@ abstract class aihelper
             $this->auto_compact_cache =
                 $cacheDir . '/' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $this->session_id) . '.txt';
         }
+    }
+
+    public function fetchModelsFromModelsDev(): array
+    {
+        static $models_dev_api = null;
+
+        $provider = $this->name;
+        if ($provider === null) {
+            return [];
+        }
+        if (in_array($provider, ['openrouter'], true)) {
+            return [];
+        }
+
+        if ($models_dev_api === null) {
+            $response = __::curl(url: 'https://models.dev/api.json', method: 'GET', timeout: $this->timeout ?? 300);
+            $models_dev_api = $response?->result ?? null;
+        }
+        $result = $models_dev_api;
+        if (!is_object($result) || !__::x($result->{$provider}->models ?? null)) {
+            return [];
+        }
+
+        $models = [];
+        $default_candidates = [];
+        $required_input_modalities = [];
+        if (in_array($provider, ['anthropic', 'google', 'openai', 'openrouter'], true)) {
+            $required_input_modalities = ['image', 'pdf'];
+        }
+        if ($provider === 'xai') {
+            $required_input_modalities = ['image'];
+        }
+        foreach (array_values((array) $result->{$provider}->models) as $model) {
+            if (!__::x($model?->id ?? null)) {
+                continue;
+            }
+
+            $family = (string) ($model->family ?? '');
+            $searchable_name = strtolower($model->id . ' ' . ($model->name ?? '') . ' ' . $family);
+            if (
+                strpos($searchable_name, 'embedding') !== false ||
+                strpos($searchable_name, 'embed') !== false ||
+                strpos($searchable_name, 'moderation') !== false ||
+                strpos($searchable_name, 'rerank') !== false ||
+                strpos($searchable_name, 'safety') !== false ||
+                strpos($searchable_name, 'guard') !== false ||
+                $family === 'bge'
+            ) {
+                continue;
+            }
+
+            $input_modalities = array_values((array) ($model->modalities->input ?? []));
+            $output_modalities = array_values((array) ($model->modalities->output ?? []));
+            $cost = $model->cost ?? null;
+            $model_date = (string) ($model->release_date ?? $model->last_updated ?? '');
+            $model_key = count($models);
+            $models[] = [
+                'name' => $model->id,
+                'context_length' => (int) ($model->limit->context ?? 128000),
+                'max_output_tokens' => (int) ($model->limit->output ?? 16384),
+                'costs' => [
+                    'input' => ((float) ($cost->input ?? 0)) / 1000000,
+                    'input_cached' => ((float) ($cost->cache_read ?? 0)) / 1000000,
+                    'output' => ((float) ($cost->output ?? 0)) / 1000000
+                ],
+                'supports_temperature' => (bool) ($model->temperature ?? true),
+                'supports_tools' => (bool) ($model->tool_call ?? true),
+                'supports_text_to_image' => in_array('image', $output_modalities, true),
+                'supports_text_to_audio' => in_array('audio', $output_modalities, true),
+                'supports_image_to_text' => in_array('image', $input_modalities, true),
+                'supports_audio_to_text' => $provider !== 'openrouter' && in_array('audio', $input_modalities, true),
+                'default' => false,
+                'test' => false
+            ];
+            $matches_required_input_modalities = true;
+            foreach ($required_input_modalities as $required_input_modality) {
+                if (in_array($required_input_modality, $input_modalities, true)) {
+                    continue;
+                }
+                $matches_required_input_modalities = false;
+                break;
+            }
+            if (
+                $matches_required_input_modalities &&
+                !str_starts_with($model->id, '~') &&
+                in_array('text', $input_modalities, true) &&
+                in_array('text', $output_modalities, true) &&
+                (bool) ($model->tool_call ?? true) === true
+            ) {
+                $default_candidates[] = [
+                    'key' => $model_key,
+                    'date' => $model_date,
+                    'price' =>
+                        isset($cost->input) || isset($cost->output)
+                            ? ((float) ($cost->input ?? 0)) + ((float) ($cost->output ?? 0))
+                            : PHP_FLOAT_MAX
+                ];
+            }
+        }
+
+        if (empty($models)) {
+            return [];
+        }
+
+        if (empty($default_candidates)) {
+            $default_candidates[] = ['key' => 0, 'date' => '', 'price' => PHP_FLOAT_MAX];
+        }
+        usort($default_candidates, function ($a, $b) {
+            return strcmp($b['date'], $a['date']);
+        });
+        $default_candidates = array_slice($default_candidates, 0, 10);
+        $priced_default_candidates = array_values(
+            array_filter($default_candidates, function ($candidate) {
+                return $candidate['price'] > 0 && $candidate['price'] < PHP_FLOAT_MAX;
+            })
+        );
+        if (!empty($priced_default_candidates)) {
+            $default_candidates = $priced_default_candidates;
+        }
+        usort($default_candidates, function ($a, $b) {
+            return $a['price'] <=> $b['price'];
+        });
+        $models[$default_candidates[0]['key']]['default'] = true;
+        $models[$default_candidates[0]['key']]['test'] = true;
+
+        return $models;
     }
 
     public function ask(?string $prompt = null, mixed $files = null): array
@@ -2295,7 +2409,45 @@ abstract class aihelper
         return $schema;
     }
 
-    abstract public function fetchModels(): array;
+    public function fetchModels(): array
+    {
+        $models = $this->normalizeModels($this->fetchModelsFromModelsDev());
+        if (!empty($models)) {
+            return $models;
+        }
+        if (method_exists($this, 'fetchModelsFromProvider')) {
+            $models = $this->normalizeModels($this->fetchModelsFromProvider());
+            if (!empty($models)) {
+                return $models;
+            }
+        }
+        return $this->normalizeModels($this->models);
+    }
+
+    protected function normalizeModels(array $models): array
+    {
+        $normalized_models = [];
+        foreach ($models as $model) {
+            if (!isset($model['name'])) {
+                continue;
+            }
+            $normalized_models[] = [
+                'name' => $model['name'],
+                'context_length' => $model['context_length'] ?? 128000,
+                'max_output_tokens' => $model['max_output_tokens'] ?? 16384,
+                'costs' => $model['costs'] ?? ['input' => 0, 'input_cached' => 0, 'output' => 0],
+                'supports_temperature' => $model['supports_temperature'] ?? true,
+                'supports_tools' => $model['supports_tools'] ?? true,
+                'supports_text_to_image' => $model['supports_text_to_image'] ?? false,
+                'supports_text_to_audio' => $model['supports_text_to_audio'] ?? false,
+                'supports_image_to_text' => $model['supports_image_to_text'] ?? false,
+                'supports_audio_to_text' => $model['supports_audio_to_text'] ?? false,
+                'default' => isset($model['default']) ? $model['default'] : false,
+                'test' => isset($model['test']) ? $model['test'] : false
+            ];
+        }
+        return $normalized_models;
+    }
 
     abstract protected function askThis(
         ?string $prompt = null,
@@ -2345,6 +2497,9 @@ abstract class aihelper
 
     public function ping(): bool
     {
+        if (method_exists($this, 'fetchModelsFromProvider')) {
+            return !empty($this->fetchModelsFromProvider());
+        }
         return !empty($this->fetchModels());
     }
 
@@ -4224,1038 +4379,9 @@ class ai_openai extends aihelper
 
     public ?bool $supports_stream = true;
 
-    public array $models = [
-        [
-            'name' => 'gpt-3.5-turbo',
-            'context_length' => 16384,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-3.5-turbo-0125',
-            'context_length' => 16384,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0.0000005, 'input_cached' => 0.0000005, 'output' => 0.0000015],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-3.5-turbo-1106',
-            'context_length' => 16384,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0.000001, 'input_cached' => 0.000001, 'output' => 0.000002],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4',
-            'context_length' => 8192,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4-0613',
-            'context_length' => 8192,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00006],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4-turbo',
-            'context_length' => 128000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4-turbo-2024-04-09',
-            'context_length' => 128000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0.00001, 'input_cached' => 0.00001, 'output' => 0.00003],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4.1',
-            'context_length' => 1047576,
-            'max_output_tokens' => 32768,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4.1-2025-04-14',
-            'context_length' => 1047576,
-            'max_output_tokens' => 32768,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4.1-mini',
-            'context_length' => 1047576,
-            'max_output_tokens' => 32768,
-            'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4.1-mini-2025-04-14',
-            'context_length' => 1047576,
-            'max_output_tokens' => 32768,
-            'costs' => ['input' => 0.0000004, 'input_cached' => 0.0000001, 'output' => 0.0000016],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4.1-nano',
-            'context_length' => 1047576,
-            'max_output_tokens' => 32768,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4.1-nano-2025-04-14',
-            'context_length' => 1047576,
-            'max_output_tokens' => 32768,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.000000025, 'output' => 0.0000004],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o',
-            'context_length' => 128000,
-            'max_output_tokens' => 16384,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-2024-05-13',
-            'context_length' => 128000,
-            'max_output_tokens' => 16384,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.000005, 'output' => 0.000015],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-2024-08-06',
-            'context_length' => 128000,
-            'max_output_tokens' => 16384,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-2024-11-20',
-            'context_length' => 128000,
-            'max_output_tokens' => 16384,
-            'costs' => ['input' => 0.0000025, 'input_cached' => 0.00000125, 'output' => 0.00001],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini',
-            'context_length' => 128000,
-            'max_output_tokens' => 16384,
-            'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-2024-07-18',
-            'context_length' => 128000,
-            'max_output_tokens' => 16384,
-            'costs' => ['input' => 0.00000015, 'input_cached' => 0.000000075, 'output' => 0.0000006],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => true,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-2025-08-07',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-chat-latest',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-codex',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-mini',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => true
-        ],
-        [
-            'name' => 'gpt-5-mini-2025-08-07',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-nano',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-nano-2025-08-07',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000005, 'input_cached' => 0.000000005, 'output' => 0.0000004],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-pro',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5-pro-2025-10-06',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.000015, 'output' => 0.00012],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.1',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.1-2025-11-13',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.1-chat-latest',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.1-codex',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.1-codex-max',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.1-codex-mini',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.000002],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.2',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.2-2025-12-11',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.2-chat-latest',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.2-codex',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.2-pro',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.2-pro-2025-12-11',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.3-chat-latest',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.3-codex',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4',
-            'context_length' => 1050000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-2026-03-05',
-            'context_length' => 1050000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00000175, 'input_cached' => 0.000000175, 'output' => 0.000014],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-mini',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-mini-2026-03-17',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.0000006, 'input_cached' => 0.00000006, 'output' => 0.0000024],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-nano',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-nano-2026-03-17',
-            'context_length' => 400000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-pro',
-            'context_length' => 1050000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.4-pro-2026-03-05',
-            'context_length' => 1050000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.000021, 'input_cached' => 0.000021, 'output' => 0.000168],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.5',
-            'context_length' => 1050000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.00003],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.5-2026-04-23',
-            'context_length' => 1050000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.00003],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.5-pro',
-            'context_length' => 1050000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00018],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-5.5-pro-2026-04-23',
-            'context_length' => 1050000,
-            'max_output_tokens' => 128000,
-            'costs' => ['input' => 0.00003, 'input_cached' => 0.00003, 'output' => 0.00018],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o1',
-            'context_length' => 200000,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o1-2024-12-17',
-            'context_length' => 200000,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.0000075, 'output' => 0.00006],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o1-pro',
-            'context_length' => 200000,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o1-pro-2025-03-19',
-            'context_length' => 200000,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.00015, 'input_cached' => 0.00015, 'output' => 0.0006],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3',
-            'context_length' => 200000,
-            'max_output_tokens' => 100000,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3-2025-04-16',
-            'context_length' => 200000,
-            'max_output_tokens' => 100000,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000005, 'output' => 0.000008],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3-mini',
-            'context_length' => 200000,
-            'max_output_tokens' => 100000,
-            'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3-mini-2025-01-31',
-            'context_length' => 200000,
-            'max_output_tokens' => 100000,
-            'costs' => ['input' => 0.0000011, 'input_cached' => 0.00000055, 'output' => 0.0000044],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3-pro',
-            'context_length' => 200000,
-            'max_output_tokens' => 100000,
-            'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o3-pro-2025-06-10',
-            'context_length' => 200000,
-            'max_output_tokens' => 100000,
-            'costs' => ['input' => 0.00002, 'input_cached' => 0.00002, 'output' => 0.00008],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o4-mini',
-            'context_length' => 200000,
-            'max_output_tokens' => 100000,
-            'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'o4-mini-2025-04-16',
-            'context_length' => 200000,
-            'max_output_tokens' => 100000,
-            'costs' => ['input' => 0.0000011, 'input_cached' => 0.000000275, 'output' => 0.0000044],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        // image generation — costs per image (1024x1024 medium quality where applicable)
-        [
-            'name' => 'gpt-image-1',
-            'supports_tools' => false,
-            'costs' => ['image' => 0.042],
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-image-1-mini',
-            'supports_tools' => false,
-            'costs' => ['image' => 0.011],
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-image-1.5',
-            'supports_tools' => false,
-            'costs' => ['image' => 0.04],
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-image-2',
-            'supports_tools' => false,
-            'costs' => ['image' => 0.04],
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'chatgpt-image-latest',
-            'supports_tools' => false,
-            'costs' => ['image' => 0.04],
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        // audio (TTS) — costs per input character
-        [
-            'name' => 'tts-1',
-            'supports_tools' => false,
-            'costs' => ['audio' => 0.000015],
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => true,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'tts-1-hd',
-            'supports_tools' => false,
-            'costs' => ['audio' => 0.00003],
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => true,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gpt-4o-mini-tts',
-            'supports_tools' => false,
-            'costs' => ['audio' => 0.000015],
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => true,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ]
-    ];
+    public array $models = [];
 
-    public function fetchModels(): array
+    public function fetchModelsFromProvider(): array
     {
         $models = [];
         $response = __::curl(
@@ -5335,19 +4461,7 @@ class ai_openai extends aihelper
                     ) {
                         continue;
                     }
-                    $entry = ['name' => $name, 'context_length' => 128000];
-                    foreach ($this->models as $definedModel) {
-                        if ($definedModel['name'] === $name) {
-                            // merge static caps (supports_*/costs/…) into the
-                            // dynamic entry so capability metadata survives fetchModels()
-                            $entry = array_merge($definedModel, ['name' => $name]);
-                            if (!isset($entry['context_length'])) {
-                                $entry['context_length'] = 128000;
-                            }
-                            break;
-                        }
-                    }
-                    $models[] = $entry;
+                    $models[] = ['name' => $name, 'context_length' => 128000];
                 }
             }
         }
@@ -5665,164 +4779,9 @@ class ai_anthropic extends aihelper
 
     public ?bool $supports_stream = true;
 
-    public array $models = [
-        [
-            'name' => 'claude-haiku-4-5',
-            'context_length' => 200000,
-            'max_output_tokens' => 64000,
-            'costs' => ['input' => 0.000001, 'input_cached' => 0.0000001, 'output' => 0.000005],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => true
-        ],
-        [
-            'name' => 'claude-fable-5',
-            'context_length' => 1000000,
-            'max_output_tokens' => 64000,
-            'costs' => ['input' => 0.00001, 'input_cached' => 0.000001, 'output' => 0.00005],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'claude-opus-4-0',
-            'context_length' => 200000,
-            'max_output_tokens' => 32000,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'claude-opus-4-1',
-            'context_length' => 200000,
-            'max_output_tokens' => 32000,
-            'costs' => ['input' => 0.000015, 'input_cached' => 0.0000015, 'output' => 0.000075],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'claude-opus-4-5',
-            'context_length' => 200000,
-            'max_output_tokens' => 32000,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'claude-opus-4-6',
-            'context_length' => 1000000,
-            'max_output_tokens' => 32000,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'claude-opus-4-7',
-            'context_length' => 1000000,
-            'max_output_tokens' => 32000,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'claude-opus-4-8',
-            'context_length' => 1000000,
-            'max_output_tokens' => 32000,
-            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'claude-sonnet-4-0',
-            'context_length' => 200000,
-            'max_output_tokens' => 16384,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'claude-sonnet-4-5',
-            'context_length' => 200000,
-            'max_output_tokens' => 16384,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'claude-sonnet-4-6',
-            'context_length' => 1000000,
-            'max_output_tokens' => 16384,
-            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => true,
-            'test' => false
-        ]
-    ];
+    public array $models = [];
 
-    public function fetchModels(): array
+    public function fetchModelsFromProvider(): array
     {
         $models = [];
         $response = __::curl(
@@ -5859,19 +4818,7 @@ class ai_anthropic extends aihelper
                     ) {
                         continue;
                     }
-                    $entry = ['name' => $name, 'context_length' => 128000];
-                    foreach ($this->models as $definedModel) {
-                        if ($definedModel['name'] === $name) {
-                            // merge static caps (supports_*/costs/…) into the
-                            // dynamic entry so capability metadata survives fetchModels()
-                            $entry = array_merge($definedModel, ['name' => $name]);
-                            if (!isset($entry['context_length'])) {
-                                $entry['context_length'] = 128000;
-                            }
-                            break;
-                        }
-                    }
-                    $models[] = $entry;
+                    $models[] = ['name' => $name, 'context_length' => 128000];
                 }
             }
         }
@@ -6235,225 +5182,9 @@ class ai_google extends aihelper
 
     public ?bool $supports_stream = true;
 
-    public array $models = [
-        [
-            'name' => 'gemini-2.5-flash',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => true,
-            'default' => false,
-            'test' => true
-        ],
-        [
-            'name' => 'gemini-2.5-flash-image',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-2.5-flash-lite',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-2.5-pro',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => true,
-            'default' => true,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-flash-latest',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.0000003, 'input_cached' => 0.00000003, 'output' => 0.0000025],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-flash-lite-latest',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.0000001, 'input_cached' => 0.00000001, 'output' => 0.0000004],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-pro-latest',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-3.1-flash-lite',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.00000025, 'input_cached' => 0.000000025, 'output' => 0.0000015],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-3.1-flash-image',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.0000005, 'input_cached' => 0.00000005, 'output' => 0.000003, 'image' => 0.067],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-3-pro-image',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000012, 'image' => 0.134],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemini-3.5-flash',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0.0000015, 'input_cached' => 0.00000015, 'output' => 0.000009],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => true,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemma-4-26b-a4b-it',
-            'context_length' => 256000,
-            'max_output_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'gemma-4-31b-it',
-            'context_length' => 256000,
-            'max_output_tokens' => 8192,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'imagen-4.0-generate-001',
-            'supports_tools' => false,
-            'costs' => ['image' => 0.04],
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'imagen-4.0-fast-generate-001',
-            'supports_tools' => false,
-            'costs' => ['image' => 0.02],
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'imagen-4.0-ultra-generate-001',
-            'supports_tools' => false,
-            'costs' => ['image' => 0.06],
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ]
-    ];
+    public array $models = [];
 
-    public function fetchModels(): array
+    public function fetchModelsFromProvider(): array
     {
         $models = [];
         $response = __::curl(
@@ -6497,15 +5228,6 @@ class ai_google extends aihelper
                         continue;
                     }
                     $entry = ['name' => $name, 'context_length' => 128000];
-                    foreach ($this->models as $definedModel) {
-                        if ($definedModel['name'] === $name) {
-                            $entry = array_merge($definedModel, ['name' => $name]);
-                            if (!isset($entry['context_length'])) {
-                                $entry['context_length'] = 128000;
-                            }
-                            break;
-                        }
-                    }
                     if (!empty($models__value->inputTokenLimit)) {
                         $entry['context_length'] = (int) $models__value->inputTokenLimit;
                     }
@@ -6738,101 +5460,7 @@ class ai_xai extends ai_anthropic
 
     public ?bool $supports_stream = false;
 
-    public array $models = [
-        [
-            'name' => 'grok-4.20-0309-non-reasoning',
-            'context_length' => 256000,
-            'max_output_tokens' => 16000,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000006],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-4.20-0309-reasoning',
-            'context_length' => 256000,
-            'max_output_tokens' => 16000,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000006],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-4.20-multi-agent-0309',
-            'context_length' => 256000,
-            'max_output_tokens' => 16000,
-            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000002, 'output' => 0.000006],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-build-0.1',
-            'context_length' => 256000,
-            'max_output_tokens' => 16000,
-            'costs' => ['input' => 0.000001, 'input_cached' => 0.0000002, 'output' => 0.000002],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-4.3',
-            'context_length' => 1000000,
-            'max_output_tokens' => 16000,
-            'costs' => ['input' => 0.00000125, 'input_cached' => 0.00000125, 'output' => 0.0000025],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => true,
-            'test' => true
-        ],
-        // image generation — costs per image
-        [
-            'name' => 'grok-imagine-image',
-            'supports_tools' => false,
-            'costs' => ['image' => 0.02],
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'grok-imagine-image-quality',
-            'supports_tools' => false,
-            'costs' => ['image' => 0.07],
-            'supports_text_to_image' => true,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ]
-    ];
+    public array $models = [];
 }
 
 /* compatible with the anthropic api */
@@ -6854,38 +5482,9 @@ class ai_deepseek extends ai_anthropic
 
     public ?bool $supports_stream = false;
 
-    public array $models = [
-        [
-            'name' => 'deepseek-v4-flash',
-            'context_length' => 1000000,
-            'max_output_tokens' => 64000,
-            'costs' => ['input' => 0.00000004, 'input_cached' => 0.000000004, 'output' => 0.0000001],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => true,
-            'test' => true
-        ],
-        [
-            'name' => 'deepseek-v4-pro',
-            'context_length' => 1000000,
-            'max_output_tokens' => 64000,
-            'costs' => ['input' => 0.00000027, 'input_cached' => 0.000000027, 'output' => 0.00000042],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ]
-    ];
+    public array $models = [];
 
-    public function fetchModels(): array
+    public function fetchModelsFromProvider(): array
     {
         $models = [];
         $response = __::curl(
@@ -6902,19 +5501,7 @@ class ai_deepseek extends ai_anthropic
             foreach ($response->result->data as $data__value) {
                 if (__::x($data__value?->id ?? null)) {
                     $name = $data__value->id;
-                    $entry = ['name' => $name, 'context_length' => 128000];
-                    foreach ($this->models as $definedModel) {
-                        if ($definedModel['name'] === $name) {
-                            // merge static caps (supports_*/costs/…) into the
-                            // dynamic entry so capability metadata survives fetchModels()
-                            $entry = array_merge($definedModel, ['name' => $name]);
-                            if (!isset($entry['context_length'])) {
-                                $entry['context_length'] = 128000;
-                            }
-                            break;
-                        }
-                    }
-                    $models[] = $entry;
+                    $models[] = ['name' => $name, 'context_length' => 128000];
                 }
             }
         }
@@ -6943,7 +5530,7 @@ class ai_openrouter extends aihelper
 
     public array $models = [];
 
-    public function fetchModels(): array
+    public function fetchModelsFromProvider(): array
     {
         $models = [];
         $response = __::curl(
@@ -7362,7 +5949,7 @@ class ai_llamacpp extends ai_openrouter
 
     public array $models = [];
 
-    public function fetchModels(): array
+    public function fetchModelsFromProvider(): array
     {
         $models = [];
         $response = __::curl(
@@ -7454,7 +6041,7 @@ class ai_lmstudio extends ai_openai
 
     public array $models = [];
 
-    public function fetchModels(): array
+    public function fetchModelsFromProvider(): array
     {
         $models = [];
         $response = __::curl(
@@ -7597,176 +6184,30 @@ class ai_nvidia extends ai_openrouter
 
     public ?bool $supports_stream = true;
 
-    public array $models = [
-        [
-            'name' => 'minimaxai/minimax-m2.5',
-            'context_length' => 192000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => true,
-            'test' => true
-        ],
-        [
-            'name' => 'qwen/qwen3-next-80b-a3b-instruct',
-            'context_length' => 256000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'qwen/qwen3-next-80b-a3b-thinking',
-            'context_length' => 256000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'qwen/qwen3.5-122b-a10b',
-            'context_length' => 256000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'qwen/qwen3.5-397b-a17b',
-            'context_length' => 256000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'qwen/qwen2.5-coder-32b-instruct',
-            'context_length' => 32000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'google/gemma-3-27b-it',
-            'context_length' => 128000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'google/gemma-3-4b-it',
-            'context_length' => 4000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'google/gemma-3n-e2b-it',
-            'context_length' => 32000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'google/gemma-3n-e4b-it',
-            'context_length' => 4000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'google/gemma-2-2b-it',
-            'context_length' => 4000,
-            'max_output_tokens' => 4096,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ]
-    ];
+    public array $models = [];
 
-    public function fetchModels(): array
+    public function fetchModelsFromProvider(): array
     {
-        // NIM catalog discovery is opaque (no pricing, no consistent context
-        // metadata across model families). Return the static list above so
-        // callers always get usable model entries.
         return $this->models;
     }
 
     public function ping(): bool
     {
         try {
-            $response = $this->ask('Test');
-            return $response['success'];
+            $response = __::curl(
+                url: rtrim($this->url, '/') . '/chat/completions',
+                data: [
+                    'model' => $this->model,
+                    'messages' => [['role' => 'user', 'content' => 'Test']],
+                    'max_tokens' => 1
+                ],
+                method: 'POST',
+                headers: ['Authorization' => 'Bearer ' . $this->api_key],
+                timeout: 30
+            );
+            return ($response->status ?? 0) >= 200 &&
+                ($response->status ?? 0) < 300 &&
+                __::x($response?->result?->choices ?? null);
         } catch (\Exception) {
             return false;
         }
@@ -7894,7 +6335,7 @@ class ai_elevenlabs extends ai_openai
         ]
     ];
 
-    public function fetchModels(): array
+    public function fetchModelsFromProvider(): array
     {
         $models = [];
         $response = __::curl(
@@ -7908,7 +6349,7 @@ class ai_elevenlabs extends ai_openai
         if (!is_array($list)) {
             $code = $response?->status ?? null;
             $this->log(
-                '⚠️ elevenlabs fetchModels returned empty — HTTP ' .
+                '⚠️ elevenlabs fetchModelsFromProvider returned empty — HTTP ' .
                     var_export($code, true) .
                     ' (check api key / quota / connectivity)'
             );
@@ -8113,11 +6554,9 @@ class ai_test extends ai_anthropic
         ]
     ];
 
-    public function fetchModels(): array
+    public function fetchModelsFromProvider(): array
     {
-        return array_map(function ($model) {
-            return ['name' => $model['name'], 'context_length' => $model['context_length']];
-        }, $this->models);
+        return $this->models;
     }
 
     protected function makeApiCall(?array $args = null): mixed
@@ -8291,9 +6730,9 @@ class ai_codex extends ai_openrouter
 
     public ?bool $supports_stream = true;
 
-    public function fetchModels(): array
+    public function fetchModelsFromProvider(): array
     {
-        $models = parent::fetchModels();
+        $models = parent::fetchModelsFromProvider();
         $efforts = ['low', 'medium', 'high', 'xhigh', 'auto', 'none'];
         $expanded = [];
         foreach ($models as $model) {

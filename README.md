@@ -98,7 +98,7 @@ $ai->audio(prompt: 'Hallo, wie geht es dir?', output_file: '/tmp/hi.mp3');
 
 aihelper::getProviders() // gets overview of providers and models with costs and additional infos
 
-aihelper::create(provider: '...', api_key: '...')->fetchModels() // dynamically get models of provider via api
+aihelper::create(provider: '...', api_key: '...')->fetchModels() // get resolved model catalog
 
 $ai->ping() // gets health, returns true|false
 
