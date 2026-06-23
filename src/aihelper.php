@@ -2476,7 +2476,7 @@ abstract class aihelper
         if (self::$artificial_analysis_models === null) {
             self::$artificial_analysis_models = [];
             $response = __::curl(
-                url: 'https://artificialanalysis.ai/api/v2/language/models/free',
+                url: 'https://artificialanalysis.ai/api/v2/data/llms/models',
                 method: 'GET',
                 headers: ['x-api-key' => $artificial_analysis_api_key],
                 timeout: $this->timeout
@@ -2505,13 +2505,17 @@ abstract class aihelper
                 $normalized_models[$model_key]['artificial_analysis_agentic_index'] =
                     $artificial_analysis_model->evaluations->artificial_analysis_agentic_index ?? null;
                 $normalized_models[$model_key]['artificial_analysis_output_speed'] =
-                    $artificial_analysis_model->performance->median_output_tokens_per_second ?? null;
+                    $artificial_analysis_model->median_output_tokens_per_second ??
+                    ($artificial_analysis_model->performance->median_output_tokens_per_second ?? null);
                 $normalized_models[$model_key]['artificial_analysis_time_to_first_token'] =
-                    $artificial_analysis_model->performance->median_time_to_first_token_seconds ?? null;
+                    $artificial_analysis_model->median_time_to_first_token_seconds ??
+                    ($artificial_analysis_model->performance->median_time_to_first_token_seconds ?? null);
                 $normalized_models[$model_key]['artificial_analysis_time_to_first_answer_token'] =
-                    $artificial_analysis_model->performance->median_time_to_first_answer_token_seconds ?? null;
+                    $artificial_analysis_model->median_time_to_first_answer_token ??
+                    ($artificial_analysis_model->performance->median_time_to_first_answer_token_seconds ?? null);
                 $normalized_models[$model_key]['artificial_analysis_response_time'] =
-                    $artificial_analysis_model->performance->median_end_to_end_response_time_seconds ?? null;
+                    $artificial_analysis_model->median_end_to_end_response_time_seconds ??
+                    ($artificial_analysis_model->performance->median_end_to_end_response_time_seconds ?? null);
                 $normalized_models[$model_key]['artificial_analysis_index_cost'] =
                     $artificial_analysis_model->artificial_analysis_intelligence_index_cost->total_cost ?? null;
                 break;
@@ -2525,11 +2529,13 @@ abstract class aihelper
     {
         $model = strtolower($model);
         $model = preg_replace('/:[a-z0-9_-]+$/i', '', $model) ?? $model;
+        $model = preg_replace('/\s*\((high|medium|low|minimal|max|adaptive[^)]*)\)$/i', '', $model) ?? $model;
         $values = [$model];
         if (str_contains($model, '/')) {
             $values[] = substr($model, (int) strrpos($model, '/') + 1);
         }
         $values[] = preg_replace('/-\d{4}-\d{2}-\d{2}$/', '', end($values)) ?? end($values);
+        $values[] = preg_replace('/-(high|medium|low|minimal|max)$/', '', end($values)) ?? end($values);
 
         $keys = [];
         foreach ($values as $value) {
