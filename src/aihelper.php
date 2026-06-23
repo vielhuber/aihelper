@@ -47,7 +47,7 @@ abstract class aihelper
     protected ?bool $auto_compact = null;
     protected ?string $auto_compact_summary = null;
     protected ?string $auto_compact_cache = null;
-    protected ?array $artificial_analysis_models = null;
+    protected static ?array $artificial_analysis_models = null;
 
     public static function create(
         string $provider,
@@ -2473,8 +2473,8 @@ abstract class aihelper
             return $normalized_models;
         }
 
-        if ($this->artificial_analysis_models === null) {
-            $this->artificial_analysis_models = [];
+        if (self::$artificial_analysis_models === null) {
+            self::$artificial_analysis_models = [];
             $response = __::curl(
                 url: 'https://artificialanalysis.ai/api/v2/language/models/free',
                 method: 'GET',
@@ -2485,7 +2485,7 @@ abstract class aihelper
                 foreach ($response->result->data as $model_data) {
                     foreach ([$model_data->slug ?? '', $model_data->name ?? ''] as $value) {
                         foreach ($this->getModelMatchingKeys((string) $value) as $model_key) {
-                            $this->artificial_analysis_models[$model_key] = $model_data;
+                            self::$artificial_analysis_models[$model_key] = $model_data;
                         }
                     }
                 }
@@ -2494,10 +2494,10 @@ abstract class aihelper
 
         foreach ($normalized_models as $model_key => $model) {
             foreach ($this->getModelMatchingKeys((string) ($model['name'] ?? '')) as $matching_key) {
-                if (!isset($this->artificial_analysis_models[$matching_key])) {
+                if (!isset(self::$artificial_analysis_models[$matching_key])) {
                     continue;
                 }
-                $artificial_analysis_model = $this->artificial_analysis_models[$matching_key];
+                $artificial_analysis_model = self::$artificial_analysis_models[$matching_key];
                 $normalized_models[$model_key]['artificial_analysis_intelligence_index'] =
                     $artificial_analysis_model->evaluations->artificial_analysis_intelligence_index ?? null;
                 $normalized_models[$model_key]['artificial_analysis_coding_index'] =
