@@ -340,6 +340,30 @@ class Test extends \PHPUnit\Framework\TestCase
         @unlink($cache_file);
     }
 
+    function test__artificial_analysis_model_enrichment(): void
+    {
+        $artificialAnalysisApiKey = $_SERVER['ARTIFICIAL_ANALYSIS_API_KEY'] ?? null;
+        if ($artificialAnalysisApiKey === null || $artificialAnalysisApiKey === '') {
+            $artificialAnalysisApiKey = $_ENV['ARTIFICIAL_ANALYSIS_API_KEY'] ?? null;
+        }
+        if ($artificialAnalysisApiKey === null || $artificialAnalysisApiKey === '') {
+            $artificialAnalysisApiKey = getenv('ARTIFICIAL_ANALYSIS_API_KEY') ?: null;
+        }
+        if ($artificialAnalysisApiKey === null || $artificialAnalysisApiKey === '') {
+            $this->markTestSkipped('Skipped.');
+        }
+        $models = aihelper::create(provider: 'openai', api_key: $_SERVER['OPENAI_API_KEY'] ?? null)->models;
+        $hasArtificialAnalysisData = false;
+        foreach ($models as $model) {
+            if (($model['artificial_analysis_intelligence_index'] ?? null) === null) {
+                continue;
+            }
+            $hasArtificialAnalysisData = true;
+            break;
+        }
+        $this->assertTrue($hasArtificialAnalysisData);
+    }
+
     function ai_test_prepare(string $provider, ?string $api_key = null, ?string $url = null, array &$stats = []): void
     {
         $models = aihelper::create(

@@ -47,6 +47,7 @@ abstract class aihelper
     protected ?bool $auto_compact = null;
     protected ?string $auto_compact_summary = null;
     protected ?string $auto_compact_cache = null;
+    protected ?array $artificial_analysis_models = null;
 
     public static function create(
         string $provider,
@@ -2415,20 +2416,20 @@ abstract class aihelper
 
     public function fetchModels(): array
     {
-        $models = $this->normalizeModels($this->fetchModelsFromModelsDev());
+        $models = $this->normalizeAndEnrichModels($this->fetchModelsFromModelsDev());
         if (!empty($models)) {
             return $models;
         }
         if (method_exists($this, 'fetchModelsFromProvider')) {
-            $models = $this->normalizeModels($this->fetchModelsFromProvider());
+            $models = $this->normalizeAndEnrichModels($this->fetchModelsFromProvider());
             if (!empty($models)) {
                 return $models;
             }
         }
-        return $this->normalizeModels($this->models);
+        return $this->normalizeAndEnrichModels($this->models);
     }
 
-    protected function normalizeModels(array $models): array
+    protected function normalizeAndEnrichModels(array $models): array
     {
         $normalized_models = [];
         foreach ($models as $model) {
@@ -2447,11 +2448,97 @@ abstract class aihelper
                 'supports_image_to_text' => $model['supports_image_to_text'] ?? false,
                 'supports_audio_to_text' => $model['supports_audio_to_text'] ?? false,
                 'open_weights' => isset($model['open_weights']) ? (bool) $model['open_weights'] : false,
+                'artificial_analysis_intelligence_index' => $model['artificial_analysis_intelligence_index'] ?? null,
+                'artificial_analysis_coding_index' => $model['artificial_analysis_coding_index'] ?? null,
+                'artificial_analysis_agentic_index' => $model['artificial_analysis_agentic_index'] ?? null,
+                'artificial_analysis_output_speed' => $model['artificial_analysis_output_speed'] ?? null,
+                'artificial_analysis_time_to_first_token' => $model['artificial_analysis_time_to_first_token'] ?? null,
+                'artificial_analysis_time_to_first_answer_token' =>
+                    $model['artificial_analysis_time_to_first_answer_token'] ?? null,
+                'artificial_analysis_response_time' => $model['artificial_analysis_response_time'] ?? null,
+                'artificial_analysis_index_cost' => $model['artificial_analysis_index_cost'] ?? null,
                 'default' => isset($model['default']) ? $model['default'] : false,
                 'test' => isset($model['test']) ? $model['test'] : false
             ];
         }
+
+        $artificial_analysis_api_key = $_SERVER['ARTIFICIAL_ANALYSIS_API_KEY'] ?? null;
+        if ($artificial_analysis_api_key === null || $artificial_analysis_api_key === '') {
+            $artificial_analysis_api_key = $_ENV['ARTIFICIAL_ANALYSIS_API_KEY'] ?? null;
+        }
+        if ($artificial_analysis_api_key === null || $artificial_analysis_api_key === '') {
+            $artificial_analysis_api_key = getenv('ARTIFICIAL_ANALYSIS_API_KEY') ?: null;
+        }
+        if ($artificial_analysis_api_key === null || $artificial_analysis_api_key === '') {
+            return $normalized_models;
+        }
+
+        if ($this->artificial_analysis_models === null) {
+            $this->artificial_analysis_models = [];
+            $response = __::curl(
+                url: 'https://artificialanalysis.ai/api/v2/language/models/free',
+                method: 'GET',
+                headers: ['x-api-key' => $artificial_analysis_api_key],
+                timeout: $this->timeout
+            );
+            if (__::x($response?->result?->data ?? null) && is_array($response->result->data)) {
+                foreach ($response->result->data as $model_data) {
+                    foreach ([$model_data->slug ?? '', $model_data->name ?? ''] as $value) {
+                        foreach ($this->getModelMatchingKeys((string) $value) as $model_key) {
+                            $this->artificial_analysis_models[$model_key] = $model_data;
+                        }
+                    }
+                }
+            }
+        }
+
+        foreach ($normalized_models as $model_key => $model) {
+            foreach ($this->getModelMatchingKeys((string) ($model['name'] ?? '')) as $matching_key) {
+                if (!isset($this->artificial_analysis_models[$matching_key])) {
+                    continue;
+                }
+                $artificial_analysis_model = $this->artificial_analysis_models[$matching_key];
+                $normalized_models[$model_key]['artificial_analysis_intelligence_index'] =
+                    $artificial_analysis_model->evaluations->artificial_analysis_intelligence_index ?? null;
+                $normalized_models[$model_key]['artificial_analysis_coding_index'] =
+                    $artificial_analysis_model->evaluations->artificial_analysis_coding_index ?? null;
+                $normalized_models[$model_key]['artificial_analysis_agentic_index'] =
+                    $artificial_analysis_model->evaluations->artificial_analysis_agentic_index ?? null;
+                $normalized_models[$model_key]['artificial_analysis_output_speed'] =
+                    $artificial_analysis_model->performance->median_output_tokens_per_second ?? null;
+                $normalized_models[$model_key]['artificial_analysis_time_to_first_token'] =
+                    $artificial_analysis_model->performance->median_time_to_first_token_seconds ?? null;
+                $normalized_models[$model_key]['artificial_analysis_time_to_first_answer_token'] =
+                    $artificial_analysis_model->performance->median_time_to_first_answer_token_seconds ?? null;
+                $normalized_models[$model_key]['artificial_analysis_response_time'] =
+                    $artificial_analysis_model->performance->median_end_to_end_response_time_seconds ?? null;
+                $normalized_models[$model_key]['artificial_analysis_index_cost'] =
+                    $artificial_analysis_model->artificial_analysis_intelligence_index_cost->total_cost ?? null;
+                break;
+            }
+        }
+
         return $normalized_models;
+    }
+
+    protected function getModelMatchingKeys(string $model): array
+    {
+        $model = strtolower($model);
+        $model = preg_replace('/:[a-z0-9_-]+$/i', '', $model) ?? $model;
+        $values = [$model];
+        if (str_contains($model, '/')) {
+            $values[] = substr($model, (int) strrpos($model, '/') + 1);
+        }
+        $values[] = preg_replace('/-\d{4}-\d{2}-\d{2}$/', '', end($values)) ?? end($values);
+
+        $keys = [];
+        foreach ($values as $value) {
+            $key = preg_replace('/[^a-z0-9]+/', '', $value) ?? '';
+            if ($key !== '') {
+                $keys[$key] = true;
+            }
+        }
+        return array_keys($keys);
     }
 
     abstract protected function askThis(
