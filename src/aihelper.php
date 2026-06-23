@@ -692,7 +692,7 @@ abstract class aihelper
             $input_modalities = array_values((array) ($model->modalities->input ?? []));
             $output_modalities = array_values((array) ($model->modalities->output ?? []));
             $cost = $model->cost ?? null;
-            $model_date = (string) ($model->release_date ?? $model->last_updated ?? '');
+            $model_date = (string) ($model->release_date ?? ($model->last_updated ?? ''));
             $model_key = count($models);
             $models[] = [
                 'name' => $model->id,
@@ -1159,7 +1159,8 @@ abstract class aihelper
             // Imagen response shape: predictions[].bytesBase64Encoded
             $items = is_array($data) ? $data['predictions'] ?? [] : [];
             if (!is_array($items) || count($items) === 0) {
-                $msg = 'image: provider returned no image (empty response) — the prompt was most likely rejected by the content/safety filter';
+                $msg =
+                    'image: provider returned no image (empty response) — the prompt was most likely rejected by the content/safety filter';
                 $this->log('⛔ ' . $msg);
                 return ['response' => $msg, 'success' => false, 'costs' => 0.0];
             }
@@ -1170,7 +1171,8 @@ abstract class aihelper
                 }
             }
             if ($b64s === []) {
-                $msg = 'image: provider returned no image data — the prompt was most likely rejected by the content/safety filter';
+                $msg =
+                    'image: provider returned no image data — the prompt was most likely rejected by the content/safety filter';
                 $this->log('⛔ ' . $msg);
                 return ['response' => $msg, 'success' => false, 'costs' => 0.0];
             }
@@ -1178,7 +1180,8 @@ abstract class aihelper
             // OpenAI/xAI shape: data[].b64_json or data[].url (download + encode)
             $items = is_array($data) ? $data['data'] ?? [] : [];
             if (!is_array($items) || count($items) === 0) {
-                $msg = 'image: provider returned no image (empty response) — the prompt was most likely rejected by the content/safety filter';
+                $msg =
+                    'image: provider returned no image (empty response) — the prompt was most likely rejected by the content/safety filter';
                 $this->log('⛔ ' . $msg);
                 return ['response' => $msg, 'success' => false, 'costs' => 0.0];
             }
@@ -5535,6 +5538,17 @@ class ai_openrouter extends aihelper
     public function fetchModelsFromProvider(): array
     {
         $models = [];
+        // enhance data
+        $openrouter_open_weights_by_model = [];
+        $models_dev_response = __::curl(url: 'https://models.dev/api.json', method: 'GET', timeout: $this->timeout);
+        if (
+            __::x($models_dev_response?->result?->openrouter?->models ?? null) &&
+            is_object($models_dev_response->result->openrouter->models)
+        ) {
+            foreach ((array) $models_dev_response->result->openrouter->models as $model_id => $model_data) {
+                $openrouter_open_weights_by_model[$model_id] = (bool) ($model_data->open_weights ?? false);
+            }
+        }
         $response = __::curl(
             url: $this->url . '/models',
             method: 'GET',
@@ -5552,6 +5566,9 @@ class ai_openrouter extends aihelper
         ) {
             foreach ($response->result->data as $models__value) {
                 if (__::x($models__value?->id ?? null)) {
+                    $model_id = (string) $models__value->id;
+                    $model_id_without_suffix = preg_replace('/:[a-z0-9_-]+$/i', '', $model_id) ?? $model_id;
+                    $canonical_slug = (string) ($models__value->canonical_slug ?? '');
                     $input_cost = (float) ($models__value->pricing->prompt ?? 0);
                     $output_cost = (float) ($models__value->pricing->completion ?? 0);
                     $supported_params =
@@ -5559,13 +5576,17 @@ class ai_openrouter extends aihelper
                             ? $models__value->supported_parameters
                             : [];
                     $models[] = [
-                        'name' => $models__value->id,
+                        'name' => $model_id,
                         'context_length' => (int) ($models__value->context_length ?? 128000),
                         'costs' => ['input' => $input_cost, 'input_cached' => $input_cost, 'output' => $output_cost],
                         'supports_temperature' => in_array('temperature', $supported_params, true),
                         'supports_tools' => in_array('tools', $supported_params, true),
-                        'default' => $models__value->id === 'anthropic/claude-haiku-4.5',
-                        'test' => $models__value->id === 'anthropic/claude-haiku-4.5'
+                        'open_weights' =>
+                            $openrouter_open_weights_by_model[$model_id] ??
+                            ($openrouter_open_weights_by_model[$canonical_slug] ??
+                                ($openrouter_open_weights_by_model[$model_id_without_suffix] ?? false)),
+                        'default' => $model_id === 'anthropic/claude-haiku-4.5',
+                        'test' => $model_id === 'anthropic/claude-haiku-4.5'
                     ];
                 }
             }
@@ -6419,7 +6440,8 @@ class ai_elevenlabs extends ai_openai
         }
         if ($audio === null) {
             return [
-                'response' => 'elevenlabs ask() error: provider is speech-to-text only — pass an audio file via the $files argument.',
+                'response' =>
+                    'elevenlabs ask() error: provider is speech-to-text only — pass an audio file via the $files argument.',
                 'success' => false,
                 'costs' => 0.0
             ];
