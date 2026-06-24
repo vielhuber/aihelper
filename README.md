@@ -22,7 +22,7 @@ composer require vielhuber/aihelper
 use vielhuber\aihelper\aihelper;
 
 $ai = aihelper::create(
-    provider: 'anthropic', // anthropic|google|openai|xai|deepseek|openrouter|codex|elevenlabs|nvidia|llamacpp|lmstudio
+    provider: 'anthropic', // anthropic|google|openai|xai|deepseek|openrouter|cliproxyapi|elevenlabs|nvidia|llamacpp|lmstudio
     model: 'claude-opus-4-1', // claude-opus-4-1|gemini-2.5-pro|gpt-5|grok-4|deepseek-chat|qwen/qwen3-coder-next|...
     effort: null, // null|none|minimal|low|medium|high|xhigh|max — reasoning effort, ignored when the provider/model has no supported reasoning control
     temperature: 1.0, // controls the randomness of the text generated
@@ -132,23 +132,6 @@ aihelper::callMcpTool(
 );
 // ['jsonrpc' => '2.0', 'id' => 123, 'result' => ['content' => [['type' => 'text', 'text' => '...']]]]
 ```
-
-### reasoning effort
-
-`effort` is an optional cross-provider hint for reasoning/thinking models. allowed values are:
-
-```
-none|minimal|low|medium|high|xhigh|max
-```
-
-aihelper maps the value to the provider-specific request shape where possible:
-
-- OpenAI / OpenRouter / Codex / NVIDIA: `reasoning.effort`
-- Anthropic-compatible providers: thinking budget or adaptive effort
-- Google: `thinkingConfig`
-- llama.cpp / LM Studio: local thinking flags and budget hints
-
-For providers or models without reasoning support (for example ElevenLabs text-to-speech), the value is accepted but has no effect.
 
 ### streaming
 
