@@ -1188,17 +1188,40 @@ abstract class aihelper
                 $body = json_encode($payload);
             }
         }
-        $ch = curl_init($endpoint);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_POSTFIELDS => $body,
-            CURLOPT_TIMEOUT => $this->timeout ?? 300
-        ]);
-        $raw = curl_exec($ch);
-        $err = curl_error($ch);
-        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $max_tries = max(1, (int) ($this->max_tries ?? 1));
+        $raw = false;
+        $err = '';
+        $http = 0;
+        for ($attempt = 1; $attempt <= $max_tries; $attempt++) {
+            $ch = curl_init($endpoint);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_HTTPHEADER => $headers,
+                CURLOPT_POSTFIELDS => $body,
+                CURLOPT_TIMEOUT => $this->timeout ?? 300
+            ]);
+            $raw = curl_exec($ch);
+            $err = curl_error($ch);
+            $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            // retry transient failures
+            $is_transient = $raw === false || $http === 429 || $http >= 500;
+            if (!$is_transient || $attempt >= $max_tries) {
+                break;
+            }
+            $this->log(
+                '⚠️ image transient HTTP ' .
+                    $http .
+                    ' (' .
+                    ($err ?: 'no curl error') .
+                    ') — retry ' .
+                    $attempt .
+                    '/' .
+                    ($max_tries - 1)
+            );
+            sleep($attempt);
+        }
         if ($tmp_input !== null && is_file($tmp_input)) {
             unlink($tmp_input);
         }
@@ -6811,21 +6834,36 @@ class ai_elevenlabs extends ai_openai
         if ($speed !== null) {
             $payload['voice_settings'] = ['speed' => $speed];
         }
-        $ch = curl_init($endpoint);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => json_encode($payload),
-            CURLOPT_HTTPHEADER => [
-                'xi-api-key: ' . $this->api_key,
-                'Content-Type: application/json',
-                'Accept: audio/mpeg'
-            ],
-            CURLOPT_TIMEOUT => $this->timeout ?? 300
-        ]);
-        $raw = curl_exec($ch);
-        $err = curl_error($ch);
-        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $max_tries = max(1, (int) ($this->max_tries ?? 1));
+        $raw = false;
+        $err = '';
+        $http = 0;
+        for ($attempt = 1; $attempt <= $max_tries; $attempt++) {
+            $ch = curl_init($endpoint);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => json_encode($payload),
+                CURLOPT_HTTPHEADER => [
+                    'xi-api-key: ' . $this->api_key,
+                    'Content-Type: application/json',
+                    'Accept: audio/mpeg'
+                ],
+                CURLOPT_TIMEOUT => $this->timeout ?? 300
+            ]);
+            $raw = curl_exec($ch);
+            $err = curl_error($ch);
+            $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            // retry transient failures (network error, 429, 5xx) but fail fast on
+            // 4xx (bad request) where a retry would not help.
+            $is_transient = $raw === false || $http === 429 || $http >= 500;
+            if (!$is_transient || $attempt >= $max_tries) {
+                break;
+            }
+            $this->log('⚠️ elevenlabs audio transient HTTP ' . $http . ' (' . ($err ?: 'no curl error') . ') — retry ' . $attempt . '/' . ($max_tries - 1));
+            sleep($attempt);
+        }
         if ($raw === false || $http >= 400) {
             $msg = 'elevenlabs audio HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500);
             $this->log('⛔ ' . $msg);
