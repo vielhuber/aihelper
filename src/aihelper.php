@@ -331,9 +331,13 @@ abstract class aihelper
         return $data;
     }
 
-    public static function getMcpOnlineStatus(?string $url = null, ?string $authorization_token = null): bool
-    {
+    public static function getMcpOnlineStatus(
+        ?string $url = null,
+        ?string $authorization_token = null,
+        ?int $timeout = null
+    ): bool {
         try {
+            $timeout = $timeout ?? 30;
             // add trailing slash to avoid 307 redirect
             if (substr($url, -1) !== '/') {
                 $url .= '/';
@@ -342,8 +346,8 @@ abstract class aihelper
             // use mcp ping endpoint
             $ch = curl_init($url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeout);
+            curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
             curl_setopt($ch, CURLOPT_UNRESTRICTED_AUTH, true);
             curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
@@ -6855,13 +6859,21 @@ class ai_elevenlabs extends ai_openai
             $err = curl_error($ch);
             $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
-            // retry transient failures (network error, 429, 5xx) but fail fast on
-            // 4xx (bad request) where a retry would not help.
+            // retry transient failures
             $is_transient = $raw === false || $http === 429 || $http >= 500;
             if (!$is_transient || $attempt >= $max_tries) {
                 break;
             }
-            $this->log('⚠️ elevenlabs audio transient HTTP ' . $http . ' (' . ($err ?: 'no curl error') . ') — retry ' . $attempt . '/' . ($max_tries - 1));
+            $this->log(
+                '⚠️ elevenlabs audio transient HTTP ' .
+                    $http .
+                    ' (' .
+                    ($err ?: 'no curl error') .
+                    ') — retry ' .
+                    $attempt .
+                    '/' .
+                    ($max_tries - 1)
+            );
             sleep($attempt);
         }
         if ($raw === false || $http >= 400) {
