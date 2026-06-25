@@ -5959,10 +5959,7 @@ class ai_openrouter extends aihelper
         $entry = ['role' => 'assistant', 'content' => $message->content ?? ''];
         $tool_calls = isset($message->tool_calls) ? json_decode(json_encode($message->tool_calls), true) : null;
         if (!empty($tool_calls) && is_array($tool_calls)) {
-            // drop malformed tool calls with an empty name: streaming can leave an
-            // unfilled placeholder (an index that never received its data chunk), and a
-            // strict backend — e.g. anthropic models served via a proxy — rejects an empty
-            // tool_use.name, which then poisons every follow-up request in the tool loop.
+            // drop malformed tool calls with an empty name
             $tool_calls = array_values(
                 array_filter($tool_calls, fn($tc) => trim((string) ($tc['function']['name'] ?? '')) !== '')
             );
@@ -7072,7 +7069,11 @@ class ai_cliproxyapi extends ai_openrouter
         $models = parent::fetchModelsFromProvider();
         foreach ($models as $model_key => $model) {
             $models[$model_key]['supports_tools'] = true;
-            $models[$model_key]['supports_temperature'] = true;
+            // anthropic models reject `temperature` once extended thinking is active
+            // ("temperature is deprecated for this model"), and the proxy enables
+            // thinking for higher effort. never send temperature for claude — anthropic
+            // applies its own default — while keeping it for the gpt models.
+            $models[$model_key]['supports_temperature'] = !str_starts_with((string) $model['name'], 'claude');
             if (!str_starts_with((string) $model['name'], 'gpt-5')) {
                 continue;
             }
