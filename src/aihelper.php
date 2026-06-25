@@ -7069,10 +7069,7 @@ class ai_cliproxyapi extends ai_openrouter
         $models = parent::fetchModelsFromProvider();
         foreach ($models as $model_key => $model) {
             $models[$model_key]['supports_tools'] = true;
-            // anthropic models reject `temperature` once extended thinking is active
-            // ("temperature is deprecated for this model"), and the proxy enables
-            // thinking for higher effort. never send temperature for claude — anthropic
-            // applies its own default — while keeping it for the gpt models.
+            // anthropic models reject `temperature`
             $models[$model_key]['supports_temperature'] = !str_starts_with((string) $model['name'], 'claude');
             if (!str_starts_with((string) $model['name'], 'gpt-5')) {
                 continue;
