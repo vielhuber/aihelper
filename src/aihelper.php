@@ -1209,14 +1209,23 @@ abstract class aihelper
             $err = curl_error($ch);
             $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
-            // retry transient failures
-            $is_transient = $raw === false || $http === 429 || $http >= 500;
+            // a 200 with an empty image payload
+            $empty_image = false;
+            if ($raw !== false && $http >= 200 && $http < 300) {
+                $peek = json_decode((string) $raw, true);
+                $empty_image =
+                    $this->name === 'google'
+                        ? !is_array($peek) || empty($peek['predictions'])
+                        : !is_array($peek) || empty($peek['data']);
+            }
+            // retry transient failures (network error, 429, 5xx, empty 200 response)
+            $is_transient = $raw === false || $http === 429 || $http >= 500 || $empty_image;
             if (!$is_transient || $attempt >= $max_tries) {
                 break;
             }
             $this->log(
-                '⚠️ image transient HTTP ' .
-                    $http .
+                '⚠️ image transient ' .
+                    ($empty_image ? 'empty-response' : 'HTTP ' . $http) .
                     ' (' .
                     ($err ?: 'no curl error') .
                     ') — retry ' .
