@@ -1233,7 +1233,7 @@ abstract class aihelper
                     '/' .
                     ($max_tries - 1)
             );
-            sleep($attempt);
+            sleep($attempt * 3);
         }
         if ($tmp_input !== null && is_file($tmp_input)) {
             unlink($tmp_input);
@@ -1249,7 +1249,7 @@ abstract class aihelper
             $items = is_array($data) ? $data['predictions'] ?? [] : [];
             if (!is_array($items) || count($items) === 0) {
                 $msg =
-                    'image: provider returned no image (empty response) — the prompt was most likely rejected by the content/safety filter';
+                    'image: provider returned no image (empty response) — usually a transient provider overload (already retried), possibly a content/safety rejection';
                 $this->log('⛔ ' . $msg);
                 return ['response' => $msg, 'success' => false, 'costs' => 0.0];
             }
@@ -1261,7 +1261,7 @@ abstract class aihelper
             }
             if ($b64s === []) {
                 $msg =
-                    'image: provider returned no image data — the prompt was most likely rejected by the content/safety filter';
+                    'image: provider returned no image data — usually a transient provider overload (already retried), possibly a content/safety rejection';
                 $this->log('⛔ ' . $msg);
                 return ['response' => $msg, 'success' => false, 'costs' => 0.0];
             }
@@ -1270,7 +1270,7 @@ abstract class aihelper
             $items = is_array($data) ? $data['data'] ?? [] : [];
             if (!is_array($items) || count($items) === 0) {
                 $msg =
-                    'image: provider returned no image (empty response) — the prompt was most likely rejected by the content/safety filter';
+                    'image: provider returned no image (empty response) — usually a transient provider overload (already retried), possibly a content/safety rejection';
                 $this->log('⛔ ' . $msg);
                 return ['response' => $msg, 'success' => false, 'costs' => 0.0];
             }
@@ -6883,7 +6883,7 @@ class ai_elevenlabs extends ai_openai
                     '/' .
                     ($max_tries - 1)
             );
-            sleep($attempt);
+            sleep($attempt * 3);
         }
         if ($raw === false || $http >= 400) {
             $msg = 'elevenlabs audio HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500);
