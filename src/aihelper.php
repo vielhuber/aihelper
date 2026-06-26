@@ -663,10 +663,56 @@ abstract class aihelper
         }
     }
 
+    /**
+     * Fetch and cache the models.dev catalog (api.json).
+     *
+     * models.dev/api.json is a ~2.4MB, slowly-changing public catalog. Fetching it
+     * on every instantiation blocks the constructor for seconds (much longer under
+     * load). Cache it to disk across processes with a daily TTL, cap the network
+     * timeout, and fall back to a stale cache when the network is slow/unreachable.
+     *
+     * @return object|null The decoded api.json, or null when unavailable.
+     */
+    protected function fetchModelsDevApi(): ?object
+    {
+        static $api = null;
+        if ($api !== null) {
+            return $api;
+        }
+        $cache_file = sys_get_temp_dir() . '/aihelper-modelsdev.json';
+        $ttl_seconds = 86400;
+        $fetch_timeout = 10;
+        if (is_file($cache_file) && time() - filemtime($cache_file) < $ttl_seconds) {
+            $cached = json_decode((string) file_get_contents($cache_file));
+            if (is_object($cached)) {
+                $api = $cached;
+                return $api;
+            }
+        }
+        $response = __::curl(url: 'https://models.dev/api.json', method: 'GET', timeout: $fetch_timeout);
+        $fresh = $response?->result ?? null;
+        if (is_object($fresh)) {
+            // atomic write so a concurrent reader never sees a half-written file
+            $tmp = $cache_file . '.' . getmypid() . '.tmp';
+            if (file_put_contents($tmp, json_encode($fresh)) !== false) {
+                rename($tmp, $cache_file);
+            }
+            $api = $fresh;
+            return $api;
+        }
+        // network failed: serve a stale cache if one exists rather than nothing
+        if (is_file($cache_file)) {
+            $cached = json_decode((string) file_get_contents($cache_file));
+            if (is_object($cached)) {
+                $api = $cached;
+                return $api;
+            }
+        }
+        return null;
+    }
+
     public function fetchModelsFromModelsDev(): array
     {
-        static $models_dev_api = null;
-
         $provider = $this->name;
         if ($provider === null) {
             return [];
@@ -675,11 +721,7 @@ abstract class aihelper
             return [];
         }
 
-        if ($models_dev_api === null) {
-            $response = __::curl(url: 'https://models.dev/api.json', method: 'GET', timeout: $this->timeout ?? 300);
-            $models_dev_api = $response?->result ?? null;
-        }
-        $result = $models_dev_api;
+        $result = $this->fetchModelsDevApi();
         if (!is_object($result) || !__::x($result->{$provider}->models ?? null)) {
             return [];
         }
@@ -5860,12 +5902,12 @@ class ai_openrouter extends aihelper
         $models = [];
         // enhance data
         $openrouter_open_weights_by_model = [];
-        $models_dev_response = __::curl(url: 'https://models.dev/api.json', method: 'GET', timeout: $this->timeout);
+        $models_dev_api = $this->fetchModelsDevApi();
         if (
-            __::x($models_dev_response?->result?->openrouter?->models ?? null) &&
-            is_object($models_dev_response->result->openrouter->models)
+            __::x($models_dev_api?->openrouter?->models ?? null) &&
+            is_object($models_dev_api->openrouter->models)
         ) {
-            foreach ((array) $models_dev_response->result->openrouter->models as $model_id => $model_data) {
+            foreach ((array) $models_dev_api->openrouter->models as $model_id => $model_data) {
                 $openrouter_open_weights_by_model[$model_id] = (bool) ($model_data->open_weights ?? false);
             }
         }
