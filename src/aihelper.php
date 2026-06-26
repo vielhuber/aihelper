@@ -663,16 +663,6 @@ abstract class aihelper
         }
     }
 
-    /**
-     * Fetch and cache the models.dev catalog (api.json).
-     *
-     * models.dev/api.json is a ~2.4MB, slowly-changing public catalog. Fetching it
-     * on every instantiation blocks the constructor for seconds (much longer under
-     * load). Cache it to disk across processes with a daily TTL, cap the network
-     * timeout, and fall back to a stale cache when the network is slow/unreachable.
-     *
-     * @return object|null The decoded api.json, or null when unavailable.
-     */
     protected function fetchModelsDevApi(): ?object
     {
         static $api = null;
@@ -5903,10 +5893,7 @@ class ai_openrouter extends aihelper
         // enhance data
         $openrouter_open_weights_by_model = [];
         $models_dev_api = $this->fetchModelsDevApi();
-        if (
-            __::x($models_dev_api?->openrouter?->models ?? null) &&
-            is_object($models_dev_api->openrouter->models)
-        ) {
+        if (__::x($models_dev_api?->openrouter?->models ?? null) && is_object($models_dev_api->openrouter->models)) {
             foreach ((array) $models_dev_api->openrouter->models as $model_id => $model_data) {
                 $openrouter_open_weights_by_model[$model_id] = (bool) ($model_data->open_weights ?? false);
             }
