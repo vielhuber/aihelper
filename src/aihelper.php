@@ -663,6 +663,158 @@ abstract class aihelper
         }
     }
 
+    public function getCliUsageLimits(): ?array
+    {
+        $model = strtolower((string) $this->model);
+        $tool = null;
+        if (str_contains($model, 'claude') || $this->name === 'anthropic') {
+            $tool = 'claude';
+        }
+        if (str_contains($model, 'codex') || ($this->name === 'cliproxyapi' && str_contains($model, 'gpt'))) {
+            $tool = 'codex';
+        }
+        if ($tool === null) {
+            return null;
+        }
+
+        $command = $tool === 'claude' ? 'claude' : 'codex --no-alt-screen';
+        $input = $tool === 'claude' ? "/usage\n/exit\n" : "/status\n/quit\n";
+        $output = shell_exec(
+            'printf %s ' .
+                escapeshellarg($input) .
+                ' | timeout 25s script --output-limit 60000 -qfec ' .
+                escapeshellarg('bash -lc ' . escapeshellarg($command)) .
+                ' /dev/null 2>&1'
+        );
+        if (!is_string($output) || trim($output) === '') {
+            return null;
+        }
+
+        $limits = $this->parseCliUsageLimits($tool, $output);
+        return !empty($limits) ? $limits : null;
+    }
+
+    protected function parseCliUsageLimits(string $tool, string $output): array
+    {
+        $output = preg_replace('/\x1B(?:[@-Z\\\\-_]|\[[0-?]*[ -\/]*[@-~])/', '', $output) ?? $output;
+        $output = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', str_replace("\r", "\n", $output)) ?? $output;
+        $lines = [];
+        foreach (explode("\n", $output) as $line) {
+            $line = trim(preg_replace('/\s+/', ' ', $line) ?? $line);
+            if ($line !== '') {
+                $lines[] = $line;
+            }
+        }
+
+        $parsePercent = function (string $text): int|float|null {
+            if (!preg_match('/(\d+(?:\.\d+)?)%\s*(used|left)\b/i', $text, $matches)) {
+                return null;
+            }
+            $percent = (float) $matches[1];
+            if (strtolower($matches[2]) === 'left') {
+                $percent = 100 - $percent;
+            }
+            $percent = max(0, min(100, $percent));
+            return (float) (int) $percent === $percent ? (int) $percent : $percent;
+        };
+        $parseReset = function (string $text): ?string {
+            $value = null;
+            if (preg_match('/\((?:re)?sets?\s+([^)]+)\)/i', $text, $matches)) {
+                $value = $matches[1];
+            }
+            if ($value === null) {
+                foreach (explode("\n", $text) as $line) {
+                    if (preg_match('/^(?:re)?sets?\s+(.+)$/i', trim($line), $matches)) {
+                        $value = $matches[1];
+                        break;
+                    }
+                }
+            }
+            if ($value === null) {
+                return null;
+            }
+
+            $value = trim(preg_replace('/\s+/', ' ', $value) ?? $value);
+            $timezone = new \DateTimeZone(date_default_timezone_get());
+            if (preg_match('/\(([^)]+)\)/', $value, $matches)) {
+                try {
+                    $timezone = new \DateTimeZone($matches[1]);
+                } catch (\Exception) {
+                }
+                $value = trim(str_replace($matches[0], '', $value));
+            }
+            $now = new \DateTimeImmutable('now', $timezone);
+            $dateValue = null;
+            $timeOnly = false;
+            if (preg_match('/^(\d{1,2}:\d{2}\s*(?:am|pm)?)$/i', $value, $matches)) {
+                $dateValue = $now->format('Y-m-d') . ' ' . $matches[1];
+                $timeOnly = true;
+            }
+            if ($dateValue === null && preg_match('/^(\d{1,2}:\d{2}\s*(?:am|pm)?)\s+on\s+(.+)$/i', $value, $matches)) {
+                $dateValue = $matches[2] . ' ' . $now->format('Y') . ' ' . $matches[1];
+            }
+            if ($dateValue === null && preg_match('/^(.+?),?\s+(\d{1,2}:\d{2}\s*(?:am|pm)?)$/i', $value, $matches)) {
+                $dateValue = $matches[1] . ' ' . $now->format('Y') . ' ' . $matches[2];
+            }
+            if ($dateValue === null) {
+                return null;
+            }
+
+            try {
+                $date = new \DateTimeImmutable($dateValue, $timezone);
+            } catch (\Exception) {
+                return null;
+            }
+            if ($timeOnly && $date <= $now) {
+                $date = $date->modify('+1 day');
+            }
+            if (!$timeOnly && $date < $now) {
+                $date = $date->modify('+1 year');
+            }
+            return $date->format(\DateTimeInterface::ATOM);
+        };
+
+        $limits = [];
+        $usedTypes = [];
+        foreach ($lines as $lineKey => $line) {
+            $type = null;
+            if ($tool === 'codex' && preg_match('/\b5h\s+limit\b/i', $line)) {
+                $type = 'daily';
+            }
+            if ($tool === 'claude' && preg_match('/\bcurrent\s+session\b/i', $line)) {
+                $type = 'daily';
+            }
+            if (preg_match($tool === 'codex' ? '/\bweekly\s+limit\b/i' : '/\bcurrent\s+week\b/i', $line)) {
+                $type = 'weekly';
+            }
+            if (preg_match($tool === 'codex' ? '/\bmonthly\s+limit\b/i' : '/\bcurrent\s+month\b/i', $line)) {
+                $type = 'monthly';
+            }
+            if ($type === null || isset($usedTypes[$type])) {
+                continue;
+            }
+
+            $block = [$line];
+            if ($tool === 'claude') {
+                $block = [];
+                for ($i = $lineKey; $i < count($lines); $i++) {
+                    if ($i > $lineKey && preg_match('/\bcurrent\s+(session|week|month)\b/i', $lines[$i])) {
+                        break;
+                    }
+                    $block[] = $lines[$i];
+                }
+            }
+            $text = implode("\n", $block);
+            $percent = $parsePercent(str_replace("\n", ' ', $text));
+            if ($percent === null) {
+                continue;
+            }
+            $limits[] = ['type' => $type, 'percent used' => $percent, 'resets_at' => $parseReset($text)];
+            $usedTypes[$type] = true;
+        }
+        return $limits;
+    }
+
     protected function fetchModelsDevApi(): ?object
     {
         static $api = null;

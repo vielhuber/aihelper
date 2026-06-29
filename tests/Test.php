@@ -42,6 +42,50 @@ class Test extends \PHPUnit\Framework\TestCase
         return true;
     }
 
+    function test__cli_usage_limits_parsing(): void
+    {
+        $ai = aihelper::create(provider: 'test');
+
+        $parser = new \ReflectionMethod($ai, 'parseCliUsageLimits');
+        $codexLimits = $parser->invoke(
+            $ai,
+            'codex',
+            <<<'TXT'
+│  Context window:              73% left (77.6K used / 258K)                             │
+│  5h limit:                    [██████████████████░░] 92% left (resets 19:12)           │
+│  Weekly limit:                [███████████████████░] 97% left (resets 03:03 on 6 Jul)  │
+│  GPT-5.3-Codex-Spark limit:                                                            │
+│  5h limit:                    [████████████████████] 100% left (resets 15:52)          │
+TXT
+        );
+
+        $this->assertSame('daily', $codexLimits[0]['type']);
+        $this->assertSame(8, $codexLimits[0]['percent used']);
+        $this->assertSame('weekly', $codexLimits[1]['type']);
+        $this->assertSame(3, $codexLimits[1]['percent used']);
+        $this->assertMatchesRegularExpression('/T19:12:00/', $codexLimits[0]['resets_at']);
+
+        $claudeLimits = $parser->invoke(
+            $ai,
+            'claude',
+            <<<'TXT'
+Current session
+██████████████████████████████████████████████████ 100% used
+Resets 5:59pm (Europe/Berlin)
+
+Current week (all models)
+██████████████████████████████████▌ 69% used
+Resets Jun 30, 4:59pm (Europe/Berlin)
+TXT
+        );
+
+        $this->assertSame('daily', $claudeLimits[0]['type']);
+        $this->assertSame(100, $claudeLimits[0]['percent used']);
+        $this->assertSame('weekly', $claudeLimits[1]['type']);
+        $this->assertSame(69, $claudeLimits[1]['percent used']);
+        $this->assertMatchesRegularExpression('/T17:59:00\\+02:00/', $claudeLimits[0]['resets_at']);
+    }
+
     function test__ai_all(): void
     {
         $stats = [];
