@@ -1008,6 +1008,95 @@ abstract class aihelper
         $headers = [];
         $tmp_input = null;
         if ($this->name === 'google') {
+            $is_gemini_image_model = str_starts_with((string) $this->model, 'gemini-') && str_contains((string) $this->model, '-image');
+            if ($is_gemini_image_model) {
+                $aspect_payload = '1:1';
+                if (
+                    $aspect_ratio !== null &&
+                    $aspect_ratio !== '' &&
+                    preg_match('/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/', $aspect_ratio, $aspect_ratio__match) === 1 &&
+                    (float) $aspect_ratio__match[1] > 0 &&
+                    (float) $aspect_ratio__match[2] > 0
+                ) {
+                    $aspect_ratio__target = (float) $aspect_ratio__match[1] / (float) $aspect_ratio__match[2];
+                    $aspect_ratio__candidates = [
+                        '1:1' => 1.0,
+                        '2:3' => 2 / 3,
+                        '3:2' => 3 / 2,
+                        '3:4' => 3 / 4,
+                        '4:3' => 4 / 3,
+                        '4:5' => 4 / 5,
+                        '5:4' => 5 / 4,
+                        '9:16' => 9 / 16,
+                        '16:9' => 16 / 9,
+                        '21:9' => 21 / 9
+                    ];
+                    $aspect_ratio__best_delta = PHP_FLOAT_MAX;
+                    foreach ($aspect_ratio__candidates as $label => $val) {
+                        $d = abs(log($aspect_ratio__target / $val));
+                        if ($d < $aspect_ratio__best_delta) {
+                            $aspect_ratio__best_delta = $d;
+                            $aspect_payload = $label;
+                        }
+                    }
+                }
+                $parts = [];
+                if ($is_edit) {
+                    $input_binary = null;
+                    $input_mime = 'image/png';
+                    if (is_string($input_file) && is_file($input_file)) {
+                        $input_binary = file_get_contents($input_file);
+                        $detected_mime = mime_content_type($input_file);
+                        if (is_string($detected_mime) && $detected_mime !== '') {
+                            $input_mime = $detected_mime;
+                        }
+                    } elseif (
+                        is_string($input_file) &&
+                        (str_starts_with($input_file, 'http://') || str_starts_with($input_file, 'https://'))
+                    ) {
+                        if (!self::isPublicHttpUrl($input_file)) {
+                            $this->log('⛔ image: refused private/reserved url ' . $input_file);
+                            return ['response' => null, 'success' => false, 'costs' => 0.0];
+                        }
+                        $input_binary = self::fetchUrlBinary($input_file, (int) ($this->timeout ?? 30));
+                    } elseif (is_string($input_file) && str_contains($input_file, ';base64,')) {
+                        $input_binary = base64_decode(explode(';base64,', $input_file, 2)[1], true);
+                        if (preg_match('/^data:([^;]+);base64,/', $input_file, $input_mime_match) === 1) {
+                            $input_mime = $input_mime_match[1];
+                        }
+                    } elseif (is_string($input_file)) {
+                        $input_binary = base64_decode($input_file, true);
+                    }
+                    if (!is_string($input_binary) || $input_binary === '') {
+                        $this->log('⛔ image: invalid input_file for google gemini image');
+                        return ['response' => null, 'success' => false, 'costs' => 0.0];
+                    }
+                    $parts[] = [
+                        'inline_data' => [
+                            'mime_type' => $input_mime,
+                            'data' => base64_encode($input_binary)
+                        ]
+                    ];
+                }
+                $parts[] = ['text' => (string) $prompt];
+                $payload = [
+                    'contents' => [
+                        [
+                            'role' => 'user',
+                            'parts' => $parts
+                        ]
+                    ],
+                    'generationConfig' => [
+                        'responseModalities' => ['IMAGE'],
+                        'imageConfig' => [
+                            'aspectRatio' => $aspect_payload
+                        ]
+                    ]
+                ];
+                $endpoint = $this->url . '/models/' . $this->model . ':generateContent?key=' . $this->api_key;
+                $headers = ['Content-Type: application/json'];
+                $body = json_encode($payload);
+            } else {
             // Google Imagen via the `:predict` endpoint. Different URL pattern,
             // different auth (query-param `?key=`), different body shape, and
             // no edit support — `imagen-capability` would be a separate model.
@@ -1055,6 +1144,7 @@ abstract class aihelper
             $endpoint = $this->url . '/models/' . $this->model . ':predict?key=' . $this->api_key;
             $headers = ['Content-Type: application/json'];
             $body = json_encode($payload);
+            }
         } else {
             // OpenAI / xAI / DALL-E shape. Edits: OpenAI uses multipart
             // `/images/edits`, xAI uses the same path but expects JSON with
@@ -1240,14 +1330,17 @@ abstract class aihelper
             $raw = curl_exec($ch);
             $err = curl_error($ch);
             $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
             // a 200 with an empty image payload
             $empty_image = false;
             if ($raw !== false && $http >= 200 && $http < 300) {
                 $peek = json_decode((string) $raw, true);
                 $empty_image =
                     $this->name === 'google'
-                        ? !is_array($peek) || empty($peek['predictions'])
+                        ? (!is_array($peek) ||
+                            (
+                                empty($peek['predictions']) &&
+                                empty($peek['candidates'])
+                            ))
                         : !is_array($peek) || empty($peek['data']);
             }
             // retry transient failures (network error, 429, 5xx, empty 200 response)
@@ -1277,8 +1370,21 @@ abstract class aihelper
         }
         $data = json_decode((string) $raw, true);
         if ($this->name === 'google') {
-            // Imagen response shape: predictions[].bytesBase64Encoded
-            $items = is_array($data) ? $data['predictions'] ?? [] : [];
+            $is_gemini_image_model = str_starts_with((string) $this->model, 'gemini-') && str_contains((string) $this->model, '-image');
+            $items = [];
+            if ($is_gemini_image_model) {
+                foreach (($data['candidates'] ?? []) as $candidate) {
+                    foreach (($candidate['content']['parts'] ?? []) as $part) {
+                        $inline_data = $part['inlineData'] ?? ($part['inline_data'] ?? null);
+                        if (!empty($inline_data['data'])) {
+                            $items[] = ['bytesBase64Encoded' => (string) $inline_data['data']];
+                        }
+                    }
+                }
+            } else {
+                // Imagen response shape: predictions[].bytesBase64Encoded
+                $items = is_array($data) ? $data['predictions'] ?? [] : [];
+            }
             if (!is_array($items) || count($items) === 0) {
                 $msg =
                     'image: provider returned no image (empty response) — usually a transient provider overload (already retried), possibly a content/safety rejection';
@@ -2546,9 +2652,13 @@ abstract class aihelper
                 }
             }
             foreach ($this->fetchModelsFromProvider() as $provider__value) {
-                if (isset($provider__value['name']) && !isset($known[$provider__value['name']])) {
-                    $raw[] = $provider__value;
+                if (!isset($provider__value['name'])) {
+                    continue;
                 }
+                if (isset($known[$provider__value['name']])) {
+                    continue;
+                }
+                $raw[] = $provider__value;
             }
         }
         $models = $this->normalizeAndEnrichModels($raw);
@@ -6896,7 +7006,6 @@ class ai_elevenlabs extends ai_openai
             $raw = curl_exec($ch);
             $err = curl_error($ch);
             $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
             // retry transient failures
             $is_transient = $raw === false || $http === 429 || $http >= 500;
             if (!$is_transient || $attempt >= $max_tries) {
