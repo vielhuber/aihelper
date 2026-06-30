@@ -845,7 +845,7 @@ abstract class aihelper
                         }
                     }
                     $limits[] = [
-                        'type' => trim((string) ($group->displayName ?? '') . ' ' . (string) ($bucket->window ?? '')),
+                        'type' => (string) ($bucket->window ?? ''),
                         'percent used' => (int) round(100 - max(0, min(1, (float) $bucket->remainingFraction)) * 100),
                         'resets_at' => $resets_at,
                     ];
@@ -1845,7 +1845,7 @@ abstract class aihelper
         $cost_per = 0.0;
         foreach ($this->models as $m) {
             if (($m['name'] ?? null) === $this->model) {
-                $cost_per = (float) ($m['costs']['image'] ?? 0 ?: 0);
+                $cost_per = (float) ($m['costs']['image'] ?? $m['costs']['input'] ?? 0 ?: 0);
                 break;
             }
         }
@@ -6563,7 +6563,12 @@ class ai_openrouter extends aihelper
         $args = $this->applyTemperatureParameter($args);
 
         if (!empty($this->mcp_servers) && $this->mcp_servers_call_type === 'local') {
-            $raw_tools = $this->buildLocalToolsArgs('parameters', false);
+            $raw_tools = $this->buildLocalToolsArgs('parameters', false, [
+                'additionalProperties',
+                '$schema',
+                'definition',
+                'default'
+            ]);
             $args['tools'] = [];
             foreach ($raw_tools as $tool) {
                 $args['tools'][] = [
