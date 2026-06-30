@@ -674,6 +674,13 @@ abstract class aihelper
         if (str_contains($model, 'codex') || ($this->name === 'cliproxyapi' && str_contains($model, 'gpt'))) {
             $tool = 'codex';
         }
+        if (
+            str_contains($model, 'antigravity') ||
+            str_contains($model, 'agy') ||
+            ($this->name === 'cliproxyapi' && str_contains($model, 'gemini'))
+        ) {
+            $tool = 'antigravity';
+        }
         if ($tool === null) {
             return null;
         }
@@ -735,6 +742,98 @@ abstract class aihelper
                     'percent used' => (int) round((float) $window->used_percent),
                     'resets_at' => is_numeric($window->reset_at ?? null) ? date(\DateTimeInterface::ATOM, (int) $window->reset_at) : null,
                 ];
+            }
+            $cache[$tool] = ['time' => time(), 'limits' => !empty($limits) ? $limits : null];
+            return $cache[$tool]['limits'];
+        }
+        if ($tool === 'antigravity') {
+            $auth_files = array_values(
+                array_unique(
+                    array_merge(
+                        ['/root/.gemini/antigravity-cli/antigravity-oauth-token'],
+                        glob('/root/.cli-proxy-api/antigravity*.json') ?: [],
+                        glob('/host/data/cliproxyapi/auth/antigravity*.json') ?: []
+                    )
+                )
+            );
+            $access_token = null;
+            foreach ($auth_files as $auth_file) {
+                if (!is_file($auth_file)) {
+                    continue;
+                }
+                $auth = json_decode((string) file_get_contents($auth_file), true);
+                if (!is_array($auth)) {
+                    continue;
+                }
+                $access_token =
+                    $auth['token']['access_token'] ??
+                    $auth['tokens']['access_token'] ??
+                    $auth['access_token'] ??
+                    null;
+                if (($access_token ?? '') !== '') {
+                    break;
+                }
+            }
+            if (($access_token ?? '') === '') {
+                return null;
+            }
+            $load_response = __::curl(
+                url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist',
+                data: '{}',
+                method: 'POST',
+                headers: [
+                    'Authorization' => 'Bearer ' . $access_token,
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                ],
+                timeout: 15
+            );
+            if (($load_response?->status ?? 0) !== 200) {
+                return null;
+            }
+            $project = $load_response?->result?->cloudaicompanionProject ?? null;
+            $params = is_string($project) && $project !== '' ? ['project' => $project] : '{}';
+            $response = __::curl(
+                url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota',
+                data: $params,
+                method: 'POST',
+                headers: [
+                    'Authorization' => 'Bearer ' . $access_token,
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                ],
+                timeout: 15
+            );
+            $payload = $response?->result ?? null;
+            if (!is_object($payload) || !is_array($payload->buckets ?? null)) {
+                return null;
+            }
+            $limits = [];
+            $usedModels = [];
+            foreach ($payload->buckets as $bucket) {
+                if (!is_object($bucket) || !is_numeric($bucket->remainingFraction ?? null)) {
+                    continue;
+                }
+                $model_id = (string) ($bucket->modelId ?? '');
+                if ($model_id === '' || isset($usedModels[$model_id])) {
+                    continue;
+                }
+                $resets_at = null;
+                if (($bucket->resetTime ?? null) !== null) {
+                    try {
+                        $reset_date = new \DateTimeImmutable((string) $bucket->resetTime);
+                        if ((int) $reset_date->format('Y') > 1971) {
+                            $resets_at = $reset_date->format(\DateTimeInterface::ATOM);
+                        }
+                    } catch (\Exception) {
+                    }
+                }
+                $limits[] = [
+                    'type' => $model_id,
+                    'percent used' => (int) round(100 - max(0, min(1, (float) $bucket->remainingFraction)) * 100),
+                    'resets_at' => $resets_at,
+                ];
+                $usedModels[$model_id] = true;
             }
             $cache[$tool] = ['time' => time(), 'limits' => !empty($limits) ? $limits : null];
             return $cache[$tool]['limits'];
