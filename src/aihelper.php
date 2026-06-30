@@ -665,6 +665,7 @@ abstract class aihelper
 
     public function getCliUsageLimits(): ?array
     {
+        static $cache = [];
         $model = strtolower((string) $this->model);
         $tool = null;
         if (str_contains($model, 'claude') || $this->name === 'anthropic') {
@@ -676,22 +677,143 @@ abstract class aihelper
         if ($tool === null) {
             return null;
         }
-
-        $command = $tool === 'claude' ? 'claude' : 'codex --no-alt-screen';
-        $input = $tool === 'claude' ? "/usage\n/exit\n" : "/status\n/quit\n";
-        $output = shell_exec(
-            'printf %s ' .
-                escapeshellarg($input) .
-                ' | timeout 25s script --output-limit 60000 -qfec ' .
-                escapeshellarg('bash -lc ' . escapeshellarg($command)) .
-                ' /dev/null 2>&1'
-        );
-        if (!is_string($output) || trim($output) === '') {
-            return null;
+        if (isset($cache[$tool]) && time() - $cache[$tool]['time'] < 60) {
+            return $cache[$tool]['limits'];
+        }
+        if ($tool === 'codex') {
+            $auth_files = array_values(
+                array_unique(
+                    array_merge(
+                        ['/root/.codex/auth.json'],
+                        glob('/root/.cli-proxy-api/codex*.json') ?: [],
+                        glob('/host/data/cliproxyapi/auth/codex*.json') ?: []
+                    )
+                )
+            );
+            $access_token = null;
+            $account_id = null;
+            foreach ($auth_files as $auth_file) {
+                if (!is_file($auth_file)) {
+                    continue;
+                }
+                $auth = json_decode((string) file_get_contents($auth_file), true);
+                if (!is_array($auth)) {
+                    continue;
+                }
+                $access_token = $auth['tokens']['access_token'] ?? $auth['access_token'] ?? null;
+                $account_id = $auth['tokens']['account_id'] ?? $auth['account_id'] ?? null;
+                if (($access_token ?? '') !== '' && ($account_id ?? '') !== '') {
+                    break;
+                }
+            }
+            if (($access_token ?? '') === '' || ($account_id ?? '') === '') {
+                return null;
+            }
+            $response = __::curl(
+                url: 'https://chatgpt.com/backend-api/wham/usage',
+                method: 'GET',
+                headers: [
+                    'Authorization' => 'Bearer ' . $access_token,
+                    'ChatGPT-Account-Id' => $account_id,
+                    'User-Agent' => 'codex-cli',
+                    'Accept' => 'application/json',
+                ],
+                timeout: 15
+            );
+            $payload = $response?->result ?? null;
+            $windows = [
+                '5-hour' => $payload?->rate_limit?->primary_window ?? null,
+                'weekly' => $payload?->rate_limit?->secondary_window ?? null,
+            ];
+            $limits = [];
+            foreach ($windows as $type => $window) {
+                if (!is_object($window) || !is_numeric($window->used_percent ?? null)) {
+                    continue;
+                }
+                $limits[] = [
+                    'type' => $type,
+                    'percent used' => (int) round((float) $window->used_percent),
+                    'resets_at' => is_numeric($window->reset_at ?? null) ? date(\DateTimeInterface::ATOM, (int) $window->reset_at) : null,
+                ];
+            }
+            $cache[$tool] = ['time' => time(), 'limits' => !empty($limits) ? $limits : null];
+            return $cache[$tool]['limits'];
         }
 
-        $limits = $this->parseCliUsageLimits($tool, $output);
-        return !empty($limits) ? $limits : null;
+        $auth_files = array_values(
+            array_unique(
+                array_merge(
+                    ['/root/.claude/.credentials.json'],
+                    glob('/root/.cli-proxy-api/claude*.json') ?: [],
+                    glob('/host/data/cliproxyapi/auth/claude*.json') ?: []
+                )
+            )
+        );
+        $access_token = null;
+        foreach ($auth_files as $auth_file) {
+            if (!is_file($auth_file)) {
+                continue;
+            }
+            $auth = json_decode((string) file_get_contents($auth_file), true);
+            if (!is_array($auth)) {
+                continue;
+            }
+            $access_token = $auth['claudeAiOauth']['accessToken'] ?? $auth['access_token'] ?? null;
+            if (($access_token ?? '') !== '') {
+                break;
+            }
+        }
+        if (($access_token ?? '') === '') {
+            return null;
+        }
+        $response = __::curl(
+            url: 'https://api.anthropic.com/api/oauth/usage',
+            method: 'GET',
+            headers: [
+                'Authorization' => 'Bearer ' . $access_token,
+                'User-Agent' => 'claude-cli',
+                'Accept' => 'application/json',
+            ],
+            timeout: 15
+        );
+        $payload = $response?->result ?? null;
+        if (!is_object($payload) || !is_array($payload->limits ?? null)) {
+            return null;
+        }
+        $limits = [];
+        $usedTypes = [];
+        foreach ($payload->limits as $limit) {
+            if (!is_object($limit) || !is_numeric($limit->percent ?? null)) {
+                continue;
+            }
+            $group = (string) ($limit->group ?? '');
+            $kind = (string) ($limit->kind ?? '');
+            $type = in_array($group, ['daily', 'weekly', 'monthly'], true) ? $group : null;
+            if ($group === 'session') {
+                $type = '5-hour';
+            }
+            if ($type === null && str_starts_with($kind, 'weekly')) {
+                $type = 'weekly';
+            }
+            if ($type === null || isset($usedTypes[$type])) {
+                continue;
+            }
+            $resets_at = null;
+            if (($limit->resets_at ?? null) !== null) {
+                try {
+                    $resets_at = (new \DateTimeImmutable((string) $limit->resets_at))->format(\DateTimeInterface::ATOM);
+                } catch (\Exception) {
+                }
+            }
+            $limits[] = [
+                'type' => $type,
+                'percent used' => (int) round((float) $limit->percent),
+                'resets_at' => $resets_at,
+            ];
+            $usedTypes[$type] = true;
+        }
+        $cache[$tool] = ['time' => time(), 'limits' => !empty($limits) ? $limits : null];
+        return $cache[$tool]['limits'];
     }
 
     protected function parseCliUsageLimits(string $tool, string $output): array
@@ -779,10 +901,10 @@ abstract class aihelper
         foreach ($lines as $lineKey => $line) {
             $type = null;
             if ($tool === 'codex' && preg_match('/\b5h\s+limit\b/i', $line)) {
-                $type = 'daily';
+                $type = '5-hour';
             }
             if ($tool === 'claude' && preg_match('/\bcurrent\s+session\b/i', $line)) {
-                $type = 'daily';
+                $type = '5-hour';
             }
             if (preg_match($tool === 'codex' ? '/\bweekly\s+limit\b/i' : '/\bcurrent\s+week\b/i', $line)) {
                 $type = 'weekly';

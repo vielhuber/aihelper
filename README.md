@@ -109,7 +109,7 @@ $ai->getSessionContent() // gets messages in chat history
 
 $ai->getCliUsageLimits() // get cli usage limits for claude code and codex
 // [
-//     ['type' => 'daily', 'percent used' => 20, 'resets_at' => '2026-06-29T17:59:00+02:00'],
+//     ['type' => '5-hour', 'percent used' => 20, 'resets_at' => '2026-06-29T17:59:00+02:00'],
 //     ['type' => 'weekly', 'percent used' => 10, 'resets_at' => '2026-07-06T03:03:00+02:00']
 // ]
 

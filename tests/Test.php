@@ -59,7 +59,7 @@ class Test extends \PHPUnit\Framework\TestCase
 TXT
         );
 
-        $this->assertSame('daily', $codexLimits[0]['type']);
+        $this->assertSame('5-hour', $codexLimits[0]['type']);
         $this->assertSame(8, $codexLimits[0]['percent used']);
         $this->assertSame('weekly', $codexLimits[1]['type']);
         $this->assertSame(3, $codexLimits[1]['percent used']);
@@ -79,7 +79,7 @@ Resets Jun 30, 4:59pm (Europe/Berlin)
 TXT
         );
 
-        $this->assertSame('daily', $claudeLimits[0]['type']);
+        $this->assertSame('5-hour', $claudeLimits[0]['type']);
         $this->assertSame(100, $claudeLimits[0]['percent used']);
         $this->assertSame('weekly', $claudeLimits[1]['type']);
         $this->assertSame(69, $claudeLimits[1]['percent used']);
