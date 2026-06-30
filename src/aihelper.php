@@ -773,6 +773,7 @@ abstract class aihelper
                 )
             );
             $access_token = null;
+            $project = null;
             foreach ($auth_files as $auth_file) {
                 if (!is_file($auth_file)) {
                     continue;
@@ -786,6 +787,7 @@ abstract class aihelper
                     $auth['tokens']['access_token'] ??
                     $auth['access_token'] ??
                     null;
+                $project = $auth['project_id'] ?? null;
                 if (($access_token ?? '') !== '') {
                     break;
                 }
@@ -793,63 +795,61 @@ abstract class aihelper
             if (($access_token ?? '') === '') {
                 return null;
             }
-            $load_response = __::curl(
-                url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist',
-                data: '{}',
-                method: 'POST',
-                headers: [
-                    'Authorization' => 'Bearer ' . $access_token,
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                ],
-                timeout: 15
-            );
-            if (($load_response?->status ?? 0) !== 200) {
+            $headers = [
+                'Authorization' => 'Bearer ' . $access_token,
+                'Content-Type' => 'application/json',
+                'User-Agent' => 'antigravity/cli/1.0.14 (aidev_client; os_type=linux; arch=amd64)',
+                'Accept' => 'application/json',
+            ];
+            if (($project ?? '') === '') {
+                $project_response = __::curl(
+                    url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist',
+                    data: json_encode(['metadata' => ['ideType' => 'ANTIGRAVITY']]),
+                    method: 'POST',
+                    headers: $headers,
+                    timeout: 15
+                );
+                $project = $project_response?->result?->cloudaicompanionProject ?? null;
+            }
+            if (($project ?? '') === '') {
                 return null;
             }
-            $project = $load_response?->result?->cloudaicompanionProject ?? null;
-            $params = is_string($project) && $project !== '' ? ['project' => $project] : '{}';
             $response = __::curl(
-                url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota',
-                data: $params,
+                url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
+                data: json_encode(['project' => $project]),
                 method: 'POST',
-                headers: [
-                    'Authorization' => 'Bearer ' . $access_token,
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                ],
+                headers: $headers,
                 timeout: 15
             );
-            $payload = $response?->result ?? null;
-            if (!is_object($payload) || !is_array($payload->buckets ?? null)) {
+            $groups = $response?->result?->groups ?? null;
+            if (!is_array($groups)) {
                 return null;
             }
             $limits = [];
-            $usedModels = [];
-            foreach ($payload->buckets as $bucket) {
-                if (!is_object($bucket) || !is_numeric($bucket->remainingFraction ?? null)) {
+            foreach ($groups as $group) {
+                if (!is_object($group) || !is_array($group->buckets ?? null)) {
                     continue;
                 }
-                $model_id = (string) ($bucket->modelId ?? '');
-                if ($model_id === '' || isset($usedModels[$model_id])) {
+                if (stripos((string) ($group->displayName ?? ''), 'Claude and GPT') !== false) {
                     continue;
                 }
-                $resets_at = null;
-                if (($bucket->resetTime ?? null) !== null) {
-                    try {
-                        $reset_date = new \DateTimeImmutable((string) $bucket->resetTime);
-                        if ((int) $reset_date->format('Y') > 1971) {
-                            $resets_at = $reset_date->format(\DateTimeInterface::ATOM);
-                        }
-                    } catch (\Exception) {
+                foreach ($group->buckets as $bucket) {
+                    if (!is_object($bucket) || !is_numeric($bucket->remainingFraction ?? null)) {
+                        continue;
                     }
+                    $resets_at = null;
+                    if (($bucket->resetTime ?? null) !== null) {
+                        try {
+                            $resets_at = (new \DateTimeImmutable((string) $bucket->resetTime))->format(\DateTimeInterface::ATOM);
+                        } catch (\Exception) {
+                        }
+                    }
+                    $limits[] = [
+                        'type' => trim((string) ($group->displayName ?? '') . ' ' . (string) ($bucket->window ?? '')),
+                        'percent used' => (int) round(100 - max(0, min(1, (float) $bucket->remainingFraction)) * 100),
+                        'resets_at' => $resets_at,
+                    ];
                 }
-                $limits[] = [
-                    'type' => $model_id,
-                    'percent used' => (int) round(100 - max(0, min(1, (float) $bucket->remainingFraction)) * 100),
-                    'resets_at' => $resets_at,
-                ];
-                $usedModels[$model_id] = true;
             }
             $cache[$tool] = ['time' => time(), 'limits' => !empty($limits) ? $limits : null];
             return $cache[$tool]['limits'];
