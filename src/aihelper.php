@@ -668,16 +668,32 @@ abstract class aihelper
         static $cache = [];
         $model = strtolower((string) $this->model);
         $tool = null;
-        if (str_contains($model, 'claude') || $this->name === 'anthropic') {
+        $owned_by = null;
+        if ($this->name === 'cliproxyapi') {
+            foreach ($this->models as $available_model) {
+                if (($available_model['name'] ?? null) !== $this->model) {
+                    continue;
+                }
+                $owned_by = strtolower((string) ($available_model['owned_by'] ?? ''));
+                break;
+            }
+        }
+        if ($owned_by === 'antigravity') {
+            $tool = 'antigravity';
+        }
+        if ($owned_by === 'anthropic' || ($owned_by === null && (str_contains($model, 'claude') || $this->name === 'anthropic'))) {
             $tool = 'claude';
         }
-        if (str_contains($model, 'codex') || ($this->name === 'cliproxyapi' && str_contains($model, 'gpt'))) {
+        if ($owned_by === 'openai' || ($owned_by === null && (str_contains($model, 'codex') || ($this->name === 'cliproxyapi' && str_contains($model, 'gpt'))))) {
             $tool = 'codex';
         }
         if (
-            str_contains($model, 'antigravity') ||
-            str_contains($model, 'agy') ||
-            ($this->name === 'cliproxyapi' && str_contains($model, 'gemini'))
+            $owned_by === null &&
+            (
+                str_contains($model, 'antigravity') ||
+                str_contains($model, 'agy') ||
+                ($this->name === 'cliproxyapi' && str_contains($model, 'gemini'))
+            )
         ) {
             $tool = 'antigravity';
         }
@@ -3050,6 +3066,7 @@ abstract class aihelper
             }
             $normalized_models[] = [
                 'name' => $model['name'],
+                'owned_by' => $model['owned_by'] ?? null,
                 'context_length' => $model['context_length'] ?? 128000,
                 'max_output_tokens' => $model['max_output_tokens'] ?? 16384,
                 'costs' => $model['costs'] ?? ['input' => 0, 'input_cached' => 0, 'output' => 0],
@@ -6409,6 +6426,7 @@ class ai_openrouter extends aihelper
                             : [];
                     $models[] = [
                         'name' => $model_id,
+                        'owned_by' => (string) ($models__value->owned_by ?? ''),
                         'context_length' => (int) ($models__value->context_length ?? 128000),
                         'costs' => ['input' => $input_cost, 'input_cached' => $input_cost, 'output' => $output_cost],
                         'supports_temperature' => in_array('temperature', $supported_params, true),
@@ -7638,6 +7656,10 @@ class ai_cliproxyapi extends ai_openrouter
     {
         $models = parent::fetchModelsFromProvider();
         foreach ($models as $model_key => $model) {
+            if (($model['owned_by'] ?? null) === 'antigravity' && !str_starts_with((string) $model['name'], 'gemini')) {
+                unset($models[$model_key]);
+                continue;
+            }
             $models[$model_key]['supports_tools'] = true;
             // anthropic models reject `temperature`
             $models[$model_key]['supports_temperature'] = !str_starts_with((string) $model['name'], 'claude');
