@@ -1060,6 +1060,258 @@ abstract class aihelper
         return $limits;
     }
 
+    public static function getCliApiRequests(
+        ?int $limit = null,
+        ?string $date_from = null,
+        ?string $date_until = null,
+        bool $include_body = false
+    ): array {
+        $log_files = [];
+        foreach (['/root/.cli-proxy-api/logs', '/host/data/cliproxyapi/logs'] as $dir) {
+            $log_files = array_merge($log_files, glob($dir . '/*.log') ?: []);
+        }
+        $log_files = array_values(array_unique($log_files));
+        usort($log_files, fn($a, $b) => (filemtime($b) ?: 0) <=> (filemtime($a) ?: 0));
+        $date_from_time = $date_from !== null ? strtotime($date_from) : false;
+        $date_until_time = $date_until !== null ? strtotime($date_until) : false;
+
+        $parse_pairs = function (array $lines): array {
+            $pairs = [];
+            foreach ($lines as $line) {
+                if (preg_match('/^([A-Za-z0-9\-_ ]+?):\s?(.*)$/', $line, $matches)) {
+                    $pairs[$matches[1]] = $matches[2];
+                }
+            }
+            return $pairs;
+        };
+        $parse_block = function (array $lines) use ($parse_pairs): array {
+            $meta_lines = [];
+            $header_lines = [];
+            $body_lines = [];
+            $state = 'meta';
+            $has_markers = false;
+            foreach ($lines as $line) {
+                if (trim($line) === 'Headers:') {
+                    $state = 'headers';
+                    $has_markers = true;
+                    continue;
+                }
+                if (trim($line) === 'Body:') {
+                    $state = 'body';
+                    $has_markers = true;
+                    continue;
+                }
+                if ($state === 'meta') {
+                    $meta_lines[] = $line;
+                }
+                if ($state === 'headers') {
+                    $header_lines[] = $line;
+                }
+                if ($state === 'body') {
+                    $body_lines[] = $line;
+                }
+            }
+            if (!$has_markers) {
+                // final RESPONSE section: status/header pairs until first blank line, body afterwards
+                $header_lines = [];
+                $body_lines = [];
+                $in_body = false;
+                foreach ($meta_lines as $line) {
+                    if (!$in_body && trim($line) === '' && !empty($header_lines)) {
+                        $in_body = true;
+                        continue;
+                    }
+                    if ($in_body) {
+                        $body_lines[] = $line;
+                        continue;
+                    }
+                    if (trim($line) !== '') {
+                        $header_lines[] = $line;
+                    }
+                }
+                $meta_lines = $header_lines;
+            }
+            $meta = $parse_pairs($meta_lines);
+            $headers = $has_markers ? $parse_pairs($header_lines) : $meta;
+            unset($headers['Status'], $headers['Timestamp']);
+            return [
+                'time' => $meta['Timestamp'] ?? null,
+                'status' => is_numeric($meta['Status'] ?? null) ? (int) $meta['Status'] : null,
+                'meta' => $meta,
+                'headers' => $headers,
+                'body' => trim(implode("\n", $body_lines))
+            ];
+        };
+        $to_time = function (?string $value): ?float {
+            if (($value ?? '') === '') {
+                return null;
+            }
+            try {
+                return (float) (new \DateTimeImmutable($value))->format('U.u');
+            } catch (\Exception) {
+                return null;
+            }
+        };
+
+        $merge_usage = function (array $target, array $fragment) use (&$merge_usage): array {
+            foreach ($fragment as $usage_key => $usage_value) {
+                if (is_array($usage_value)) {
+                    $usage_value = $merge_usage(
+                        is_array($target[$usage_key] ?? null) ? $target[$usage_key] : [],
+                        $usage_value
+                    );
+                }
+                if (is_numeric($usage_value) && is_numeric($target[$usage_key] ?? null)) {
+                    $usage_value = max($target[$usage_key], $usage_value);
+                }
+                $target[$usage_key] = $usage_value;
+            }
+            return $target;
+        };
+
+        $requests = [];
+        foreach ($log_files as $log_file) {
+            if ($limit !== null && count($requests) >= $limit) {
+                break;
+            }
+            $file_time = filemtime($log_file) ?: 0;
+            if ($date_until_time !== false && $file_time > $date_until_time) {
+                continue;
+            }
+            if ($date_from_time !== false && $file_time < $date_from_time) {
+                break;
+            }
+
+            $sections = [];
+            $current = null;
+            foreach (explode("\n", str_replace("\r\n", "\n", (string) file_get_contents($log_file))) as $line) {
+                if (preg_match('/^=== (.+?) ===$/', trim($line), $matches)) {
+                    $current = $matches[1];
+                    $sections[$current] = [];
+                    continue;
+                }
+                if ($current !== null) {
+                    $sections[$current][] = $line;
+                }
+            }
+
+            $info = $parse_pairs($sections['REQUEST INFO'] ?? []);
+            $headers = $parse_pairs($sections['HEADERS'] ?? []);
+            $request_body_raw = trim(implode("\n", $sections['REQUEST BODY'] ?? []));
+            $request_body = json_decode($request_body_raw, true) ?? $request_body_raw;
+
+            $api_key = null;
+            if (preg_match('/^Bearer\s+(.+)$/i', $headers['Authorization'] ?? '', $matches)) {
+                $api_key = $matches[1];
+            }
+            $api_key = $api_key ?? ($headers['X-Api-Key'] ?? null);
+            $forwarded_for = array_map('trim', explode(',', $headers['X-Forwarded-For'] ?? ''));
+
+            $api_requests = [];
+            $api_responses = [];
+            $response = null;
+            $other = [];
+            foreach ($sections as $name => $lines) {
+                if (in_array($name, ['REQUEST INFO', 'HEADERS', 'REQUEST BODY'], true)) {
+                    continue;
+                }
+                if (preg_match('/^API REQUEST\s*\d*$/', $name)) {
+                    $block = $parse_block($lines);
+                    $auth = [];
+                    foreach (explode(', ', $block['meta']['Auth'] ?? '') as $auth_pair) {
+                        if (str_contains($auth_pair, '=')) {
+                            [$auth_key, $auth_value] = explode('=', $auth_pair, 2);
+                            $auth[$auth_key] = $auth_value;
+                        }
+                    }
+                    $api_requests[] = [
+                        'time' => $block['time'],
+                        'url' => $block['meta']['Upstream URL'] ?? null,
+                        'method' => $block['meta']['HTTP Method'] ?? null,
+                        'auth' => $auth,
+                        'headers' => $block['headers'],
+                        'body' => $block['body']
+                    ];
+                    continue;
+                }
+                if (preg_match('/^API RESPONSE\s*\d*$/', $name)) {
+                    $api_responses[] = $parse_block($lines);
+                    continue;
+                }
+                if ($name === 'RESPONSE') {
+                    $response = $parse_block($lines);
+                    continue;
+                }
+                $other[$name] = trim(implode("\n", $lines));
+            }
+
+            $usage = null;
+            $usage_bodies = array_merge(
+                array_map(fn($api_response) => $api_response['body'], $api_responses),
+                [$response['body'] ?? '']
+            );
+            foreach ($usage_bodies as $usage_body) {
+                if (!preg_match_all('/"usage"\s*:\s*(\{(?:[^{}]|(?1))*\})/', $usage_body, $matches)) {
+                    continue;
+                }
+                foreach ($matches[1] as $usage_json) {
+                    $fragment = json_decode($usage_json, true);
+                    if (is_array($fragment)) {
+                        $usage = $merge_usage($usage ?? [], $fragment);
+                    }
+                }
+            }
+
+            $duration_in_ms = null;
+            $started_at = $to_time($info['Timestamp'] ?? null);
+            $ended_at = $to_time(!empty($api_responses) ? end($api_responses)['time'] : null);
+            if ($started_at !== null && $ended_at !== null) {
+                $duration_in_ms = (int) round(($ended_at - $started_at) * 1000);
+            }
+
+            $result = [
+                'file' => $log_file,
+                'error' => str_starts_with(basename($log_file), 'error-'),
+                'time' => $info['Timestamp'] ?? null,
+                'url' => $info['URL'] ?? null,
+                'method' => $info['Method'] ?? null,
+                'info' => $info,
+                'headers' => $headers,
+                'ip' => $headers['Cf-Connecting-Ip'] ?? ($forwarded_for[0] ?? null) ?: null,
+                'host' => $headers['X-Forwarded-Host'] ?? ($headers['Host'] ?? null),
+                'user_agent' => $headers['User-Agent'] ?? null,
+                'api_key' => $api_key,
+                'model' => is_array($request_body) ? $request_body['model'] ?? null : null,
+                'stream' => is_array($request_body) ? $request_body['stream'] ?? null : null,
+                'request_body' => $request_body,
+                'api_requests' => $api_requests,
+                'api_responses' => $api_responses,
+                'response' => [
+                    'status' => $response['status'] ?? null,
+                    'headers' => $response['headers'] ?? [],
+                    'body' => $response['body'] ?? ''
+                ],
+                'other' => $other,
+                'usage' => $usage,
+                'duration_in_ms' => $duration_in_ms
+            ];
+            if (!$include_body) {
+                unset($result['request_body'], $result['response']['body']);
+                foreach ($result['api_requests'] as $api_request_key => $api_request) {
+                    unset($result['api_requests'][$api_request_key]['body']);
+                }
+                foreach ($result['api_responses'] as $api_response_key => $api_response) {
+                    unset($result['api_responses'][$api_response_key]['body']);
+                }
+            }
+            foreach ($result['api_responses'] as $api_response_key => $api_response) {
+                unset($result['api_responses'][$api_response_key]['meta']);
+            }
+            $requests[] = $result;
+        }
+        return $requests;
+    }
+
     protected function fetchModelsDevApi(): ?object
     {
         static $api = null;
