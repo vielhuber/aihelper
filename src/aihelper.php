@@ -34,6 +34,7 @@ abstract class aihelper
     protected ?string $stream_buffer_data = null;
     protected ?string $stream_current_block_type = null;
     protected bool $stream_first_text_sent = false;
+    protected bool $stream_text_emitted_since_tool = false;
     protected bool $stream_running = false;
     protected bool $stream_in_think = false;
     protected string $stream_think_tag_buf = '';
@@ -681,19 +682,24 @@ abstract class aihelper
         if ($owned_by === 'antigravity') {
             $tool = 'antigravity';
         }
-        if ($owned_by === 'anthropic' || ($owned_by === null && (str_contains($model, 'claude') || $this->name === 'anthropic'))) {
+        if (
+            $owned_by === 'anthropic' ||
+            ($owned_by === null && (str_contains($model, 'claude') || $this->name === 'anthropic'))
+        ) {
             $tool = 'claude';
         }
-        if ($owned_by === 'openai' || ($owned_by === null && (str_contains($model, 'codex') || ($this->name === 'cliproxyapi' && str_contains($model, 'gpt'))))) {
+        if (
+            $owned_by === 'openai' ||
+            ($owned_by === null &&
+                (str_contains($model, 'codex') || ($this->name === 'cliproxyapi' && str_contains($model, 'gpt'))))
+        ) {
             $tool = 'codex';
         }
         if (
             $owned_by === null &&
-            (
-                str_contains($model, 'antigravity') ||
+            (str_contains($model, 'antigravity') ||
                 str_contains($model, 'agy') ||
-                ($this->name === 'cliproxyapi' && str_contains($model, 'gemini'))
-            )
+                ($this->name === 'cliproxyapi' && str_contains($model, 'gemini')))
         ) {
             $tool = 'antigravity';
         }
@@ -723,8 +729,8 @@ abstract class aihelper
                 if (!is_array($auth)) {
                     continue;
                 }
-                $access_token = $auth['tokens']['access_token'] ?? $auth['access_token'] ?? null;
-                $account_id = $auth['tokens']['account_id'] ?? $auth['account_id'] ?? null;
+                $access_token = $auth['tokens']['access_token'] ?? ($auth['access_token'] ?? null);
+                $account_id = $auth['tokens']['account_id'] ?? ($auth['account_id'] ?? null);
                 if (($access_token ?? '') !== '' && ($account_id ?? '') !== '') {
                     break;
                 }
@@ -739,14 +745,14 @@ abstract class aihelper
                     'Authorization' => 'Bearer ' . $access_token,
                     'ChatGPT-Account-Id' => $account_id,
                     'User-Agent' => 'codex-cli',
-                    'Accept' => 'application/json',
+                    'Accept' => 'application/json'
                 ],
                 timeout: 15
             );
             $payload = $response?->result ?? null;
             $windows = [
                 '5-hour' => $payload?->rate_limit?->primary_window ?? null,
-                'weekly' => $payload?->rate_limit?->secondary_window ?? null,
+                'weekly' => $payload?->rate_limit?->secondary_window ?? null
             ];
             $limits = [];
             foreach ($windows as $type => $window) {
@@ -756,7 +762,9 @@ abstract class aihelper
                 $limits[] = [
                     'type' => $type,
                     'percent used' => (int) round((float) $window->used_percent),
-                    'resets_at' => is_numeric($window->reset_at ?? null) ? date(\DateTimeInterface::ATOM, (int) $window->reset_at) : null,
+                    'resets_at' => is_numeric($window->reset_at ?? null)
+                        ? date(\DateTimeInterface::ATOM, (int) $window->reset_at)
+                        : null
                 ];
             }
             $cache[$tool] = ['time' => time(), 'limits' => !empty($limits) ? $limits : null];
@@ -784,9 +792,7 @@ abstract class aihelper
                 }
                 $access_token =
                     $auth['token']['access_token'] ??
-                    $auth['tokens']['access_token'] ??
-                    $auth['access_token'] ??
-                    null;
+                    ($auth['tokens']['access_token'] ?? ($auth['access_token'] ?? null));
                 $project = $auth['project_id'] ?? null;
                 if (($access_token ?? '') !== '') {
                     break;
@@ -799,7 +805,7 @@ abstract class aihelper
                 'Authorization' => 'Bearer ' . $access_token,
                 'Content-Type' => 'application/json',
                 'User-Agent' => 'antigravity/cli/1.0.14 (aidev_client; os_type=linux; arch=amd64)',
-                'Accept' => 'application/json',
+                'Accept' => 'application/json'
             ];
             if (($project ?? '') === '') {
                 $project_response = __::curl(
@@ -840,14 +846,16 @@ abstract class aihelper
                     $resets_at = null;
                     if (($bucket->resetTime ?? null) !== null) {
                         try {
-                            $resets_at = (new \DateTimeImmutable((string) $bucket->resetTime))->format(\DateTimeInterface::ATOM);
+                            $resets_at = (new \DateTimeImmutable((string) $bucket->resetTime))->format(
+                                \DateTimeInterface::ATOM
+                            );
                         } catch (\Exception) {
                         }
                     }
                     $limits[] = [
                         'type' => (string) ($bucket->window ?? ''),
                         'percent used' => (int) round(100 - max(0, min(1, (float) $bucket->remainingFraction)) * 100),
-                        'resets_at' => $resets_at,
+                        'resets_at' => $resets_at
                     ];
                 }
             }
@@ -873,7 +881,7 @@ abstract class aihelper
             if (!is_array($auth)) {
                 continue;
             }
-            $access_token = $auth['claudeAiOauth']['accessToken'] ?? $auth['access_token'] ?? null;
+            $access_token = $auth['claudeAiOauth']['accessToken'] ?? ($auth['access_token'] ?? null);
             if (($access_token ?? '') !== '') {
                 break;
             }
@@ -887,7 +895,7 @@ abstract class aihelper
             headers: [
                 'Authorization' => 'Bearer ' . $access_token,
                 'User-Agent' => 'claude-cli',
-                'Accept' => 'application/json',
+                'Accept' => 'application/json'
             ],
             timeout: 15
         );
@@ -923,7 +931,7 @@ abstract class aihelper
             $limits[] = [
                 'type' => $type,
                 'percent used' => (int) round((float) $limit->percent),
-                'resets_at' => $resets_at,
+                'resets_at' => $resets_at
             ];
             $usedTypes[$type] = true;
         }
@@ -1248,6 +1256,8 @@ abstract class aihelper
     public function ask(?string $prompt = null, mixed $files = null): array
     {
         $this->autoCompactSession();
+        $this->stubOversizedFileBlocks();
+        $this->stream_text_emitted_since_tool = false;
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
         $max_tries = $this->max_tries;
         while ($return['success'] === false && $max_tries > 0) {
@@ -1397,13 +1407,15 @@ abstract class aihelper
         $headers = [];
         $tmp_input = null;
         if ($this->name === 'google') {
-            $is_gemini_image_model = str_starts_with((string) $this->model, 'gemini-') && str_contains((string) $this->model, '-image');
+            $is_gemini_image_model =
+                str_starts_with((string) $this->model, 'gemini-') && str_contains((string) $this->model, '-image');
             if ($is_gemini_image_model) {
                 $aspect_payload = '1:1';
                 if (
                     $aspect_ratio !== null &&
                     $aspect_ratio !== '' &&
-                    preg_match('/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/', $aspect_ratio, $aspect_ratio__match) === 1 &&
+                    preg_match('/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/', $aspect_ratio, $aspect_ratio__match) ===
+                        1 &&
                     (float) $aspect_ratio__match[1] > 0 &&
                     (float) $aspect_ratio__match[2] > 0
                 ) {
@@ -1486,53 +1498,54 @@ abstract class aihelper
                 $headers = ['Content-Type: application/json'];
                 $body = json_encode($payload);
             } else {
-            // Google Imagen via the `:predict` endpoint. Different URL pattern,
-            // different auth (query-param `?key=`), different body shape, and
-            // no edit support — `imagen-capability` would be a separate model.
-            if ($is_edit) {
-                $this->log('⛔ image: Imagen :predict does not support edit/input_file');
-                return [
-                    'response' => 'Imagen generate does not support image-to-image edit',
-                    'success' => false,
-                    'costs' => 0.0
-                ];
-            }
-            $aspect_payload = '1:1';
-            if (
-                $aspect_ratio !== null &&
-                $aspect_ratio !== '' &&
-                preg_match('/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/', $aspect_ratio, $aspect_ratio__match) === 1 &&
-                (float) $aspect_ratio__match[1] > 0 &&
-                (float) $aspect_ratio__match[2] > 0
-            ) {
-                $aspect_ratio__target = (float) $aspect_ratio__match[1] / (float) $aspect_ratio__match[2];
-                $aspect_ratio__candidates = [
-                    '1:1' => 1.0,
-                    '16:9' => 16 / 9,
-                    '9:16' => 9 / 16,
-                    '4:3' => 4 / 3,
-                    '3:4' => 3 / 4
-                ];
-                $aspect_ratio__best_delta = PHP_FLOAT_MAX;
-                foreach ($aspect_ratio__candidates as $label => $val) {
-                    $d = abs(log($aspect_ratio__target / $val));
-                    if ($d < $aspect_ratio__best_delta) {
-                        $aspect_ratio__best_delta = $d;
-                        $aspect_payload = $label;
+                // Google Imagen via the `:predict` endpoint. Different URL pattern,
+                // different auth (query-param `?key=`), different body shape, and
+                // no edit support — `imagen-capability` would be a separate model.
+                if ($is_edit) {
+                    $this->log('⛔ image: Imagen :predict does not support edit/input_file');
+                    return [
+                        'response' => 'Imagen generate does not support image-to-image edit',
+                        'success' => false,
+                        'costs' => 0.0
+                    ];
+                }
+                $aspect_payload = '1:1';
+                if (
+                    $aspect_ratio !== null &&
+                    $aspect_ratio !== '' &&
+                    preg_match('/^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/', $aspect_ratio, $aspect_ratio__match) ===
+                        1 &&
+                    (float) $aspect_ratio__match[1] > 0 &&
+                    (float) $aspect_ratio__match[2] > 0
+                ) {
+                    $aspect_ratio__target = (float) $aspect_ratio__match[1] / (float) $aspect_ratio__match[2];
+                    $aspect_ratio__candidates = [
+                        '1:1' => 1.0,
+                        '16:9' => 16 / 9,
+                        '9:16' => 9 / 16,
+                        '4:3' => 4 / 3,
+                        '3:4' => 3 / 4
+                    ];
+                    $aspect_ratio__best_delta = PHP_FLOAT_MAX;
+                    foreach ($aspect_ratio__candidates as $label => $val) {
+                        $d = abs(log($aspect_ratio__target / $val));
+                        if ($d < $aspect_ratio__best_delta) {
+                            $aspect_ratio__best_delta = $d;
+                            $aspect_payload = $label;
+                        }
                     }
                 }
-            }
-            $payload = [
-                'instances' => [['prompt' => (string) $prompt]],
-                'parameters' => [
-                    'sampleCount' => $n,
-                    'aspectRatio' => $aspect_payload,
-                    'personGeneration' => 'ALLOW_ADULT'
-                ]
-            ];
-            $endpoint = $this->url . '/models/' . $this->model . ':predict?key=' . $this->api_key;
-            $headers = ['Content-Type: application/json'];
-            $body = json_encode($payload);
+                $payload = [
+                    'instances' => [['prompt' => (string) $prompt]],
+                    'parameters' => [
+                        'sampleCount' => $n,
+                        'aspectRatio' => $aspect_payload,
+                        'personGeneration' => 'ALLOW_ADULT'
+                    ]
+                ];
+                $endpoint = $this->url . '/models/' . $this->model . ':predict?key=' . $this->api_key;
+                $headers = ['Content-Type: application/json'];
+                $body = json_encode($payload);
             }
         } else {
             // OpenAI / xAI / DALL-E shape. Edits: OpenAI uses multipart
@@ -1725,11 +1738,7 @@ abstract class aihelper
                 $peek = json_decode((string) $raw, true);
                 $empty_image =
                     $this->name === 'google'
-                        ? (!is_array($peek) ||
-                            (
-                                empty($peek['predictions']) &&
-                                empty($peek['candidates'])
-                            ))
+                        ? !is_array($peek) || (empty($peek['predictions']) && empty($peek['candidates']))
                         : !is_array($peek) || empty($peek['data']);
             }
             // retry transient failures (network error, 429, 5xx, empty 200 response)
@@ -1759,11 +1768,12 @@ abstract class aihelper
         }
         $data = json_decode((string) $raw, true);
         if ($this->name === 'google') {
-            $is_gemini_image_model = str_starts_with((string) $this->model, 'gemini-') && str_contains((string) $this->model, '-image');
+            $is_gemini_image_model =
+                str_starts_with((string) $this->model, 'gemini-') && str_contains((string) $this->model, '-image');
             $items = [];
             if ($is_gemini_image_model) {
-                foreach (($data['candidates'] ?? []) as $candidate) {
-                    foreach (($candidate['content']['parts'] ?? []) as $part) {
+                foreach ($data['candidates'] ?? [] as $candidate) {
+                    foreach ($candidate['content']['parts'] ?? [] as $part) {
                         $inline_data = $part['inlineData'] ?? ($part['inline_data'] ?? null);
                         if (!empty($inline_data['data'])) {
                             $items[] = ['bytesBase64Encoded' => (string) $inline_data['data']];
@@ -1845,7 +1855,7 @@ abstract class aihelper
         $cost_per = 0.0;
         foreach ($this->models as $m) {
             if (($m['name'] ?? null) === $this->model) {
-                $cost_per = (float) ($m['costs']['image'] ?? $m['costs']['input'] ?? 0 ?: 0);
+                $cost_per = (float) ($m['costs']['image'] ?? ($m['costs']['input'] ?? 0) ?: 0);
                 break;
             }
         }
@@ -2736,6 +2746,8 @@ abstract class aihelper
             }
             // truncate older tool outputs in session to prevent context overflow
             $this->truncateOlderToolOutputs();
+            $this->stubOversizedFileBlocks();
+            $this->emitStreamBlockSeparator();
 
             // Retry the follow-up LLM call honoring max_tries so transient
             // empty responses (e.g. llama.cpp slot contention under parallel
@@ -2785,6 +2797,131 @@ abstract class aihelper
             $max_tool_rounds--;
         }
         return $return;
+    }
+
+    // read a key from a block that may be an array or a stdClass (rehydrated history)
+    private function blockGet(mixed $container, string $key): mixed
+    {
+        if (is_object($container)) {
+            return $container->$key ?? null;
+        }
+        return is_array($container) ? $container[$key] ?? null : null;
+    }
+
+    // detect an inline file/image block across the provider dialects. returns
+    // [payload, filename|null, stub-factory] or null when it is not one.
+    private function detectInlineFileBlock(mixed $block): ?array
+    {
+        $type = $this->blockGet($block, 'type');
+        // openai responses api
+        if ($type === 'input_file' || $type === 'input_image') {
+            $payload =
+                $type === 'input_file' ? $this->blockGet($block, 'file_data') : $this->blockGet($block, 'image_url');
+            return [
+                $payload,
+                $this->blockGet($block, 'filename'),
+                fn(string $text) => ['type' => 'input_text', 'text' => $text]
+            ];
+        }
+        // chat completions (openrouter/llamacpp/nvidia/cliproxyapi)
+        if ($type === 'file') {
+            $file = $this->blockGet($block, 'file');
+            return [
+                $this->blockGet($file, 'file_data'),
+                $this->blockGet($file, 'filename'),
+                fn(string $text) => ['type' => 'text', 'text' => $text]
+            ];
+        }
+        if ($type === 'image_url') {
+            $url = $this->blockGet($block, 'image_url');
+            return [
+                is_string($url) ? $url : $this->blockGet($url, 'url'),
+                null,
+                fn(string $text) => ['type' => 'text', 'text' => $text]
+            ];
+        }
+        // anthropic
+        if (($type === 'document' || $type === 'image') && $this->blockGet($block, 'source') !== null) {
+            return [
+                $this->blockGet($this->blockGet($block, 'source'), 'data'),
+                null,
+                fn(string $text) => ['type' => 'text', 'text' => $text]
+            ];
+        }
+        // google
+        $inline = $this->blockGet($block, 'inline_data') ?? $this->blockGet($block, 'inlineData');
+        if ($inline !== null) {
+            return [$this->blockGet($inline, 'data'), null, fn(string $text) => ['text' => $text]];
+        }
+        return null;
+    }
+
+    // large inlined files (base64 pdfs/images) only need to reach the model once;
+    // afterwards they burn context on every follow-up request (a 44mb pdf ≈ 270k
+    // tokens). replace any that exceed $max_chars with a short text stub.
+    protected function stubOversizedFileBlocks(int $max_chars = 1000000): void
+    {
+        if (empty($this->session_id) || empty(self::$sessions[$this->session_id])) {
+            return;
+        }
+        $session = &self::$sessions[$this->session_id];
+        foreach ($session as &$entry) {
+            if ($this->blockGet($entry, 'role') !== 'user') {
+                continue;
+            }
+            foreach (['content', 'parts'] as $key) {
+                $blocks = $this->blockGet($entry, $key);
+                if (!is_array($blocks)) {
+                    continue;
+                }
+                $changed = false;
+                foreach ($blocks as $index => $block) {
+                    $detected = $this->detectInlineFileBlock($block);
+                    if ($detected === null) {
+                        continue;
+                    }
+                    [$payload, $filename, $stub] = $detected;
+                    if (!is_string($payload) || strlen($payload) <= $max_chars) {
+                        continue;
+                    }
+                    $blocks[$index] = $stub($this->stubbedAttachmentLabel($filename));
+                    $changed = true;
+                }
+                if ($changed) {
+                    if (is_object($entry)) {
+                        $entry->$key = $blocks;
+                    } else {
+                        $entry[$key] = $blocks;
+                    }
+                }
+            }
+        }
+        unset($entry);
+    }
+
+    private function stubbedAttachmentLabel(mixed $filename): string
+    {
+        $named = is_string($filename) && $filename !== '' ? ' "' . $filename . '"' : '';
+        return '[attachment' .
+            $named .
+            ' removed from context to save tokens — its full content was already provided in an earlier request of this conversation]';
+    }
+
+    // in the live stream, separate a follow-up text turn from the previous one
+    // with a blank line (pre- vs post-tool narration): the per-turn parser strips
+    // leading newlines and never forwards the tool boundary, so text blocks would
+    // otherwise glue ("…ausgewertet.Läuft").
+    protected function emitStreamBlockSeparator(): void
+    {
+        if ($this->stream !== true || $this->stream_text_emitted_since_tool !== true) {
+            return;
+        }
+        echo 'data: ' . json_encode(['choices' => [['delta' => ['content' => "\n\n"]]]]) . "\n\n";
+        if (ob_get_level() > 0) {
+            ob_flush();
+        }
+        flush();
+        $this->stream_text_emitted_since_tool = false;
     }
 
     protected function truncateOlderToolOutputs(int $max_chars = 25000): void
@@ -4323,6 +4460,7 @@ abstract class aihelper
                                             continue;
                                         }
                                         $this->stream_first_text_sent = true;
+                                        $this->stream_text_emitted_since_tool = true;
 
                                         if (!isset($block->text)) {
                                             $block->text = '';
@@ -4662,6 +4800,7 @@ abstract class aihelper
                                         continue;
                                     }
                                     $this->stream_first_text_sent = true;
+                                    $this->stream_text_emitted_since_tool = true;
 
                                     $this->stream_response->result->output[0]->content[0]->text .= $normal_text;
 
@@ -4978,6 +5117,7 @@ abstract class aihelper
                         }
 
                         $this->stream_first_text_sent = true;
+                        $this->stream_text_emitted_since_tool = true;
                         $this->stream_response->result->choices[0]->message->content .= $normal_text;
                         $this->stream_running = true;
 
@@ -5074,6 +5214,7 @@ abstract class aihelper
                                         continue;
                                     }
                                     $this->stream_first_text_sent = true;
+                                    $this->stream_text_emitted_since_tool = true;
                                     // echo SSE
                                     $this->stream_running = true;
                                     echo 'data: ' .
