@@ -900,40 +900,58 @@ abstract class aihelper
             timeout: 15
         );
         $payload = $response?->result ?? null;
-        if (!is_object($payload) || !is_array($payload->limits ?? null)) {
+        if (!is_object($payload)) {
             return null;
         }
+        $format_reset = function ($value): ?string {
+            if (($value ?? null) === null) {
+                return null;
+            }
+            try {
+                return (new \DateTimeImmutable((string) $value))->format(\DateTimeInterface::ATOM);
+            } catch (\Exception) {
+                return null;
+            }
+        };
         $limits = [];
-        $usedTypes = [];
-        foreach ($payload->limits as $limit) {
-            if (!is_object($limit) || !is_numeric($limit->percent ?? null)) {
-                continue;
-            }
-            $group = (string) ($limit->group ?? '');
-            $kind = (string) ($limit->kind ?? '');
-            $type = in_array($group, ['daily', 'weekly', 'monthly'], true) ? $group : null;
-            if ($group === 'session') {
-                $type = '5-hour';
-            }
-            if ($type === null && str_starts_with($kind, 'weekly')) {
-                $type = 'weekly';
-            }
-            if ($type === null || isset($usedTypes[$type])) {
-                continue;
-            }
-            $resets_at = null;
-            if (($limit->resets_at ?? null) !== null) {
-                try {
-                    $resets_at = (new \DateTimeImmutable((string) $limit->resets_at))->format(\DateTimeInterface::ATOM);
-                } catch (\Exception) {
+        if (is_array($payload->limits ?? null)) {
+            // legacy shape: { limits: [{ group, kind, percent, resets_at }] }
+            $usedTypes = [];
+            foreach ($payload->limits as $limit) {
+                if (!is_object($limit) || !is_numeric($limit->percent ?? null)) {
+                    continue;
                 }
+                $group = (string) ($limit->group ?? '');
+                $kind = (string) ($limit->kind ?? '');
+                $type = in_array($group, ['daily', 'weekly', 'monthly'], true) ? $group : null;
+                if ($group === 'session') {
+                    $type = '5-hour';
+                }
+                if ($type === null && str_starts_with($kind, 'weekly')) {
+                    $type = 'weekly';
+                }
+                if ($type === null || isset($usedTypes[$type])) {
+                    continue;
+                }
+                $limits[] = [
+                    'type' => $type,
+                    'percent used' => (int) round((float) $limit->percent),
+                    'resets_at' => $format_reset($limit->resets_at ?? null)
+                ];
+                $usedTypes[$type] = true;
             }
-            $limits[] = [
-                'type' => $type,
-                'percent used' => (int) round((float) $limit->percent),
-                'resets_at' => $resets_at
-            ];
-            $usedTypes[$type] = true;
+        } else {
+            // current shape: { five_hour: { utilization, resets_at }, seven_day: { ... } }
+            foreach (['5-hour' => $payload->five_hour ?? null, 'weekly' => $payload->seven_day ?? null] as $type => $window) {
+                if (!is_object($window) || !is_numeric($window->utilization ?? null)) {
+                    continue;
+                }
+                $limits[] = [
+                    'type' => $type,
+                    'percent used' => (int) round((float) $window->utilization),
+                    'resets_at' => $format_reset($window->resets_at ?? null)
+                ];
+            }
         }
         $cache[$tool] = ['time' => time(), 'limits' => !empty($limits) ? $limits : null];
         return $cache[$tool]['limits'];
