@@ -889,20 +889,6 @@ abstract class aihelper
         if (($access_token ?? '') === '') {
             return null;
         }
-        $response = __::curl(
-            url: 'https://api.anthropic.com/api/oauth/usage',
-            method: 'GET',
-            headers: [
-                'Authorization' => 'Bearer ' . $access_token,
-                'User-Agent' => 'claude-cli',
-                'Accept' => 'application/json'
-            ],
-            timeout: 15
-        );
-        $payload = $response?->result ?? null;
-        if (!is_object($payload)) {
-            return null;
-        }
         $format_reset = function ($value): ?string {
             if (($value ?? null) === null) {
                 return null;
@@ -913,35 +899,27 @@ abstract class aihelper
                 return null;
             }
         };
+        // the anthropic usage endpoint is flaky and intermittently returns an empty body — retry a
+        // few times before giving up so a valid response is used when available
         $limits = [];
-        if (is_array($payload->limits ?? null)) {
-            // legacy shape: { limits: [{ group, kind, percent, resets_at }] }
-            $usedTypes = [];
-            foreach ($payload->limits as $limit) {
-                if (!is_object($limit) || !is_numeric($limit->percent ?? null)) {
-                    continue;
-                }
-                $group = (string) ($limit->group ?? '');
-                $kind = (string) ($limit->kind ?? '');
-                $type = in_array($group, ['daily', 'weekly', 'monthly'], true) ? $group : null;
-                if ($group === 'session') {
-                    $type = '5-hour';
-                }
-                if ($type === null && str_starts_with($kind, 'weekly')) {
-                    $type = 'weekly';
-                }
-                if ($type === null || isset($usedTypes[$type])) {
-                    continue;
-                }
-                $limits[] = [
-                    'type' => $type,
-                    'percent used' => (int) round((float) $limit->percent),
-                    'resets_at' => $format_reset($limit->resets_at ?? null)
-                ];
-                $usedTypes[$type] = true;
+        for ($attempt = 0; $attempt < 3 && empty($limits); $attempt++) {
+            $response = __::curl(
+                url: 'https://api.anthropic.com/api/oauth/usage',
+                method: 'GET',
+                headers: [
+                    'Authorization' => 'Bearer ' . $access_token,
+                    'User-Agent' => 'claude-cli',
+                    'Accept' => 'application/json'
+                ],
+                timeout: 15
+            );
+            $payload = $response?->result ?? null;
+            if (!is_object($payload)) {
+                continue;
             }
-        } else {
-            // current shape: { five_hour: { utilization, resets_at }, seven_day: { ... } }
+            // current shape: { five_hour: { utilization, resets_at }, seven_day: { ... } }.
+            // prefer this — recent responses ALSO include a "limits" key that no longer matches the
+            // legacy shape, so checking "limits" first would wrongly yield nothing.
             foreach (['5-hour' => $payload->five_hour ?? null, 'weekly' => $payload->seven_day ?? null] as $type => $window) {
                 if (!is_object($window) || !is_numeric($window->utilization ?? null)) {
                     continue;
@@ -951,6 +929,33 @@ abstract class aihelper
                     'percent used' => (int) round((float) $window->utilization),
                     'resets_at' => $format_reset($window->resets_at ?? null)
                 ];
+            }
+            // legacy fallback: { limits: [{ group, kind, percent, resets_at }] }
+            if (empty($limits) && is_array($payload->limits ?? null)) {
+                $usedTypes = [];
+                foreach ($payload->limits as $limit) {
+                    if (!is_object($limit) || !is_numeric($limit->percent ?? null)) {
+                        continue;
+                    }
+                    $group = (string) ($limit->group ?? '');
+                    $kind = (string) ($limit->kind ?? '');
+                    $type = in_array($group, ['daily', 'weekly', 'monthly'], true) ? $group : null;
+                    if ($group === 'session') {
+                        $type = '5-hour';
+                    }
+                    if ($type === null && str_starts_with($kind, 'weekly')) {
+                        $type = 'weekly';
+                    }
+                    if ($type === null || isset($usedTypes[$type])) {
+                        continue;
+                    }
+                    $limits[] = [
+                        'type' => $type,
+                        'percent used' => (int) round((float) $limit->percent),
+                        'resets_at' => $format_reset($limit->resets_at ?? null)
+                    ];
+                    $usedTypes[$type] = true;
+                }
             }
         }
         $cache[$tool] = ['time' => time(), 'limits' => !empty($limits) ? $limits : null];
@@ -1540,6 +1545,16 @@ abstract class aihelper
                     $model = null;
                     $last_user = null;
                     $cwd = null;
+                    // the cwd lives in session_meta (first line); the tail may not include it, so
+                    // read just that first line as a fallback (turn_context in the tail overrides it)
+                    $meta_handle = fopen($session_file, 'rb');
+                    if ($meta_handle !== false) {
+                        $meta = json_decode((string) fgets($meta_handle), true);
+                        fclose($meta_handle);
+                        if (is_array($meta) && ($meta['payload']['cwd'] ?? '') !== '') {
+                            $cwd = (string) $meta['payload']['cwd'];
+                        }
+                    }
                     foreach ($tail_lines($session_file) as $line) {
                         if ($line === '' || $line[0] !== '{') {
                             continue;
