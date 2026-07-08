@@ -1314,11 +1314,11 @@ abstract class aihelper
         // additionally read the local claude code and codex session logs (calls that hit the
         // providers directly, bypassing the proxy), normalized into the same shape with a source tag
         {
-            $make_local = function (string $time, ?string $model, array $usage, string $source, $user_prompt) use (
+            $make_local = function (string $file, string $time, ?string $model, array $usage, string $source, $user_prompt) use (
                 $include_body
             ): array {
                 $result = [
-                    'file' => '',
+                    'file' => $file,
                     'error' => false,
                     'time' => $time,
                     'url' => null,
@@ -1414,6 +1414,7 @@ abstract class aihelper
                         }
                         $entry_usage = $entry['message']['usage'];
                         $requests[] = $make_local(
+                            $session_file,
                             $time,
                             $entry['message']['model'] ?? null,
                             [
@@ -1435,8 +1436,12 @@ abstract class aihelper
                     if ((filemtime($session_file) ?: 0) < $min_mtime) {
                         continue;
                     }
+                    // codex emits many token_count events per turn; emit one row per completed turn
+                    // instead, using the last request's usage in that turn (its cumulative totals
+                    // re-send the whole context each request and would massively overcount)
                     $model = null;
                     $last_user = null;
+                    $last_usage = null;
                     foreach ($tail_lines($session_file) as $line) {
                         if ($line === '' || $line[0] !== '{') {
                             continue;
@@ -1453,25 +1458,29 @@ abstract class aihelper
                         if ($payload_type === 'user_message' && is_string($payload['message'] ?? null)) {
                             $last_user = $payload['message'];
                         }
-                        if ($payload_type !== 'token_count' || !is_array($payload['info']['last_token_usage'] ?? null)) {
+                        if ($payload_type === 'token_count' && is_array($payload['info']['last_token_usage'] ?? null)) {
+                            $last_usage = $payload['info']['last_token_usage'];
+                            continue;
+                        }
+                        if ($payload_type !== 'task_complete' || $last_usage === null) {
                             continue;
                         }
                         $time = (string) ($entry['timestamp'] ?? '');
-                        if (!$in_range($to_time($time))) {
-                            continue;
+                        if ($in_range($to_time($time))) {
+                            $requests[] = $make_local(
+                                $session_file,
+                                $time,
+                                $model,
+                                [
+                                    'input_tokens' => (int) ($last_usage['input_tokens'] ?? 0),
+                                    'output_tokens' => (int) ($last_usage['output_tokens'] ?? 0),
+                                    'cache_read_input_tokens' => (int) ($last_usage['cached_input_tokens'] ?? 0)
+                                ],
+                                'codex',
+                                $last_user
+                            );
                         }
-                        $last = $payload['info']['last_token_usage'];
-                        $requests[] = $make_local(
-                            $time,
-                            $model,
-                            [
-                                'input_tokens' => (int) ($last['input_tokens'] ?? 0),
-                                'output_tokens' => (int) ($last['output_tokens'] ?? 0),
-                                'cache_read_input_tokens' => (int) ($last['cached_input_tokens'] ?? 0)
-                            ],
-                            'codex',
-                            $last_user
-                        );
+                        $last_usage = null;
                     }
                 }
             }
