@@ -113,11 +113,12 @@ $ai->getCliUsageLimits() // get cli usage limits for claude code, codex and anti
 //     ['type' => 'weekly', 'percent used' => 10, 'resets_at' => '2026-07-06T03:03:00+02:00']
 // ]
 
-aihelper::getCliApiRequests( // get all requests from local clis
-    limit: 100, // null=all
-    date_from: '2026-07-01 00:00:00', // null=all
-    date_until: '2026-07-31 23:59:59', // null=all
-    include_body: false
+aihelper::getCliApiRequests( // get all requests from a local clis
+    limit: 100, // null: all
+    date_from: '2026-07-01 00:00:00', // null: all
+    date_until: '2026-07-31 23:59:59', // null: all
+    include_body: false,
+    group: false // collapse all calls of the same prompt
 );
 
 // manually populate history
