@@ -1064,7 +1064,8 @@ abstract class aihelper
         ?int $limit = null,
         ?string $date_from = null,
         ?string $date_until = null,
-        bool $include_body = false
+        bool $include_body = false,
+        bool $group = false
     ): array {
         $log_files = [];
         foreach (['/root/.cli-proxy-api/logs', '/host/data/cliproxyapi/logs'] as $dir) {
@@ -1165,6 +1166,55 @@ abstract class aihelper
                     $usage_value = max($target[$usage_key], $usage_value);
                 }
                 $target[$usage_key] = $usage_value;
+            }
+            return $target;
+        };
+
+        // stable grouping key = source + model + normalized prefix of the last human prompt in the body
+        $prompt_key = function ($body): string {
+            if (!is_array($body)) {
+                return '';
+            }
+            $text = '';
+            foreach (array_reverse($body['messages'] ?? []) as $message) {
+                if (($message['role'] ?? '') !== 'user') {
+                    continue;
+                }
+                $content = $message['content'] ?? '';
+                $part_text = '';
+                if (is_string($content)) {
+                    $part_text = $content;
+                } elseif (is_array($content)) {
+                    foreach ($content as $part) {
+                        if (is_string($part)) {
+                            $part_text .= ' ' . $part;
+                        }
+                        if (is_array($part) && ($part['type'] ?? '') === 'text') {
+                            $part_text .= ' ' . ($part['text'] ?? '');
+                        }
+                    }
+                }
+                $part_text = trim(preg_replace('/\s+/', ' ', $part_text) ?? $part_text);
+                if ($part_text !== '') {
+                    $text = $part_text;
+                    break;
+                }
+            }
+            return mb_strtolower(mb_substr($text, 0, 64));
+        };
+        // add numeric usage fields together (for group=true), unlike $merge_usage which takes the max
+        $sum_usage = function (array $target, array $fragment) use (&$sum_usage): array {
+            foreach ($fragment as $usage_key => $usage_value) {
+                if (is_array($usage_value)) {
+                    $target[$usage_key] = $sum_usage(
+                        is_array($target[$usage_key] ?? null) ? $target[$usage_key] : [],
+                        $usage_value
+                    );
+                } elseif (is_numeric($usage_value)) {
+                    $target[$usage_key] = (is_numeric($target[$usage_key] ?? null) ? $target[$usage_key] : 0) + $usage_value;
+                } else {
+                    $target[$usage_key] = $usage_value;
+                }
             }
             return $target;
         };
@@ -1294,7 +1344,9 @@ abstract class aihelper
                 'other' => $other,
                 'usage' => $usage,
                 'duration_in_ms' => $duration_in_ms,
-                'source' => 'proxy'
+                'source' => 'proxy',
+                'group_key' => 'proxy|' . (is_array($request_body) ? $request_body['model'] ?? '' : '') . '|' . $prompt_key($request_body),
+                'calls' => 1
             ];
             if (!$include_body) {
                 unset($result['request_body'], $result['response']['body']);
@@ -1315,8 +1367,10 @@ abstract class aihelper
         // providers directly, bypassing the proxy), normalized into the same shape with a source tag
         {
             $make_local = function (string $file, string $time, ?string $model, array $usage, string $source, $user_prompt) use (
-                $include_body
+                $include_body,
+                $prompt_key
             ): array {
+                $body = $user_prompt !== null ? ['messages' => [['role' => 'user', 'content' => $user_prompt]]] : null;
                 $result = [
                     'file' => $file,
                     'error' => false,
@@ -1331,14 +1385,16 @@ abstract class aihelper
                     'api_key' => null,
                     'model' => $model,
                     'stream' => null,
-                    'request_body' => $user_prompt !== null ? ['messages' => [['role' => 'user', 'content' => $user_prompt]]] : null,
+                    'request_body' => $body,
                     'api_requests' => [],
                     'api_responses' => [],
                     'response' => ['status' => null, 'headers' => [], 'body' => ''],
                     'other' => [],
                     'usage' => $usage,
                     'duration_in_ms' => null,
-                    'source' => $source
+                    'source' => $source,
+                    'group_key' => $source . '|' . ($model ?? '') . '|' . $prompt_key($body),
+                    'calls' => 1
                 ];
                 if (!$include_body) {
                     unset($result['request_body'], $result['response']['body']);
@@ -1448,12 +1504,11 @@ abstract class aihelper
                     if ((filemtime($session_file) ?: 0) < $min_mtime) {
                         continue;
                     }
-                    // codex emits many token_count events per turn; emit one row per completed turn
-                    // instead, using the last request's usage in that turn (its cumulative totals
-                    // re-send the whole context each request and would massively overcount)
+                    // one row per token_count event (= one API request). summing every request's
+                    // last_token_usage matches the session's cumulative total_token_usage exactly,
+                    // so no tokens are lost (a per-turn collapse would drop the intermediate requests).
                     $model = null;
                     $last_user = null;
-                    $last_usage = null;
                     foreach ($tail_lines($session_file) as $line) {
                         if ($line === '' || $line[0] !== '{') {
                             continue;
@@ -1470,31 +1525,50 @@ abstract class aihelper
                         if ($payload_type === 'user_message' && is_string($payload['message'] ?? null)) {
                             $last_user = $payload['message'];
                         }
-                        if ($payload_type === 'token_count' && is_array($payload['info']['last_token_usage'] ?? null)) {
-                            $last_usage = $payload['info']['last_token_usage'];
-                            continue;
-                        }
-                        if ($payload_type !== 'task_complete' || $last_usage === null) {
+                        if ($payload_type !== 'token_count' || !is_array($payload['info']['last_token_usage'] ?? null)) {
                             continue;
                         }
                         $time = (string) ($entry['timestamp'] ?? '');
-                        if ($in_range($to_time($time))) {
-                            $requests[] = $make_local(
-                                $session_file,
-                                $time,
-                                $model,
-                                [
-                                    'input_tokens' => (int) ($last_usage['input_tokens'] ?? 0),
-                                    'output_tokens' => (int) ($last_usage['output_tokens'] ?? 0),
-                                    'cache_read_input_tokens' => (int) ($last_usage['cached_input_tokens'] ?? 0)
-                                ],
-                                'codex',
-                                $last_user
-                            );
+                        if (!$in_range($to_time($time))) {
+                            continue;
                         }
-                        $last_usage = null;
+                        $last = $payload['info']['last_token_usage'];
+                        $requests[] = $make_local(
+                            $session_file,
+                            $time,
+                            $model,
+                            [
+                                'input_tokens' => (int) ($last['input_tokens'] ?? 0),
+                                'output_tokens' => (int) ($last['output_tokens'] ?? 0),
+                                'cache_read_input_tokens' => (int) ($last['cached_input_tokens'] ?? 0)
+                            ],
+                            'codex',
+                            $last_user
+                        );
                     }
                 }
+            }
+
+            // group=true: collapse all calls of the same prompt (source + model + prompt prefix) into
+            // one row, summing tokens and counting the calls — no tokens are lost in the process
+            if ($group) {
+                $grouped = [];
+                foreach ($requests as $row) {
+                    $key = $row['group_key'] ?? '';
+                    if (!isset($grouped[$key])) {
+                        $grouped[$key] = $row;
+                        continue;
+                    }
+                    $grouped[$key]['usage'] = $sum_usage(
+                        is_array($grouped[$key]['usage'] ?? null) ? $grouped[$key]['usage'] : [],
+                        is_array($row['usage'] ?? null) ? $row['usage'] : []
+                    );
+                    $grouped[$key]['calls'] = ($grouped[$key]['calls'] ?? 1) + ($row['calls'] ?? 1);
+                    if (($to_time($row['time'] ?? null) ?? 0) > ($to_time($grouped[$key]['time'] ?? null) ?? 0)) {
+                        $grouped[$key]['time'] = $row['time'];
+                    }
+                }
+                $requests = array_values($grouped);
             }
 
             // merge newest-first across all sources and re-apply the limit
