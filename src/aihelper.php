@@ -1293,7 +1293,8 @@ abstract class aihelper
                 ],
                 'other' => $other,
                 'usage' => $usage,
-                'duration_in_ms' => $duration_in_ms
+                'duration_in_ms' => $duration_in_ms,
+                'source' => 'proxy'
             ];
             if (!$include_body) {
                 unset($result['request_body'], $result['response']['body']);
@@ -1309,6 +1310,179 @@ abstract class aihelper
             }
             $requests[] = $result;
         }
+
+        // additionally read the local claude code and codex session logs (calls that hit the
+        // providers directly, bypassing the proxy), normalized into the same shape with a source tag
+        {
+            $make_local = function (string $time, ?string $model, array $usage, string $source, $user_prompt) use (
+                $include_body
+            ): array {
+                $result = [
+                    'file' => '',
+                    'error' => false,
+                    'time' => $time,
+                    'url' => null,
+                    'method' => null,
+                    'info' => [],
+                    'headers' => [],
+                    'ip' => null,
+                    'host' => null,
+                    'user_agent' => $source,
+                    'api_key' => null,
+                    'model' => $model,
+                    'stream' => null,
+                    'request_body' => $user_prompt !== null ? ['messages' => [['role' => 'user', 'content' => $user_prompt]]] : null,
+                    'api_requests' => [],
+                    'api_responses' => [],
+                    'response' => ['status' => null, 'headers' => [], 'body' => ''],
+                    'other' => [],
+                    'usage' => $usage,
+                    'duration_in_ms' => null,
+                    'source' => $source
+                ];
+                if (!$include_body) {
+                    unset($result['request_body'], $result['response']['body']);
+                }
+                return $result;
+            };
+
+            // session transcripts can be hundreds of MB; only the newest turns are relevant here,
+            // so read just the tail of each file (streamed) instead of loading the whole thing
+            $tail_lines = function (string $file, int $max_bytes = 1048576): array {
+                $size = filesize($file) ?: 0;
+                $handle = fopen($file, 'rb');
+                if ($handle === false) {
+                    return [];
+                }
+                if ($size > $max_bytes) {
+                    fseek($handle, $size - $max_bytes);
+                }
+                $data = (string) stream_get_contents($handle);
+                fclose($handle);
+                $lines = explode("\n", $data);
+                if ($size > $max_bytes) {
+                    // the first line is likely a partial record — drop it
+                    array_shift($lines);
+                }
+                return $lines;
+            };
+
+            // bound the work: without an explicit start date, only scan recently touched sessions
+            $min_mtime = $date_from_time !== false ? $date_from_time : time() - 45 * 86400;
+            $in_range = function (?float $time_value) use ($date_from_time, $date_until_time): bool {
+                if ($time_value === null) {
+                    return false;
+                }
+                if ($date_from_time !== false && $time_value < $date_from_time) {
+                    return false;
+                }
+                if ($date_until_time !== false && $time_value > $date_until_time) {
+                    return false;
+                }
+                return true;
+            };
+
+            $claude_dirs = ['/root/.claude/projects', '/host/data/claude/projects'];
+            foreach ($claude_dirs as $claude_dir) {
+                foreach (glob($claude_dir . '/*/*.jsonl') ?: [] as $session_file) {
+                    if ((filemtime($session_file) ?: 0) < $min_mtime) {
+                        continue;
+                    }
+                    $last_user = null;
+                    foreach ($tail_lines($session_file) as $line) {
+                        if ($line === '' || $line[0] !== '{') {
+                            continue;
+                        }
+                        $entry = json_decode($line, true);
+                        if (!is_array($entry)) {
+                            continue;
+                        }
+                        $type = $entry['type'] ?? '';
+                        if ($type === 'user') {
+                            $content = $entry['message']['content'] ?? null;
+                            if (is_string($content) || is_array($content)) {
+                                $last_user = $content;
+                            }
+                            continue;
+                        }
+                        if ($type !== 'assistant' || !is_array($entry['message']['usage'] ?? null)) {
+                            continue;
+                        }
+                        $time = (string) ($entry['timestamp'] ?? '');
+                        if (!$in_range($to_time($time))) {
+                            continue;
+                        }
+                        $entry_usage = $entry['message']['usage'];
+                        $requests[] = $make_local(
+                            $time,
+                            $entry['message']['model'] ?? null,
+                            [
+                                'input_tokens' => (int) ($entry_usage['input_tokens'] ?? 0),
+                                'output_tokens' => (int) ($entry_usage['output_tokens'] ?? 0),
+                                'cache_read_input_tokens' => (int) ($entry_usage['cache_read_input_tokens'] ?? 0),
+                                'cache_creation_input_tokens' => (int) ($entry_usage['cache_creation_input_tokens'] ?? 0)
+                            ],
+                            'claude-code',
+                            $last_user
+                        );
+                    }
+                }
+            }
+
+            $codex_dirs = ['/root/.codex/sessions', '/host/data/codex/sessions'];
+            foreach ($codex_dirs as $codex_dir) {
+                foreach (glob($codex_dir . '/*/*/*/rollout-*.jsonl') ?: [] as $session_file) {
+                    if ((filemtime($session_file) ?: 0) < $min_mtime) {
+                        continue;
+                    }
+                    $model = null;
+                    $last_user = null;
+                    foreach ($tail_lines($session_file) as $line) {
+                        if ($line === '' || $line[0] !== '{') {
+                            continue;
+                        }
+                        $entry = json_decode($line, true);
+                        if (!is_array($entry)) {
+                            continue;
+                        }
+                        $payload = $entry['payload'] ?? [];
+                        if (($entry['type'] ?? '') === 'turn_context' && isset($payload['model'])) {
+                            $model = (string) $payload['model'];
+                        }
+                        $payload_type = $payload['type'] ?? '';
+                        if ($payload_type === 'user_message' && is_string($payload['message'] ?? null)) {
+                            $last_user = $payload['message'];
+                        }
+                        if ($payload_type !== 'token_count' || !is_array($payload['info']['last_token_usage'] ?? null)) {
+                            continue;
+                        }
+                        $time = (string) ($entry['timestamp'] ?? '');
+                        if (!$in_range($to_time($time))) {
+                            continue;
+                        }
+                        $last = $payload['info']['last_token_usage'];
+                        $requests[] = $make_local(
+                            $time,
+                            $model,
+                            [
+                                'input_tokens' => (int) ($last['input_tokens'] ?? 0),
+                                'output_tokens' => (int) ($last['output_tokens'] ?? 0),
+                                'cache_read_input_tokens' => (int) ($last['cached_input_tokens'] ?? 0)
+                            ],
+                            'codex',
+                            $last_user
+                        );
+                    }
+                }
+            }
+
+            // merge newest-first across all sources and re-apply the limit
+            usort($requests, fn($a, $b) => ($to_time($b['time'] ?? null) ?? 0) <=> ($to_time($a['time'] ?? null) ?? 0));
+            if ($limit !== null) {
+                $requests = array_slice($requests, 0, $limit);
+            }
+        }
+
         return $requests;
     }
 
