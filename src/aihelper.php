@@ -1399,9 +1399,21 @@ abstract class aihelper
                         }
                         $type = $entry['type'] ?? '';
                         if ($type === 'user') {
+                            // role "user" also covers tool_result entries, which aren't real prompts;
+                            // only keep genuine human input so the turn stays attributed to its prompt
                             $content = $entry['message']['content'] ?? null;
-                            if (is_string($content) || is_array($content)) {
+                            if (is_string($content) && trim($content) !== '') {
                                 $last_user = $content;
+                            } elseif (is_array($content)) {
+                                foreach ($content as $part) {
+                                    if (
+                                        (is_string($part) && trim($part) !== '') ||
+                                        (is_array($part) && ($part['type'] ?? '') === 'text')
+                                    ) {
+                                        $last_user = $content;
+                                        break;
+                                    }
+                                }
                             }
                             continue;
                         }
