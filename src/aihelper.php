@@ -1363,6 +1363,7 @@ abstract class aihelper
                 'usage' => $usage,
                 'duration_in_ms' => $duration_in_ms,
                 'source' => 'proxy',
+                'project' => null,
                 'group_key' => 'proxy|' . (is_array($request_body) ? $request_body['model'] ?? '' : '') . '|' . $prompt_key($request_body),
                 'calls' => 1
             ];
@@ -1384,11 +1385,16 @@ abstract class aihelper
         // additionally read the local claude code and codex session logs (calls that hit the
         // providers directly, bypassing the proxy), normalized into the same shape with a source tag
         {
-            $make_local = function (string $file, string $time, ?string $model, array $usage, string $source, $user_prompt) use (
+            $make_local = function (string $file, string $time, ?string $model, array $usage, string $source, $user_prompt, ?string $cwd) use (
                 $include_body,
                 $prompt_key
             ): array {
                 $body = $user_prompt !== null ? ['messages' => [['role' => 'user', 'content' => $user_prompt]]] : null;
+                $project = ($cwd ?? '') !== '' ? basename($cwd) : null;
+                // group by the prompt when known; otherwise fall back to the session (file) so
+                // unattributable tool-loop/subagent calls stay traceable per conversation, not one blob
+                $prompt = $prompt_key($body);
+                $suffix = $prompt !== '' ? $prompt : 'session:' . basename($file);
                 $result = [
                     'file' => $file,
                     'error' => false,
@@ -1411,7 +1417,8 @@ abstract class aihelper
                     'usage' => $usage,
                     'duration_in_ms' => null,
                     'source' => $source,
-                    'group_key' => $source . '|' . ($model ?? '') . '|' . $prompt_key($body),
+                    'project' => $project,
+                    'group_key' => $source . '|' . ($model ?? '') . '|' . $suffix,
                     'calls' => 1
                 ];
                 if (!$include_body) {
@@ -1463,6 +1470,7 @@ abstract class aihelper
                         continue;
                     }
                     $last_user = null;
+                    $cwd = null;
                     foreach ($tail_lines($session_file) as $line) {
                         if ($line === '' || $line[0] !== '{') {
                             continue;
@@ -1470,6 +1478,9 @@ abstract class aihelper
                         $entry = json_decode($line, true);
                         if (!is_array($entry)) {
                             continue;
+                        }
+                        if (($entry['cwd'] ?? '') !== '') {
+                            $cwd = (string) $entry['cwd'];
                         }
                         $type = $entry['type'] ?? '';
                         if ($type === 'user') {
@@ -1510,7 +1521,8 @@ abstract class aihelper
                                 'cache_creation_input_tokens' => (int) ($entry_usage['cache_creation_input_tokens'] ?? 0)
                             ],
                             'claude-code',
-                            $last_user
+                            $last_user,
+                            $cwd
                         );
                     }
                 }
@@ -1527,6 +1539,7 @@ abstract class aihelper
                     // so no tokens are lost (a per-turn collapse would drop the intermediate requests).
                     $model = null;
                     $last_user = null;
+                    $cwd = null;
                     foreach ($tail_lines($session_file) as $line) {
                         if ($line === '' || $line[0] !== '{') {
                             continue;
@@ -1536,6 +1549,9 @@ abstract class aihelper
                             continue;
                         }
                         $payload = $entry['payload'] ?? [];
+                        if (($payload['cwd'] ?? '') !== '') {
+                            $cwd = (string) $payload['cwd'];
+                        }
                         if (($entry['type'] ?? '') === 'turn_context' && isset($payload['model'])) {
                             $model = (string) $payload['model'];
                         }
@@ -1561,7 +1577,8 @@ abstract class aihelper
                                 'cache_read_input_tokens' => (int) ($last['cached_input_tokens'] ?? 0)
                             ],
                             'codex',
-                            $last_user
+                            $last_user,
+                            $cwd
                         );
                     }
                 }
