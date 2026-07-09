@@ -121,6 +121,11 @@ aihelper::getCliApiRequests( // get all requests from a local clis
     group_by: false // true = collapse per project
 );
 
+aihelper::purgeCliApiRequestLogs( // delete request logs only
+    date_from: null, // null: all
+    date_until: null // null: all
+);
+
 // manually populate history
 $ai = aihelper::create(...);
 $ai->prependPromptToSession(prompt: '...', files: [...]);

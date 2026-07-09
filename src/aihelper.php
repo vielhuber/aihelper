@@ -1650,6 +1650,47 @@ abstract class aihelper
         return $requests;
     }
 
+    public static function purgeCliApiRequestLogs(?string $date_from = null, ?string $date_until = null): array
+    {
+        $date_from_time = $date_from !== null ? strtotime($date_from) : false;
+        $date_until_time = $date_until !== null ? strtotime($date_until) : false;
+        $deleted = [];
+        $bytes = 0;
+        foreach (['/root/.cli-proxy-api/logs', '/host/data/cliproxyapi/logs'] as $dir) {
+            foreach (glob($dir . '/*.log') ?: [] as $file) {
+                // the request timestamp sits in the file head, above the body
+                $timestamp = null;
+                $handle = @fopen($file, 'r');
+                if ($handle !== false) {
+                    while (($line = fgets($handle)) !== false) {
+                        if (str_starts_with($line, '=== REQUEST BODY ===')) {
+                            break;
+                        }
+                        if (str_starts_with($line, 'Timestamp:')) {
+                            $timestamp = strtotime(trim(substr($line, 10))) ?: null;
+                            break;
+                        }
+                    }
+                    fclose($handle);
+                }
+                $timestamp ??= filemtime($file) ?: 0;
+                if ($date_from_time !== false && $timestamp < $date_from_time) {
+                    continue;
+                }
+                if ($date_until_time !== false && $timestamp > $date_until_time) {
+                    continue;
+                }
+                $size = filesize($file) ?: 0;
+                if (!@unlink($file)) {
+                    continue;
+                }
+                $deleted[] = $file;
+                $bytes += $size;
+            }
+        }
+        return ['count' => count($deleted), 'bytes' => $bytes, 'files' => $deleted];
+    }
+
     protected function fetchModelsDevApi(): ?object
     {
         static $api = null;
