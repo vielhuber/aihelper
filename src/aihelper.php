@@ -1088,7 +1088,8 @@ abstract class aihelper
         ?string $date_from = null,
         ?string $date_until = null,
         bool $include_body = false,
-        bool $group = false
+        bool $group = false,
+        string $group_by = 'prompt'
     ): array {
         $log_files = [];
         foreach (['/root/.cli-proxy-api/logs', '/host/data/cliproxyapi/logs'] as $dir) {
@@ -1599,12 +1600,24 @@ abstract class aihelper
                 }
             }
 
-            // group=true: collapse all calls of the same prompt (source + model + prompt prefix) into
-            // one row, summing tokens and counting the calls — no tokens are lost in the process
+            // group=true: collapse calls into one row, summing tokens and counting the calls (no tokens
+            // lost). group_by 'prompt' (default) groups by the prompt; 'project' groups by the working
+            // directory (cwd) the call ran in — for local calls that is always known, so there are no
+            // unattributed rows; proxy calls (no cwd) fall back to their host.
             if ($group) {
                 $grouped = [];
                 foreach ($requests as $row) {
-                    $key = $row['group_key'] ?? '';
+                    if ($group_by === 'project') {
+                        $location =
+                            ($row['project'] ?? '') !== ''
+                                ? $row['project']
+                                : (($row['host'] ?? '') !== ''
+                                    ? $row['host']
+                                    : (($row['file'] ?? '') !== '' ? 'session:' . basename((string) $row['file']) : 'unknown'));
+                        $key = ($row['source'] ?? 'proxy') . '|project:' . $location;
+                    } else {
+                        $key = $row['group_key'] ?? '';
+                    }
                     if (!isset($grouped[$key])) {
                         $grouped[$key] = $row;
                         continue;

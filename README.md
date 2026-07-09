@@ -118,7 +118,8 @@ aihelper::getCliApiRequests( // get all requests from a local clis
     date_from: '2026-07-01 00:00:00', // null: all
     date_until: '2026-07-31 23:59:59', // null: all
     include_body: false,
-    group: false // collapse all calls of the same prompt
+    group: false, // true = collapse calls into one row (summing tokens, counting calls)
+    group_by: 'prompt' // 'prompt' = group by the prompt; 'project' = group by the working directory (cwd) the call ran in (always known for local calls, so nothing stays unattributed)
 );
 
 // manually populate history
