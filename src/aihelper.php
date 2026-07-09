@@ -1624,15 +1624,33 @@ abstract class aihelper
                 $model = null;
                 $last_user = null;
                 $cwd = null;
-                // the cwd lives in session_meta (first line); the tail may not include it, so
-                // read just that first line as a fallback (turn_context in the tail overrides it)
+                // read the head for defaults: session_meta (line 1) carries the cwd, the first
+                // turn_context (a few lines in) carries the model. both can be absent from the 1MB
+                // tail, so seed them here; the tail overrides with more recent values when present.
                 $meta_handle = fopen($session_file, 'rb');
                 if ($meta_handle !== false) {
-                    $meta = json_decode((string) fgets($meta_handle), true);
-                    fclose($meta_handle);
-                    if (is_array($meta) && ($meta['payload']['cwd'] ?? '') !== '') {
-                        $cwd = (string) $meta['payload']['cwd'];
+                    for ($head_line = 0; $head_line < 200 && ($model === null || $cwd === null); $head_line++) {
+                        $raw = fgets($meta_handle);
+                        if ($raw === false) {
+                            break;
+                        }
+                        $head_entry = json_decode($raw, true);
+                        if (!is_array($head_entry)) {
+                            continue;
+                        }
+                        $head_payload = $head_entry['payload'] ?? [];
+                        if ($cwd === null && ($head_payload['cwd'] ?? '') !== '') {
+                            $cwd = (string) $head_payload['cwd'];
+                        }
+                        if (
+                            $model === null &&
+                            ($head_entry['type'] ?? '') === 'turn_context' &&
+                            ($head_payload['model'] ?? '') !== ''
+                        ) {
+                            $model = (string) $head_payload['model'];
+                        }
                     }
+                    fclose($meta_handle);
                 }
                 foreach ($tail_lines($session_file) as $line) {
                     if ($line === '' || $line[0] !== '{') {
@@ -1701,6 +1719,14 @@ abstract class aihelper
                 $grouped[$key]['calls'] = ($grouped[$key]['calls'] ?? 1) + ($row['calls'] ?? 1);
                 if (($to_time($row['time'] ?? null) ?? 0) > ($to_time($grouped[$key]['time'] ?? null) ?? 0)) {
                     $grouped[$key]['time'] = $row['time'];
+                }
+                // the kept (first) row can be a tail-truncated call with no model/prompt — fill those
+                // from a later row in the group so the collapsed row still shows a real model and prompt
+                if (($grouped[$key]['model'] ?? '') === '' && ($row['model'] ?? '') !== '') {
+                    $grouped[$key]['model'] = $row['model'];
+                }
+                if (empty($grouped[$key]['request_body']) && !empty($row['request_body'])) {
+                    $grouped[$key]['request_body'] = $row['request_body'];
                 }
             }
             $requests = array_values($grouped);
