@@ -1228,6 +1228,49 @@ abstract class aihelper
             }
             return mb_strtolower(mb_substr($text, 0, 64));
         };
+        // derive the project from the working directory: walk up to the nearest ancestor that carries
+        // a vcs/package marker (that is the real project root, so /var/www/foo/src → "foo"). for cwds
+        // that no longer exist on disk or have no marker, fall back to the first segment beneath a
+        // known web root, then to the directory name. cached per cwd (the filesystem walk stats disk).
+        $project_root_cache = [];
+        $project_from_cwd = function (?string $cwd) use (&$project_root_cache): ?string {
+            if (($cwd ?? '') === '') {
+                return null;
+            }
+            $cwd = rtrim(str_replace('\\', '/', $cwd), '/');
+            if (array_key_exists($cwd, $project_root_cache)) {
+                return $project_root_cache[$cwd];
+            }
+            // .git marks the real repo root; composer.json/package.json also live in subdirs (themes,
+            // frontend build dirs) so they are only a fallback when no .git exists anywhere up the tree
+            $git = null;
+            $package = null;
+            $dir = $cwd;
+            for ($depth = 0; $depth < 12 && $dir !== '' && $dir !== '/' && $dir !== '.'; $depth++) {
+                if (file_exists($dir . '/.git')) {
+                    $git = $dir;
+                    break;
+                }
+                if ($package === null && (file_exists($dir . '/composer.json') || file_exists($dir . '/package.json'))) {
+                    $package = $dir;
+                }
+                $dir = dirname($dir);
+            }
+            $result = ($git ?? $package) !== null ? basename($git ?? $package) : null;
+            if ($result === null) {
+                foreach (['/var/www/html', '/var/www', '/srv/www', '/usr/share/nginx/html'] as $base) {
+                    if (!str_starts_with($cwd . '/', $base . '/')) {
+                        continue;
+                    }
+                    $rest = ltrim(substr($cwd, strlen($base)), '/');
+                    $result = $rest !== '' ? explode('/', $rest)[0] : basename($cwd);
+                    break;
+                }
+            }
+            $result ??= basename($cwd);
+            $project_root_cache[$cwd] = $result;
+            return $result;
+        };
         // add numeric usage fields together (for group_by=true), unlike $merge_usage which takes the max
         $sum_usage = function (array $target, array $fragment) use (&$sum_usage): array {
             foreach ($fragment as $usage_key => $usage_value) {
@@ -1407,9 +1450,9 @@ abstract class aihelper
             string $source,
             $user_prompt,
             ?string $cwd
-        ) use ($include_body, $prompt_key): array {
+        ) use ($include_body, $prompt_key, $project_from_cwd): array {
             $body = $user_prompt !== null ? ['messages' => [['role' => 'user', 'content' => $user_prompt]]] : null;
-            $project = ($cwd ?? '') !== '' ? basename($cwd) : null;
+            $project = $project_from_cwd($cwd);
             // group by the prompt when known; otherwise fall back to the session (file) so
             // unattributable tool-loop/subagent calls stay traceable per conversation, not one blob
             $prompt = $prompt_key($body);
