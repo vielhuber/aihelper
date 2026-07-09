@@ -1589,6 +1589,11 @@ abstract class aihelper
                     if ($type !== 'assistant' || !is_array($entry['message']['usage'] ?? null)) {
                         continue;
                     }
+                    // claude code injects synthetic assistant messages (e.g. "you've hit your session
+                    // limit") with a "<synthetic>" model and zero tokens — not real api calls, skip them
+                    if (($entry['message']['model'] ?? '') === '<synthetic>') {
+                        continue;
+                    }
                     $time = (string) ($entry['timestamp'] ?? '');
                     if (!$in_range($to_time($time))) {
                         continue;
