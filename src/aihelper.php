@@ -920,7 +920,10 @@ abstract class aihelper
             // current shape: { five_hour: { utilization, resets_at }, seven_day: { ... } }.
             // prefer this — recent responses ALSO include a "limits" key that no longer matches the
             // legacy shape, so checking "limits" first would wrongly yield nothing.
-            foreach (['5-hour' => $payload->five_hour ?? null, 'weekly' => $payload->seven_day ?? null] as $type => $window) {
+            foreach (
+                ['5-hour' => $payload->five_hour ?? null, 'weekly' => $payload->seven_day ?? null]
+                as $type => $window
+            ) {
                 if (!is_object($window) || !is_numeric($window->utilization ?? null)) {
                     continue;
                 }
@@ -1088,8 +1091,7 @@ abstract class aihelper
         ?string $date_from = null,
         ?string $date_until = null,
         bool $include_body = false,
-        bool $group = false,
-        string $group_by = 'prompt'
+        bool $group_by = false
     ): array {
         $log_files = [];
         foreach (['/root/.cli-proxy-api/logs', '/host/data/cliproxyapi/logs'] as $dir) {
@@ -1226,7 +1228,7 @@ abstract class aihelper
             }
             return mb_strtolower(mb_substr($text, 0, 64));
         };
-        // add numeric usage fields together (for group=true), unlike $merge_usage which takes the max
+        // add numeric usage fields together (for group_by=true), unlike $merge_usage which takes the max
         $sum_usage = function (array $target, array $fragment) use (&$sum_usage): array {
             foreach ($fragment as $usage_key => $usage_value) {
                 if (is_array($usage_value)) {
@@ -1235,7 +1237,8 @@ abstract class aihelper
                         $usage_value
                     );
                 } elseif (is_numeric($usage_value)) {
-                    $target[$usage_key] = (is_numeric($target[$usage_key] ?? null) ? $target[$usage_key] : 0) + $usage_value;
+                    $target[$usage_key] =
+                        (is_numeric($target[$usage_key] ?? null) ? $target[$usage_key] : 0) + $usage_value;
                 } else {
                     $target[$usage_key] = $usage_value;
                 }
@@ -1320,10 +1323,9 @@ abstract class aihelper
             }
 
             $usage = null;
-            $usage_bodies = array_merge(
-                array_map(fn($api_response) => $api_response['body'], $api_responses),
-                [$response['body'] ?? '']
-            );
+            $usage_bodies = array_merge(array_map(fn($api_response) => $api_response['body'], $api_responses), [
+                $response['body'] ?? ''
+            ]);
             foreach ($usage_bodies as $usage_body) {
                 if (!preg_match_all('/"usage"\s*:\s*(\{(?:[^{}]|(?1))*\})/', $usage_body, $matches)) {
                     continue;
@@ -1369,8 +1371,15 @@ abstract class aihelper
                 'usage' => $usage,
                 'duration_in_ms' => $duration_in_ms,
                 'source' => 'proxy',
-                'project' => null,
-                'group_key' => 'proxy|' . (is_array($request_body) ? $request_body['model'] ?? '' : '') . '|' . $prompt_key($request_body),
+                'project' =>
+                    ($referer = trim((string) ($headers['Referer'] ?? ($headers['Referrer'] ?? '')))) !== ''
+                        ? basename($referer)
+                        : null,
+                'group_key' =>
+                    'proxy|' .
+                    (is_array($request_body) ? $request_body['model'] ?? '' : '') .
+                    '|' .
+                    $prompt_key($request_body),
                 'calls' => 1
             ];
             if (!$include_body) {
@@ -1390,255 +1399,252 @@ abstract class aihelper
 
         // additionally read the local claude code and codex session logs (calls that hit the
         // providers directly, bypassing the proxy), normalized into the same shape with a source tag
-        {
-            $make_local = function (string $file, string $time, ?string $model, array $usage, string $source, $user_prompt, ?string $cwd) use (
-                $include_body,
-                $prompt_key
-            ): array {
-                $body = $user_prompt !== null ? ['messages' => [['role' => 'user', 'content' => $user_prompt]]] : null;
-                $project = ($cwd ?? '') !== '' ? basename($cwd) : null;
-                // group by the prompt when known; otherwise fall back to the session (file) so
-                // unattributable tool-loop/subagent calls stay traceable per conversation, not one blob
-                $prompt = $prompt_key($body);
-                $suffix = $prompt !== '' ? $prompt : 'session:' . basename($file);
-                $result = [
-                    'file' => $file,
-                    'error' => false,
-                    'time' => $time,
-                    'url' => null,
-                    'method' => null,
-                    'info' => [],
-                    'headers' => [],
-                    'ip' => null,
-                    'host' => null,
-                    'user_agent' => $source,
-                    'api_key' => null,
-                    'model' => $model,
-                    'stream' => null,
-                    'request_body' => $body,
-                    'api_requests' => [],
-                    'api_responses' => [],
-                    'response' => ['status' => null, 'headers' => [], 'body' => ''],
-                    'other' => [],
-                    'usage' => $usage,
-                    'duration_in_ms' => null,
-                    'source' => $source,
-                    'project' => $project,
-                    'group_key' => $source . '|' . ($model ?? '') . '|' . $suffix,
-                    'calls' => 1
-                ];
-                if (!$include_body) {
-                    unset($result['request_body'], $result['response']['body']);
-                }
-                return $result;
-            };
+        $make_local = function (
+            string $file,
+            string $time,
+            ?string $model,
+            array $usage,
+            string $source,
+            $user_prompt,
+            ?string $cwd
+        ) use ($include_body, $prompt_key): array {
+            $body = $user_prompt !== null ? ['messages' => [['role' => 'user', 'content' => $user_prompt]]] : null;
+            $project = ($cwd ?? '') !== '' ? basename($cwd) : null;
+            // group by the prompt when known; otherwise fall back to the session (file) so
+            // unattributable tool-loop/subagent calls stay traceable per conversation, not one blob
+            $prompt = $prompt_key($body);
+            $suffix = $prompt !== '' ? $prompt : 'session:' . basename($file);
+            $result = [
+                'file' => $file,
+                'error' => false,
+                'time' => $time,
+                'url' => null,
+                'method' => null,
+                'info' => [],
+                'headers' => [],
+                'ip' => null,
+                'host' => null,
+                'user_agent' => $source,
+                'api_key' => null,
+                'model' => $model,
+                'stream' => null,
+                'request_body' => $body,
+                'api_requests' => [],
+                'api_responses' => [],
+                'response' => ['status' => null, 'headers' => [], 'body' => ''],
+                'other' => [],
+                'usage' => $usage,
+                'duration_in_ms' => null,
+                'source' => $source,
+                'project' => $project,
+                'group_key' => $source . '|' . ($model ?? '') . '|' . $suffix,
+                'calls' => 1
+            ];
+            if (!$include_body) {
+                unset($result['request_body'], $result['response']['body']);
+            }
+            return $result;
+        };
 
-            // session transcripts can be hundreds of MB; only the newest turns are relevant here,
-            // so read just the tail of each file (streamed) instead of loading the whole thing
-            $tail_lines = function (string $file, int $max_bytes = 1048576): array {
-                $size = filesize($file) ?: 0;
-                $handle = fopen($file, 'rb');
-                if ($handle === false) {
-                    return [];
-                }
-                if ($size > $max_bytes) {
-                    fseek($handle, $size - $max_bytes);
-                }
-                $data = (string) stream_get_contents($handle);
-                fclose($handle);
-                $lines = explode("\n", $data);
-                if ($size > $max_bytes) {
-                    // the first line is likely a partial record — drop it
-                    array_shift($lines);
-                }
-                return $lines;
-            };
+        // session transcripts can be hundreds of MB; only the newest turns are relevant here,
+        // so read just the tail of each file (streamed) instead of loading the whole thing
+        $tail_lines = function (string $file, int $max_bytes = 1048576): array {
+            $size = filesize($file) ?: 0;
+            $handle = fopen($file, 'rb');
+            if ($handle === false) {
+                return [];
+            }
+            if ($size > $max_bytes) {
+                fseek($handle, $size - $max_bytes);
+            }
+            $data = (string) stream_get_contents($handle);
+            fclose($handle);
+            $lines = explode("\n", $data);
+            if ($size > $max_bytes) {
+                // the first line is likely a partial record — drop it
+                array_shift($lines);
+            }
+            return $lines;
+        };
 
-            // bound the work: without an explicit start date, only scan recently touched sessions
-            $min_mtime = $date_from_time !== false ? $date_from_time : time() - 45 * 86400;
-            $in_range = function (?float $time_value) use ($date_from_time, $date_until_time): bool {
-                if ($time_value === null) {
-                    return false;
-                }
-                if ($date_from_time !== false && $time_value < $date_from_time) {
-                    return false;
-                }
-                if ($date_until_time !== false && $time_value > $date_until_time) {
-                    return false;
-                }
-                return true;
-            };
+        // bound the work: without an explicit start date, only scan recently touched sessions
+        $min_mtime = $date_from_time !== false ? $date_from_time : time() - 45 * 86400;
+        $in_range = function (?float $time_value) use ($date_from_time, $date_until_time): bool {
+            if ($time_value === null) {
+                return false;
+            }
+            if ($date_from_time !== false && $time_value < $date_from_time) {
+                return false;
+            }
+            if ($date_until_time !== false && $time_value > $date_until_time) {
+                return false;
+            }
+            return true;
+        };
 
-            $claude_dirs = ['/root/.claude/projects', '/host/data/claude/projects'];
-            foreach ($claude_dirs as $claude_dir) {
-                foreach (glob($claude_dir . '/*/*.jsonl') ?: [] as $session_file) {
-                    if ((filemtime($session_file) ?: 0) < $min_mtime) {
+        $claude_dirs = ['/root/.claude/projects', '/host/data/claude/projects'];
+        foreach ($claude_dirs as $claude_dir) {
+            foreach (glob($claude_dir . '/*/*.jsonl') ?: [] as $session_file) {
+                if ((filemtime($session_file) ?: 0) < $min_mtime) {
+                    continue;
+                }
+                $last_user = null;
+                $cwd = null;
+                foreach ($tail_lines($session_file) as $line) {
+                    if ($line === '' || $line[0] !== '{') {
                         continue;
                     }
-                    $last_user = null;
-                    $cwd = null;
-                    foreach ($tail_lines($session_file) as $line) {
-                        if ($line === '' || $line[0] !== '{') {
-                            continue;
-                        }
-                        $entry = json_decode($line, true);
-                        if (!is_array($entry)) {
-                            continue;
-                        }
-                        if (($entry['cwd'] ?? '') !== '') {
-                            $cwd = (string) $entry['cwd'];
-                        }
-                        $type = $entry['type'] ?? '';
-                        if ($type === 'user') {
-                            // role "user" also covers tool_result entries, which aren't real prompts;
-                            // only keep genuine human input so the turn stays attributed to its prompt
-                            $content = $entry['message']['content'] ?? null;
-                            if (is_string($content) && trim($content) !== '') {
-                                $last_user = $content;
-                            } elseif (is_array($content)) {
-                                foreach ($content as $part) {
-                                    if (
-                                        (is_string($part) && trim($part) !== '') ||
-                                        (is_array($part) && ($part['type'] ?? '') === 'text')
-                                    ) {
-                                        $last_user = $content;
-                                        break;
-                                    }
+                    $entry = json_decode($line, true);
+                    if (!is_array($entry)) {
+                        continue;
+                    }
+                    if (($entry['cwd'] ?? '') !== '') {
+                        $cwd = (string) $entry['cwd'];
+                    }
+                    $type = $entry['type'] ?? '';
+                    if ($type === 'user') {
+                        // role "user" also covers tool_result entries, which aren't real prompts;
+                        // only keep genuine human input so the turn stays attributed to its prompt
+                        $content = $entry['message']['content'] ?? null;
+                        if (is_string($content) && trim($content) !== '') {
+                            $last_user = $content;
+                        } elseif (is_array($content)) {
+                            foreach ($content as $part) {
+                                if (
+                                    (is_string($part) && trim($part) !== '') ||
+                                    (is_array($part) && ($part['type'] ?? '') === 'text')
+                                ) {
+                                    $last_user = $content;
+                                    break;
                                 }
                             }
-                            continue;
                         }
-                        if ($type !== 'assistant' || !is_array($entry['message']['usage'] ?? null)) {
-                            continue;
-                        }
-                        $time = (string) ($entry['timestamp'] ?? '');
-                        if (!$in_range($to_time($time))) {
-                            continue;
-                        }
-                        $entry_usage = $entry['message']['usage'];
-                        $requests[] = $make_local(
-                            $session_file,
-                            $time,
-                            $entry['message']['model'] ?? null,
-                            [
-                                'input_tokens' => (int) ($entry_usage['input_tokens'] ?? 0),
-                                'output_tokens' => (int) ($entry_usage['output_tokens'] ?? 0),
-                                'cache_read_input_tokens' => (int) ($entry_usage['cache_read_input_tokens'] ?? 0),
-                                'cache_creation_input_tokens' => (int) ($entry_usage['cache_creation_input_tokens'] ?? 0)
-                            ],
-                            'claude-code',
-                            $last_user,
-                            $cwd
-                        );
-                    }
-                }
-            }
-
-            $codex_dirs = ['/root/.codex/sessions', '/host/data/codex/sessions'];
-            foreach ($codex_dirs as $codex_dir) {
-                foreach (glob($codex_dir . '/*/*/*/rollout-*.jsonl') ?: [] as $session_file) {
-                    if ((filemtime($session_file) ?: 0) < $min_mtime) {
                         continue;
                     }
-                    // one row per token_count event (= one API request). summing every request's
-                    // last_token_usage matches the session's cumulative total_token_usage exactly,
-                    // so no tokens are lost (a per-turn collapse would drop the intermediate requests).
-                    $model = null;
-                    $last_user = null;
-                    $cwd = null;
-                    // the cwd lives in session_meta (first line); the tail may not include it, so
-                    // read just that first line as a fallback (turn_context in the tail overrides it)
-                    $meta_handle = fopen($session_file, 'rb');
-                    if ($meta_handle !== false) {
-                        $meta = json_decode((string) fgets($meta_handle), true);
-                        fclose($meta_handle);
-                        if (is_array($meta) && ($meta['payload']['cwd'] ?? '') !== '') {
-                            $cwd = (string) $meta['payload']['cwd'];
-                        }
-                    }
-                    foreach ($tail_lines($session_file) as $line) {
-                        if ($line === '' || $line[0] !== '{') {
-                            continue;
-                        }
-                        $entry = json_decode($line, true);
-                        if (!is_array($entry)) {
-                            continue;
-                        }
-                        $payload = $entry['payload'] ?? [];
-                        if (($payload['cwd'] ?? '') !== '') {
-                            $cwd = (string) $payload['cwd'];
-                        }
-                        if (($entry['type'] ?? '') === 'turn_context' && isset($payload['model'])) {
-                            $model = (string) $payload['model'];
-                        }
-                        $payload_type = $payload['type'] ?? '';
-                        if ($payload_type === 'user_message' && is_string($payload['message'] ?? null)) {
-                            $last_user = $payload['message'];
-                        }
-                        if ($payload_type !== 'token_count' || !is_array($payload['info']['last_token_usage'] ?? null)) {
-                            continue;
-                        }
-                        $time = (string) ($entry['timestamp'] ?? '');
-                        if (!$in_range($to_time($time))) {
-                            continue;
-                        }
-                        $last = $payload['info']['last_token_usage'];
-                        $requests[] = $make_local(
-                            $session_file,
-                            $time,
-                            $model,
-                            [
-                                'input_tokens' => (int) ($last['input_tokens'] ?? 0),
-                                'output_tokens' => (int) ($last['output_tokens'] ?? 0),
-                                'cache_read_input_tokens' => (int) ($last['cached_input_tokens'] ?? 0)
-                            ],
-                            'codex',
-                            $last_user,
-                            $cwd
-                        );
-                    }
-                }
-            }
-
-            // group=true: collapse calls into one row, summing tokens and counting the calls (no tokens
-            // lost). group_by 'prompt' (default) groups by the prompt; 'project' groups by the working
-            // directory (cwd) the call ran in — for local calls that is always known, so there are no
-            // unattributed rows; proxy calls (no cwd) fall back to their host.
-            if ($group) {
-                $grouped = [];
-                foreach ($requests as $row) {
-                    if ($group_by === 'project') {
-                        $location =
-                            ($row['project'] ?? '') !== ''
-                                ? $row['project']
-                                : (($row['host'] ?? '') !== ''
-                                    ? $row['host']
-                                    : (($row['file'] ?? '') !== '' ? 'session:' . basename((string) $row['file']) : 'unknown'));
-                        $key = ($row['source'] ?? 'proxy') . '|project:' . $location;
-                    } else {
-                        $key = $row['group_key'] ?? '';
-                    }
-                    if (!isset($grouped[$key])) {
-                        $grouped[$key] = $row;
+                    if ($type !== 'assistant' || !is_array($entry['message']['usage'] ?? null)) {
                         continue;
                     }
-                    $grouped[$key]['usage'] = $sum_usage(
-                        is_array($grouped[$key]['usage'] ?? null) ? $grouped[$key]['usage'] : [],
-                        is_array($row['usage'] ?? null) ? $row['usage'] : []
+                    $time = (string) ($entry['timestamp'] ?? '');
+                    if (!$in_range($to_time($time))) {
+                        continue;
+                    }
+                    $entry_usage = $entry['message']['usage'];
+                    $requests[] = $make_local(
+                        $session_file,
+                        $time,
+                        $entry['message']['model'] ?? null,
+                        [
+                            'input_tokens' => (int) ($entry_usage['input_tokens'] ?? 0),
+                            'output_tokens' => (int) ($entry_usage['output_tokens'] ?? 0),
+                            'cache_read_input_tokens' => (int) ($entry_usage['cache_read_input_tokens'] ?? 0),
+                            'cache_creation_input_tokens' => (int) ($entry_usage['cache_creation_input_tokens'] ?? 0)
+                        ],
+                        'claude-code',
+                        $last_user,
+                        $cwd
                     );
-                    $grouped[$key]['calls'] = ($grouped[$key]['calls'] ?? 1) + ($row['calls'] ?? 1);
-                    if (($to_time($row['time'] ?? null) ?? 0) > ($to_time($grouped[$key]['time'] ?? null) ?? 0)) {
-                        $grouped[$key]['time'] = $row['time'];
+                }
+            }
+        }
+
+        $codex_dirs = ['/root/.codex/sessions', '/host/data/codex/sessions'];
+        foreach ($codex_dirs as $codex_dir) {
+            foreach (glob($codex_dir . '/*/*/*/rollout-*.jsonl') ?: [] as $session_file) {
+                if ((filemtime($session_file) ?: 0) < $min_mtime) {
+                    continue;
+                }
+                // one row per token_count event (= one API request). summing every request's
+                // last_token_usage matches the session's cumulative total_token_usage exactly,
+                // so no tokens are lost (a per-turn collapse would drop the intermediate requests).
+                $model = null;
+                $last_user = null;
+                $cwd = null;
+                // the cwd lives in session_meta (first line); the tail may not include it, so
+                // read just that first line as a fallback (turn_context in the tail overrides it)
+                $meta_handle = fopen($session_file, 'rb');
+                if ($meta_handle !== false) {
+                    $meta = json_decode((string) fgets($meta_handle), true);
+                    fclose($meta_handle);
+                    if (is_array($meta) && ($meta['payload']['cwd'] ?? '') !== '') {
+                        $cwd = (string) $meta['payload']['cwd'];
                     }
                 }
-                $requests = array_values($grouped);
+                foreach ($tail_lines($session_file) as $line) {
+                    if ($line === '' || $line[0] !== '{') {
+                        continue;
+                    }
+                    $entry = json_decode($line, true);
+                    if (!is_array($entry)) {
+                        continue;
+                    }
+                    $payload = $entry['payload'] ?? [];
+                    if (($payload['cwd'] ?? '') !== '') {
+                        $cwd = (string) $payload['cwd'];
+                    }
+                    if (($entry['type'] ?? '') === 'turn_context' && isset($payload['model'])) {
+                        $model = (string) $payload['model'];
+                    }
+                    $payload_type = $payload['type'] ?? '';
+                    if ($payload_type === 'user_message' && is_string($payload['message'] ?? null)) {
+                        $last_user = $payload['message'];
+                    }
+                    if ($payload_type !== 'token_count' || !is_array($payload['info']['last_token_usage'] ?? null)) {
+                        continue;
+                    }
+                    $time = (string) ($entry['timestamp'] ?? '');
+                    if (!$in_range($to_time($time))) {
+                        continue;
+                    }
+                    $last = $payload['info']['last_token_usage'];
+                    $requests[] = $make_local(
+                        $session_file,
+                        $time,
+                        $model,
+                        [
+                            'input_tokens' => (int) ($last['input_tokens'] ?? 0),
+                            'output_tokens' => (int) ($last['output_tokens'] ?? 0),
+                            'cache_read_input_tokens' => (int) ($last['cached_input_tokens'] ?? 0)
+                        ],
+                        'codex',
+                        $last_user,
+                        $cwd
+                    );
+                }
             }
+        }
 
-            // merge newest-first across all sources and re-apply the limit
-            usort($requests, fn($a, $b) => ($to_time($b['time'] ?? null) ?? 0) <=> ($to_time($a['time'] ?? null) ?? 0));
-            if ($limit !== null) {
-                $requests = array_slice($requests, 0, $limit);
+        // group_by=true: collapse calls into one row, summing tokens and counting the calls (no
+        // tokens lost). always group by project — the working directory (cwd) for local calls
+        // (claude-code/codex, always known), the Referer for proxy calls (cliproxyapi); proxy
+        // calls without a Referer have no project and fall back to the (short) prompt.
+        if ($group_by) {
+            $grouped = [];
+            foreach ($requests as $row) {
+                if (($row['project'] ?? '') !== '') {
+                    $key = ($row['source'] ?? 'proxy') . '|project:' . $row['project'];
+                } else {
+                    $key = $row['group_key'] ?? '';
+                }
+                if (!isset($grouped[$key])) {
+                    $grouped[$key] = $row;
+                    continue;
+                }
+                $grouped[$key]['usage'] = $sum_usage(
+                    is_array($grouped[$key]['usage'] ?? null) ? $grouped[$key]['usage'] : [],
+                    is_array($row['usage'] ?? null) ? $row['usage'] : []
+                );
+                $grouped[$key]['calls'] = ($grouped[$key]['calls'] ?? 1) + ($row['calls'] ?? 1);
+                if (($to_time($row['time'] ?? null) ?? 0) > ($to_time($grouped[$key]['time'] ?? null) ?? 0)) {
+                    $grouped[$key]['time'] = $row['time'];
+                }
             }
+            $requests = array_values($grouped);
+        }
+
+        // merge newest-first across all sources and re-apply the limit
+        usort($requests, fn($a, $b) => ($to_time($b['time'] ?? null) ?? 0) <=> ($to_time($a['time'] ?? null) ?? 0));
+        if ($limit !== null) {
+            $requests = array_slice($requests, 0, $limit);
         }
 
         return $requests;
@@ -7160,1269 +7166,4 @@ class ai_openrouter extends aihelper
                             in_array('reasoning', $supported_params, true) ||
                             in_array('reasoning_effort', $supported_params, true),
                         'efforts' =>
-                            in_array('reasoning', $supported_params, true) ||
-                            in_array('reasoning_effort', $supported_params, true)
-                                ? $this->getEffortValues()
-                                : [],
-                        'supported_parameters' => $supported_params,
-                        'open_weights' =>
-                            $openrouter_open_weights_by_model[$model_id] ??
-                            ($openrouter_open_weights_by_model[$canonical_slug] ??
-                                ($openrouter_open_weights_by_model[$model_id_without_suffix] ?? false)),
-                        'default' => $model_id === 'anthropic/claude-haiku-4.5',
-                        'test' => $model_id === 'anthropic/claude-haiku-4.5'
-                    ];
-                }
-            }
-        }
-        if (!empty($models)) {
-            // sort by name
-            usort($models, function ($a, $b) {
-                return $a['name'] <=> $b['name'];
-            });
-        }
-        return $models;
-    }
-
-    public function ping(): bool
-    {
-        try {
-            $response = __::curl(
-                url: $this->url . '/auth/key',
-                method: 'GET',
-                headers: ['Authorization' => 'Bearer ' . $this->api_key],
-                timeout: 30
-            );
-            return ($response->status ?? 0) >= 200 && ($response->status ?? 0) < 300;
-        } catch (\Exception) {
-            return false;
-        }
-    }
-
-    protected function bringPromptInFormat(string $prompt, mixed $files = null): array
-    {
-        if (!__::x($files ?? null)) {
-            return ['role' => 'user', 'content' => $prompt];
-        }
-        $content = [['type' => 'text', 'text' => $prompt]];
-        if (!is_array($files)) {
-            $files = [$files];
-        }
-        foreach ($files as $files__value) {
-            if (!file_exists($files__value)) {
-                continue;
-            }
-            $mime = mime_content_type($files__value);
-            $b64 = base64_encode(file_get_contents($files__value));
-            if (stripos($mime, 'pdf') !== false || $mime === 'application/pdf') {
-                $content[] = [
-                    'type' => 'file',
-                    'file' => [
-                        'filename' => basename($files__value),
-                        'file_data' => 'data:' . $mime . ';base64,' . $b64
-                    ]
-                ];
-            } elseif (strpos($mime, 'image/') === 0) {
-                $content[] = [
-                    'type' => 'image_url',
-                    'image_url' => ['url' => 'data:' . $mime . ';base64,' . $b64]
-                ];
-            }
-        }
-        return ['role' => 'user', 'content' => $content];
-    }
-
-    protected function addResponseToSession(mixed $response): void
-    {
-        if (
-            !__::x($response ?? null) ||
-            !__::x($response?->result ?? null) ||
-            !__::x($response?->result?->choices ?? null) ||
-            !is_array($response->result->choices) ||
-            empty($response->result->choices)
-        ) {
-            return;
-        }
-        $message = $response->result->choices[0]->message ?? null;
-        if ($message === null) {
-            return;
-        }
-        $entry = ['role' => 'assistant', 'content' => $message->content ?? ''];
-        $tool_calls = isset($message->tool_calls) ? json_decode(json_encode($message->tool_calls), true) : null;
-        if (!empty($tool_calls) && is_array($tool_calls)) {
-            // drop malformed tool calls with an empty name
-            $tool_calls = array_values(
-                array_filter($tool_calls, fn($tc) => trim((string) ($tc['function']['name'] ?? '')) !== '')
-            );
-        }
-        if (!empty($tool_calls)) {
-            $entry['tool_calls'] = $tool_calls;
-        }
-        self::$sessions[$this->session_id][] = $entry;
-    }
-
-    protected function askThis(
-        ?string $prompt = null,
-        mixed $files = null,
-        bool $add_prompt_to_session = true,
-        ?string $prev_output_text = null,
-        float $prev_costs = 0.0,
-        int $length_continuation_count = 0
-    ): array {
-        $return = ['response' => null, 'success' => false, 'costs' => $prev_costs];
-
-        if (__::nx($this->model) || __::nx($this->session_id) || ($add_prompt_to_session && __::nx($prompt))) {
-            $return['response'] = 'data missing.';
-            return $return;
-        }
-
-        if ($add_prompt_to_session === true) {
-            $this->appendPromptToSession($prompt, $files);
-        }
-
-        $args = [
-            'model' => $this->model,
-            'messages' => self::$sessions[$this->session_id]
-        ];
-
-        $args = $this->applyTemperatureParameter($args);
-
-        if (!empty($this->mcp_servers) && $this->mcp_servers_call_type === 'local') {
-            $raw_tools = $this->buildLocalToolsArgs('parameters', false, [
-                'additionalProperties',
-                '$schema',
-                'definition',
-                'default'
-            ]);
-            $args['tools'] = [];
-            foreach ($raw_tools as $tool) {
-                $args['tools'][] = [
-                    'type' => 'function',
-                    'function' => $tool
-                ];
-            }
-        }
-
-        if ($this->stream === true) {
-            $args['stream'] = true;
-        }
-
-        if (method_exists($this, 'modifyArgs')) {
-            $args = $this->modifyArgs($args);
-        }
-
-        $this->log((int) round(strlen(json_encode($args)) / 3.5), 'ask with input token length');
-        $this->log($args, 'ask');
-        $response = $this->makeApiCall($args);
-        if ($this->stream === true) {
-            $response = $this->stream_response;
-            // extract tool calls from reasoning_content OR content (llama.cpp/OpenRouter models emit
-            // tool calls as XML in the reasoning field or content instead of tool_calls).
-            // supports both qwen3 format (<tool_call>...<function=name>...<parameter=key>)
-            // and minimax format (<minimax:tool_call>...<invoke name="name">...<parameter name="key">)
-            $content_text = $response->result->choices[0]->message->content ?? '';
-            $search_text = $this->stream_reasoning_buffer;
-            if (str_contains($content_text, '<tool_call>') || str_contains($content_text, '<minimax:tool_call>')) {
-                $search_text .= "\n" . $content_text;
-            }
-            if ($search_text !== '' && empty($response->result->choices[0]->message->tool_calls ?? [])) {
-                $tool_calls = [];
-                // match both standard and minimax tool_call blocks (closed and unclosed)
-                if (
-                    preg_match_all(
-                        '/<(?:minimax:)?tool_call>\s*(.*?)(?:<\/(?:minimax:)?tool_call>|\z)/s',
-                        $search_text,
-                        $matches
-                    )
-                ) {
-                    foreach ($matches[1] as $tc_xml) {
-                        $name = null;
-                        $arguments = '{}';
-                        // extract function name:
-                        // minimax: <invoke name="tool-name">
-                        // qwen3:   <function=name>
-                        // json:    "name": "..."
-                        if (preg_match('/<invoke\s+name="([^"]+)"/', $tc_xml, $nm)) {
-                            $name = $nm[1];
-                        } elseif (preg_match('/<function=(\S+?)>/', $tc_xml, $nm)) {
-                            $name = $nm[1];
-                        } elseif (preg_match('/"name"\s*:\s*"([^"]+)"/', $tc_xml, $nm)) {
-                            $name = $nm[1];
-                        }
-                        // extract arguments:
-                        // minimax: <parameter name="key">value</parameter>
-                        // qwen3:   <parameter=key>value</parameter>
-                        // json:    {...}
-                        if (
-                            preg_match_all(
-                                '/<parameter\s+name="(\S+?)">\s*([\s\S]*?)(?:\s*<\/parameter>|\s*<\/invoke|\s*<\/(?:minimax:)?tool_call|\z)/s',
-                                $tc_xml,
-                                $pm,
-                                PREG_SET_ORDER
-                            )
-                        ) {
-                            $args_map = [];
-                            foreach ($pm as $p) {
-                                $val = trim($p[2]);
-                                $decoded = json_decode($val, true);
-                                $args_map[$p[1]] = $decoded !== null ? $decoded : $val;
-                            }
-                            $arguments = json_encode($args_map, JSON_UNESCAPED_UNICODE);
-                        } elseif (
-                            preg_match_all(
-                                '/<parameter=(\S+?)>\s*([\s\S]*?)(?:\s*<\/parameter>|\s*<\/function|\s*<\/tool_call|\z)/s',
-                                $tc_xml,
-                                $pm,
-                                PREG_SET_ORDER
-                            )
-                        ) {
-                            $args_map = [];
-                            foreach ($pm as $p) {
-                                $val = trim($p[2]);
-                                $decoded = json_decode($val, true);
-                                $args_map[$p[1]] = $decoded !== null ? $decoded : $val;
-                            }
-                            $arguments = json_encode($args_map, JSON_UNESCAPED_UNICODE);
-                        } elseif (preg_match('/\{[\s\S]*\}/s', $tc_xml, $am)) {
-                            $arguments = $am[0];
-                        }
-                        if ($name !== null) {
-                            $tool_calls[] = (object) [
-                                'id' => 'call_' . substr(md5($name . $arguments), 0, 8),
-                                'type' => 'function',
-                                'function' => (object) [
-                                    'name' => $name,
-                                    'arguments' => $arguments
-                                ]
-                            ];
-                        }
-                    }
-                }
-                if (!empty($tool_calls)) {
-                    $response->result->choices[0]->message->tool_calls = $tool_calls;
-                    $response->result->choices[0]->finish_reason = 'tool_calls';
-                    // strip <tool_call> and <minimax:tool_call> blocks from content if they were there
-                    if (isset($response->result->choices[0]->message->content)) {
-                        $response->result->choices[0]->message->content = trim(
-                            preg_replace(
-                                '/<(?:minimax:)?tool_call>[\s\S]*?(?:<\/(?:minimax:)?tool_call>|$)/s',
-                                '',
-                                $response->result->choices[0]->message->content
-                            )
-                        );
-                    }
-                    $this->log(
-                        count($tool_calls) . ' tool call(s) extracted from reasoning/content',
-                        'reasoning_tool_calls'
-                    );
-                } elseif (empty($response->result->choices[0]->message->content ?? '')) {
-                    // no tool calls and content empty: model put final answer into reasoning field
-                    // strip any <think>...</think> wrappers and use reasoning as content
-                    $final_text = $this->stream_reasoning_buffer;
-                    $final_text = preg_replace('/<think>[\s\S]*?<\/think>\s*/', '', $final_text);
-                    $final_text = trim($final_text);
-                    if ($final_text !== '') {
-                        $response->result->choices[0]->message->content = $final_text;
-                        $this->log(
-                            strlen($final_text) . ' chars promoted from reasoning to content',
-                            'reasoning_content_promoted'
-                        );
-                    }
-                }
-            }
-        }
-        $this->log($response?->result ?? null, 'response');
-        $this->addCosts($response, $return);
-
-        $output_text = $prev_output_text !== null ? $prev_output_text : '';
-        if (
-            __::x($response ?? null) &&
-            __::x($response?->result ?? null) &&
-            __::x($response?->result?->choices ?? null) &&
-            is_array($response->result->choices) &&
-            !empty($response->result->choices)
-        ) {
-            $message = $response->result->choices[0]->message ?? null;
-            if ($message !== null && __::x($message->content ?? null)) {
-                $content_text = $message->content;
-                if (is_string($content_text)) {
-                    if (__::x($output_text ?? null)) {
-                        $output_text .= PHP_EOL . PHP_EOL;
-                    }
-                    $output_text .= __::trim_whitespace($this->stripThinkingBlocks($content_text));
-                }
-            }
-        }
-
-        // handle finish_reason tool_calls for local tool loop
-        if (
-            $this->mcp_servers_call_type === 'local' &&
-            __::x($response ?? null) &&
-            __::x($response?->result ?? null) &&
-            __::x($response?->result?->choices ?? null) &&
-            is_array($response->result->choices) &&
-            !empty($response->result->choices)
-        ) {
-            $finish_reason = $response->result->choices[0]->finish_reason ?? null;
-            // accept when the provider sent the canonical "tool_calls" finish_reason,
-            // OR (fallback for cliproxyapi/proxy edge case where the terminal finish_reason
-            // chunk is missing before [DONE]) when finish_reason is null but the
-            // message already carries fully-parseable tool_call arguments. This
-            // avoids retry-storms on deterministic stream-close bugs while still
-            // failing closed on truly truncated streams (broken JSON → no accept).
-            $message_tool_calls = $response->result->choices[0]->message->tool_calls ?? null;
-            $tool_calls_complete = false;
-            if ($finish_reason === null && is_array($message_tool_calls) && !empty($message_tool_calls)) {
-                $tool_calls_complete = true;
-                foreach ($message_tool_calls as $tc) {
-                    $args = $tc->function->arguments ?? null;
-                    if (!is_string($args)) {
-                        $tool_calls_complete = false;
-                        break;
-                    }
-                    // empty string is a valid no-arg call; otherwise must parse as JSON
-                    if ($args !== '' && json_decode($args) === null && json_last_error() !== JSON_ERROR_NONE) {
-                        $tool_calls_complete = false;
-                        break;
-                    }
-                }
-                if ($tool_calls_complete) {
-                    $this->log('finish_reason=null but tool_calls have valid JSON — accepting', 'tool_calls_salvage');
-                }
-            }
-            if ($finish_reason === 'tool_calls' || $tool_calls_complete) {
-                $this->addResponseToSession($response);
-                $return['response'] = $output_text ?: '';
-                $return['success'] = true;
-                return $return;
-            }
-        }
-
-        if (__::nx($output_text ?? null)) {
-            $this->log($response, 'failed');
-            $error_msg = $this->extractErrorMessage($response);
-            $return['response'] = $error_msg ?? 'No response from provider.';
-            return $return;
-        }
-
-        // auto-continue when the model was cut off by the length limit
-        $continued = $this->continueIfNotFinished(
-            $response,
-            $output_text,
-            $return['costs'],
-            $length_continuation_count
-        );
-        if ($continued !== null) {
-            return $continued;
-        }
-
-        $return['response'] = $output_text;
-        $return['success'] = true;
-
-        $this->addResponseToSession($response);
-
-        $return['response'] = $this->parseJson($return['response']);
-
-        return $return;
-    }
-
-    protected function makeApiCall(?array $args = null): mixed
-    {
-        return __::curl(
-            url: $this->url . '/chat/completions',
-            data: $args,
-            method: 'POST',
-            headers: [
-                'Authorization' => 'Bearer ' . $this->api_key
-            ],
-            timeout: $this->timeout,
-            stream_callback: $this->getStreamCallback()
-        );
-    }
-
-    protected function modifyArgs(?array $args): ?array
-    {
-        $args = $this->modifyArgsLocal($args);
-        $configured_effort = $this->getEffortForRequest();
-        if ($configured_effort !== null) {
-            $args['reasoning'] = ['effort' => $configured_effort];
-        }
-        return $args;
-    }
-}
-
-/* compatible with the openai chat completions api */
-class ai_llamacpp extends ai_openrouter
-{
-    public ?string $provider = 'llama.cpp';
-
-    public ?string $title = 'llama.cpp';
-
-    public ?string $name = 'llamacpp';
-
-    public ?string $icon = <<<'SVG'
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><path d="M17.94 125.975c-1.328-4.78-.267-14.335 2.11-18.992c1.062-2.084 1.062-2.084-.519-5.002c-4.036-7.453-4.31-18.279-.692-27.318c1.37-3.424 1.37-3.424.003-5.959c-5.619-10.41-3.848-22.86 4.502-31.66c3.62-3.815 3.62-3.815 3.176-6.515c-1.438-8.734.373-20.617 3.943-25.87c6.444-9.484 16.241-3.814 18.853 10.91c.353 1.99.704 3.704.78 3.807s1.778-.468 3.78-1.269c7.248-2.9 14.003-2.8 20.681.304c1.9.884 3.495 1.542 3.542 1.462c.048-.08.368-1.863.711-3.964C81.25 1 91.191-4.921 97.7 4.659c3.573 5.258 5.387 17.18 3.937 25.87c-.451 2.7-.451 2.7 2.894 6.21c8.381 8.793 10.265 21.377 4.73 31.595c-1.49 2.753-1.49 2.753-.197 5.694c3.853 8.763 3.673 20.372-.432 27.953c-1.581 2.918-1.581 2.918-.518 5.002c2.376 4.657 3.437 14.211 2.11 18.992c-.563 2.025-.563 2.025-4.115 2.025s-3.552 0-3.08-1.755c1.276-4.736.571-12.311-1.56-16.796c-2.466-5.184-2.465-5.131-.1-8.964c4.587-7.43 4.684-17.018.26-25.616c-2.064-4.01-2.05-4.469.254-7.891c8.675-12.891.254-30.435-14.981-31.21c-4.72-.24-4.72-.24-5.883-2.569c-6.442-12.9-25.928-13.5-33.46-1.031c-1.945 3.221-1.945 3.221-6.482 3.517C25.41 36.71 16.086 57.975 26.865 68.1c1.712 1.609 1.648 2.924-.33 6.769c-4.425 8.598-4.328 18.186.258 25.616c2.366 3.833 2.366 3.78-.098 8.964c-2.133 4.485-2.837 12.06-1.561 16.796c.472 1.755.472 1.755-3.08 1.755s-3.552 0-4.115-2.025zm20.79-97.129c4.504-.46 4.821-.985 4.378-7.23c-.634-8.923-3.835-15.995-6.251-13.808c-3.296 2.982-5.556 22.898-2.465 21.711c.447-.171 2.4-.474 4.338-.673m56.11-5.926c-.04-10.714-3.021-18.058-5.95-14.654c-2.634 3.062-5.13 16.32-3.592 19.072c.521.932 7.096 2.471 9.024 2.112c.325-.06.53-2.652.517-6.53zM56.213 83.552c-19.558-5.52-13.155-29.651 7.868-29.651c18.95 0 27.119 20.158 11.417 28.175c-4.221 2.156-14.179 2.918-19.285 1.476M73.087 78.2c11.73-5.37 5.16-19.86-9.006-19.86c-16.164 0-20.925 17.235-5.813 21.047c3.772.951 11.5.332 14.82-1.187zm-10.896-6.23c0-1.564-.343-2.395-1.35-3.27c-2.518-2.19-1.387-3.196 3.51-3.123c3.993.058 5.126 1.477 2.596 3.25c-.922.647-1.246 1.397-1.246 2.888c0 1.877-.119 2.025-1.755 2.183c-1.707.164-1.755.112-1.755-1.928m-26.214-9.017c-1.516-1.516-1.687-3.43-.51-5.706c2.28-4.409 8.364-3.014 8.364 1.918c0 4.24-4.994 6.648-7.854 3.788M85.91 62.7c-2.063-2.063-2.168-4.901-.253-6.816c2.224-2.224 5.513-1.587 7.04 1.363c2.651 5.13-2.761 9.478-6.787 5.453"/></svg>
-    SVG;
-
-    protected ?string $url = 'http://localhost:8080/v1';
-
-    public ?bool $supports_mcp_remote = false;
-
-    public ?bool $supports_stream = true;
-
-    public array $models = [];
-
-    public function fetchModelsFromProvider(): array
-    {
-        $models = [];
-        $response = __::curl(
-            url: $this->url . '/models',
-            method: 'GET',
-            headers: [
-                'Authorization' => 'Bearer ' . $this->api_key
-            ],
-            timeout: $this->timeout
-        );
-        $this->log($response);
-        if (
-            __::x($response ?? null) &&
-            __::x($response?->result ?? null) &&
-            __::x($response?->result?->data ?? null) &&
-            is_array($response->result->data)
-        ) {
-            foreach ($response->result->data as $models__value) {
-                if (__::x($models__value?->id ?? null)) {
-                    // n_ctx_train is the model's training ctx; at runtime
-                    // llama.cpp divides the deployed n_ctx across n_parallel
-                    // slots, so per-request budget is n_ctx/n_slots. halve as
-                    // a conservative fallback when slot info is not exposed.
-                    $context_length = (int) (((int) ($models__value->meta->n_ctx_train ?? 32768)) / 2);
-                    $name = $models__value->id;
-                    // strip split-shard suffix: "Model-0001-of-0004.gguf" → "Model"
-                    $name = preg_replace('/-\d{1,10}-of-\d{1,10}(\.gguf)$/i', '', $name);
-                    // completely remove .gguf
-                    $name = preg_replace('/\.gguf$/i', '', $name);
-                    $models[] = [
-                        'name' => $name,
-                        'context_length' => $context_length,
-                        'supports_tools' => true,
-                        'supports_effort' => true,
-                        'efforts' => $this->getEffortValues()
-                    ];
-                }
-            }
-        }
-        if (!empty($models)) {
-            usort($models, function ($a, $b) {
-                return $a['name'] <=> $b['name'];
-            });
-            $models[0]['default'] = true;
-            $models[0]['test'] = true;
-        }
-        return $models;
-    }
-
-    public function ping(): bool
-    {
-        try {
-            $response = __::curl(
-                url: rtrim($this->url, '/') . '/models',
-                method: 'GET',
-                headers: ['Authorization' => 'Bearer ' . $this->api_key],
-                timeout: 30
-            );
-            return ($response->status ?? 0) >= 200 &&
-                ($response->status ?? 0) < 300 &&
-                __::x($response?->result?->data ?? null);
-        } catch (\Exception) {
-            return false;
-        }
-    }
-
-    protected function modifyArgs(?array $args): ?array
-    {
-        return $this->modifyArgsLocal($args);
-    }
-}
-
-/* compatible with the openai api */
-class ai_lmstudio extends ai_openai
-{
-    public ?string $provider = 'Element Labs';
-
-    public ?string $title = 'LM Studio';
-
-    public ?string $name = 'lmstudio';
-
-    public ?string $icon = <<<'SVG'
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 293"><path fill="#409eff" d="M255.947 209.282c-.073 12.126-6.371 14.83-6.371 14.83s-108.694 62.807-115.76 66.743c-7.003 3.005-11.683 0-11.683 0S8.401 224.894 4.25 221.995C.098 219.094 0 214.577 0 214.577S.115 83.965 0 77.917c-.114-6.05 7.434-10.595 7.434-10.595L121.071 1.641c6.996-3.692 13.807 0 13.807 0s100.386 58.351 111.511 64.623c10.904 5.184 9.558 15.89 9.558 15.89s.068 115.858 0 127.128m-45.37-131.09c-23.267-13.391-78.08-45.15-78.08-45.15s-5.347-2.89-10.84 0L32.44 84.443s-5.927 3.558-5.837 8.292c.09 4.733 0 106.952 0 106.952s.076 3.535 3.336 5.804c3.26 2.268 92.553 53.89 92.553 53.89s3.675 2.353 9.172 0c5.548-3.08 90.886-52.232 90.886-52.232s4.946-2.118 5.003-11.608c.016-2.736.022-13.36.023-26.706l-100.472 60.881v-23.29c0-9.567 7.406-15.88 7.406-15.88l88.869-53.551c3.353-3.502 4.045-9.112 4.188-11.234c-.003-9.728-.007-18.226-.01-23.61L127.104 163.02v-24.35c0-9.566 6.348-13.762 6.348-13.762z"/></svg>
-    SVG;
-
-    protected ?string $url = 'http://localhost:1234/v1';
-
-    public ?bool $supports_mcp_remote = true;
-
-    public ?bool $supports_stream = true;
-
-    public array $models = [];
-
-    public function fetchModelsFromProvider(): array
-    {
-        $models = [];
-        $response = __::curl(
-            url: rtrim(str_replace('/v1', '/api/v1', $this->url), '/') . '/models',
-            method: 'GET',
-            headers: [
-                'Authorization' => 'Bearer ' . $this->api_key
-            ],
-            timeout: $this->timeout
-        );
-        $this->log($response);
-        if (
-            __::x($response ?? null) &&
-            __::x($response?->result ?? null) &&
-            __::x($response?->result?->models ?? null) &&
-            is_array($response->result->models)
-        ) {
-            foreach ($response->result->models as $models__value) {
-                // only include llm models, skip embeddings and other types
-                if (!isset($models__value->type) || $models__value->type !== 'llm') {
-                    continue;
-                }
-                if (__::x($models__value?->key ?? null)) {
-                    $context_length = (int) ($models__value->max_context_length ?? 32768);
-                    $models[] = [
-                        'name' => $models__value->key,
-                        'context_length' => $context_length,
-                        'supports_tools' => true,
-                        'supports_effort' => true,
-                        'efforts' => $this->getEffortValues()
-                    ];
-                }
-            }
-        }
-        // fallback: OpenAI-compatible format (llama.cpp, etc.)
-        if (
-            empty($models) &&
-            __::x($response ?? null) &&
-            __::x($response?->result ?? null) &&
-            __::x($response?->result?->data ?? null) &&
-            is_array($response->result->data)
-        ) {
-            foreach ($response->result->data as $models__value) {
-                if (__::x($models__value?->id ?? null)) {
-                    // n_ctx_train is the model's training ctx; at runtime
-                    // llama.cpp divides the deployed n_ctx across n_parallel
-                    // slots, so per-request budget is n_ctx/n_slots. halve as
-                    // a conservative fallback when slot info is not exposed.
-                    $context_length = (int) (((int) ($models__value->meta->n_ctx_train ?? 32768)) / 2);
-                    $models[] = [
-                        'name' => $models__value->id,
-                        'context_length' => $context_length,
-                        'supports_tools' => true,
-                        'supports_effort' => true,
-                        'efforts' => $this->getEffortValues()
-                    ];
-                }
-            }
-        }
-        if (!empty($models)) {
-            // sort by name
-            usort($models, function ($a, $b) {
-                return $a['name'] <=> $b['name'];
-            });
-            $models[0]['default'] = true;
-            $models[0]['test'] = true;
-        }
-        return $models;
-    }
-
-    protected function loadModel(?string $model): void
-    {
-        if (empty($model)) {
-            return;
-        }
-        // check via API whether the model is already loaded
-        $response = __::curl(
-            url: rtrim(str_replace('/v1', '/api/v1', $this->url), '/') . '/models',
-            method: 'GET',
-            headers: [
-                'Authorization' => 'Bearer ' . $this->api_key
-            ],
-            timeout: $this->timeout
-        );
-        $this->log($response);
-        // default context length; overridden by max_context_length from API if available
-        $context_length = 32768;
-        if (
-            __::x($response ?? null) &&
-            __::x($response?->result ?? null) &&
-            __::x($response?->result?->models ?? null) &&
-            is_array($response->result->models)
-        ) {
-            foreach ($response->result->models as $models__value) {
-                if (isset($models__value->key) && $models__value->key === $model) {
-                    if (!empty($models__value->loaded_instances)) {
-                        // model is already loaded, nothing to do
-                        return;
-                    }
-                    // use max_context_length from API, capped at 65536 to limit memory usage
-                    if (!empty($models__value->max_context_length)) {
-                        $context_length = min((int) $models__value->max_context_length, 65536);
-                    }
-                }
-            }
-        }
-        $response = __::curl(
-            url: rtrim(str_replace('/v1', '/api/v1', $this->url), '/') . '/models/load',
-            data: [
-                'model' => $model,
-                'context_length' => $context_length
-            ],
-            method: 'POST',
-            headers: [
-                'Authorization' => 'Bearer ' . $this->api_key
-            ],
-            timeout: $this->timeout
-        );
-        $this->log($response);
-    }
-
-    protected function modifyArgs(?array $args): ?array
-    {
-        return $this->modifyArgsLocal($args);
-    }
-}
-
-/* compatible with the openai api */
-class ai_nvidia extends ai_openrouter
-{
-    public ?string $provider = 'NVIDIA';
-
-    public ?string $title = 'NVIDIA';
-
-    public ?string $name = 'nvidia';
-
-    public ?string $icon = <<<'SVG'
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#76b900" d="M8.948 8.798v-1.43a7 7 0 0 1 .424-.018c3.922-.124 6.493 3.374 6.493 3.374s-2.774 3.851-5.75 3.851a3.7 3.7 0 0 1-1.158-.185v-4.346c1.528.185 1.837.857 2.747 2.385l2.04-1.714s-1.492-1.952-4-1.952a6 6 0 0 0-.796.035m0-4.735v2.138l.424-.027c5.45-.185 9.01 4.47 9.01 4.47s-4.08 4.964-8.33 4.964a6.5 6.5 0 0 1-1.095-.097v1.325c.3.035.61.062.91.062c3.957 0 6.82-2.023 9.593-4.408c.459.371 2.34 1.263 2.73 1.652c-2.633 2.208-8.772 3.984-12.253 3.984c-.335 0-.653-.018-.971-.053v1.864H24V4.063zm0 10.326v1.131c-3.657-.654-4.673-4.46-4.673-4.46s1.758-1.944 4.673-2.262v1.237H8.94c-1.528-.186-2.73 1.245-2.73 1.245s.68 2.412 2.739 3.11M2.456 10.9s2.164-3.197 6.5-3.533V6.201C4.153 6.59 0 10.653 0 10.653s2.35 6.802 8.948 7.42v-1.237c-4.84-.6-6.492-5.936-6.492-5.936"/></svg>
-    SVG;
-
-    protected ?string $url = 'https://integrate.api.nvidia.com/v1';
-
-    public ?bool $supports_mcp_remote = false;
-
-    public ?bool $supports_stream = true;
-
-    public array $models = [];
-
-    public function fetchModelsFromProvider(): array
-    {
-        return $this->models;
-    }
-
-    public function ping(): bool
-    {
-        try {
-            $response = __::curl(
-                url: rtrim($this->url, '/') . '/chat/completions',
-                data: [
-                    'model' => $this->model,
-                    'messages' => [['role' => 'user', 'content' => 'Test']],
-                    'max_tokens' => 1
-                ],
-                method: 'POST',
-                headers: ['Authorization' => 'Bearer ' . $this->api_key],
-                timeout: 30
-            );
-            return ($response->status ?? 0) >= 200 &&
-                ($response->status ?? 0) < 300 &&
-                __::x($response?->result?->choices ?? null);
-        } catch (\Exception) {
-            return false;
-        }
-    }
-}
-
-class ai_elevenlabs extends ai_openai
-{
-    public ?string $provider = 'ElevenLabs';
-
-    public ?string $title = 'ElevenLabs';
-
-    public ?string $name = 'elevenlabs';
-
-    public ?string $icon = <<<'SVG'
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M7 4h3v16H7zm7 0h3v16h-3z"/></svg>
-    SVG;
-
-    protected ?string $url = 'https://api.elevenlabs.io/v1';
-
-    public ?bool $supports_mcp_remote = false;
-
-    public ?bool $supports_stream = false;
-
-    public array $models = [
-        [
-            'name' => 'eleven_v3',
-            'supports_tools' => false,
-            'costs' => ['audio' => 0.0003],
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => true,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'eleven_turbo_v2_5',
-            'supports_tools' => false,
-            'costs' => ['audio' => 0.00005],
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => true,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => true,
-            'test' => true
-        ],
-        [
-            'name' => 'eleven_turbo_v2',
-            'supports_tools' => false,
-            'costs' => ['audio' => 0.00005],
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => true,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'eleven_flash_v2_5',
-            'supports_tools' => false,
-            'costs' => ['audio' => 0.000033],
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => true,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'eleven_flash_v2',
-            'supports_tools' => false,
-            'costs' => ['audio' => 0.000033],
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => true,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'eleven_multilingual_v2',
-            'supports_tools' => false,
-            'costs' => ['audio' => 0.00018],
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => true,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'eleven_multilingual_v1',
-            'supports_tools' => false,
-            'costs' => ['audio' => 0.000165],
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => true,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            'name' => 'eleven_monolingual_v1',
-            'supports_tools' => false,
-            'costs' => ['audio' => 0.000165],
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => true,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => false,
-            'test' => false
-        ],
-        [
-            // speech-to-text (Scribe) — used via ask() with an audio attachment
-            'name' => 'scribe_v1',
-            'supports_tools' => false,
-            'costs' => ['audio' => 0],
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => true,
-            'default' => false,
-            'test' => true
-        ]
-    ];
-
-    public function fetchModelsFromProvider(): array
-    {
-        $models = [];
-        $response = __::curl(
-            url: $this->url . '/models',
-            method: 'GET',
-            headers: ['xi-api-key' => $this->api_key],
-            timeout: $this->timeout
-        );
-        $this->log($response);
-        $list = $response?->result ?? null;
-        if (!is_array($list)) {
-            $code = $response?->status ?? null;
-            $this->log(
-                '⚠️ elevenlabs fetchModelsFromProvider returned empty — HTTP ' .
-                    var_export($code, true) .
-                    ' (check api key / quota / connectivity)'
-            );
-            return $models;
-        }
-        foreach ($list as $m) {
-            $name = $m->model_id ?? null;
-            if (!is_string($name)) {
-                continue;
-            }
-            if (!($m->can_do_text_to_speech ?? false)) {
-                continue;
-            }
-            $entry = ['name' => $name, 'context_length' => 128000];
-            foreach ($this->models as $defined) {
-                if (($defined['name'] ?? null) === $name) {
-                    $entry = array_merge($defined, ['name' => $name]);
-                    if (!isset($entry['context_length'])) {
-                        $entry['context_length'] = 128000;
-                    }
-                    break;
-                }
-            }
-            $models[] = $entry;
-        }
-        // the /models endpoint only lists text-to-speech models — append
-        // statically-defined speech-to-text models (Scribe) so they stay
-        // discoverable and consistent with the static catalog.
-        foreach ($this->models as $defined) {
-            if (($defined['supports_audio_to_text'] ?? false) !== true) {
-                continue;
-            }
-            $name = $defined['name'] ?? null;
-            if (!is_string($name)) {
-                continue;
-            }
-            $already = false;
-            foreach ($models as $existing) {
-                if (($existing['name'] ?? null) === $name) {
-                    $already = true;
-                    break;
-                }
-            }
-            if ($already) {
-                continue;
-            }
-            $entry = $defined;
-            if (!isset($entry['context_length'])) {
-                $entry['context_length'] = 128000;
-            }
-            $models[] = $entry;
-        }
-        return $models;
-    }
-
-    public function ask(?string $prompt = null, mixed $files = null): array
-    {
-        $list = is_array($files) ? $files : ($files !== null ? [$files] : []);
-        $audio = null;
-        foreach ($list as $f) {
-            if (is_string($f) && file_exists($f) && strpos((string) mime_content_type($f), 'audio/') === 0) {
-                $audio = $f;
-                break;
-            }
-        }
-        if ($audio === null) {
-            return [
-                'response' =>
-                    'elevenlabs ask() error: provider is speech-to-text only — pass an audio file via the $files argument.',
-                'success' => false,
-                'costs' => 0.0
-            ];
-        }
-        $ch = curl_init($this->url . '/speech-to-text');
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => [
-                'model_id' => $this->model,
-                'file' => new \CURLFile($audio, (string) mime_content_type($audio), basename($audio))
-            ],
-            CURLOPT_HTTPHEADER => ['xi-api-key: ' . $this->api_key],
-            CURLOPT_TIMEOUT => $this->timeout ?? 300
-        ]);
-        $raw = curl_exec($ch);
-        $err = curl_error($ch);
-        $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        if ($raw === false || $http >= 400) {
-            $msg = 'elevenlabs stt HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500);
-            $this->log('⛔ ' . $msg);
-            return ['response' => $msg, 'success' => false, 'costs' => 0.0];
-        }
-        $json = json_decode((string) $raw, true);
-        $text = is_array($json) ? (string) ($json['text'] ?? '') : '';
-        if (trim($text) === '') {
-            $msg = 'elevenlabs stt: provider returned an empty transcript';
-            $this->log('⛔ ' . $msg);
-            return ['response' => $msg, 'success' => false, 'costs' => 0.0];
-        }
-        return ['response' => $text, 'success' => true, 'costs' => 0.0];
-    }
-
-    protected function audioThis(
-        ?string $prompt = null,
-        ?string $voice = null,
-        ?float $speed = null,
-        ?string $output_file = null
-    ): array {
-        // default voice: Rachel
-        $voice_id = $voice !== null && $voice !== '' ? $voice : '21m00Tcm4TlvDq8ikWAM';
-        $format = 'mp3_44100_128';
-        if ($output_file !== null) {
-            $ext = strtolower((string) pathinfo($output_file, PATHINFO_EXTENSION));
-            // wav/flac intentionally not mapped — elevenlabs only emits raw pcm without container
-            $format_map = [
-                'mp3' => 'mp3_44100_128',
-                'opus' => 'opus_48000_128',
-                'pcm' => 'pcm_44100'
-            ];
-            if (isset($format_map[$ext])) {
-                $format = $format_map[$ext];
-            }
-        }
-        $endpoint = $this->url . '/text-to-speech/' . rawurlencode($voice_id) . '?output_format=' . urlencode($format);
-        $payload = ['text' => (string) $prompt, 'model_id' => $this->model];
-        if ($speed !== null) {
-            $payload['voice_settings'] = ['speed' => $speed];
-        }
-        $max_tries = max(1, (int) ($this->max_tries ?? 1));
-        $raw = false;
-        $err = '';
-        $http = 0;
-        for ($attempt = 1; $attempt <= $max_tries; $attempt++) {
-            $ch = curl_init($endpoint);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => json_encode($payload),
-                CURLOPT_HTTPHEADER => [
-                    'xi-api-key: ' . $this->api_key,
-                    'Content-Type: application/json',
-                    'Accept: audio/mpeg'
-                ],
-                CURLOPT_TIMEOUT => $this->timeout ?? 300
-            ]);
-            $raw = curl_exec($ch);
-            $err = curl_error($ch);
-            $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            // retry transient failures
-            $is_transient = $raw === false || $http === 429 || $http >= 500;
-            if (!$is_transient || $attempt >= $max_tries) {
-                break;
-            }
-            $this->log(
-                '⚠️ elevenlabs audio transient HTTP ' .
-                    $http .
-                    ' (' .
-                    ($err ?: 'no curl error') .
-                    ') — retry ' .
-                    $attempt .
-                    '/' .
-                    ($max_tries - 1)
-            );
-            sleep($attempt * 3);
-        }
-        if ($raw === false || $http >= 400) {
-            $msg = 'elevenlabs audio HTTP ' . $http . ' err=' . ($err ?: '') . ' body=' . substr((string) $raw, 0, 500);
-            $this->log('⛔ ' . $msg);
-            return ['response' => $msg, 'success' => false, 'costs' => 0.0];
-        }
-        if ((string) $raw === '') {
-            $msg = 'elevenlabs audio: provider returned no audio (empty response)';
-            $this->log('⛔ ' . $msg);
-            return ['response' => $msg, 'success' => false, 'costs' => 0.0];
-        }
-        $costs = 0.0;
-        foreach ($this->models as $m) {
-            if (($m['name'] ?? null) === $this->model) {
-                $costs = (float) ($m['costs']['audio'] ?? 0 ?: 0) * mb_strlen((string) $prompt);
-                break;
-            }
-        }
-        if ($output_file !== null) {
-            if (file_put_contents($output_file, $raw) === false) {
-                $msg = 'elevenlabs audio: failed to write output_file ' . $output_file;
-                $this->log('⛔ ' . $msg);
-                return ['response' => $msg, 'success' => false, 'costs' => 0.0];
-            }
-            return ['response' => $output_file, 'success' => true, 'costs' => $costs];
-        }
-        return ['response' => base64_encode((string) $raw), 'success' => true, 'costs' => $costs];
-    }
-}
-
-class ai_test extends ai_anthropic
-{
-    public ?string $provider = 'aihelper';
-
-    public ?string $title = 'Test';
-
-    public ?string $name = 'test';
-
-    public ?string $icon = null;
-
-    protected ?string $url = null;
-
-    public ?bool $supports_mcp_remote = false;
-
-    public ?bool $supports_stream = true;
-
-    public array $models = [
-        [
-            'name' => 'test-model-1',
-            'context_length' => 128000,
-            'max_output_tokens' => 16384,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => true,
-            'supports_tools' => false,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
-            'supports_audio_to_text' => false,
-            'default' => true,
-            'test' => true
-        ]
-    ];
-
-    public function fetchModelsFromProvider(): array
-    {
-        return $this->models;
-    }
-
-    protected function makeApiCall(?array $args = null): mixed
-    {
-        static $call_count = 0;
-        if ($call_count > 0) {
-            $delay = rand(3, 7);
-            $this->log('simulating pause_turn delay: ' . $delay . ' seconds');
-            sleep($delay);
-        }
-        $call_count++;
-
-        // determine pause_turn behavior based on session history
-        $history = self::$sessions[$this->session_id] ?? [];
-        $pause_turn_count = 0;
-        foreach ($history as $history__value) {
-            $role = is_array($history__value) ? $history__value['role'] ?? null : $history__value->role ?? null;
-            if ($role === 'assistant') {
-                $pause_turn_count++;
-            }
-        }
-
-        // generate multiple sentences
-        $faker = \Faker\Factory::create();
-        $sentences = [];
-        $num_sentences = rand(2, 4);
-        for ($sentence__key = 0; $sentence__key < $num_sentences; $sentence__key++) {
-            $sentences[] = $faker->sentence(rand(10, 25));
-        }
-
-        // ensure between 3 and 5 pause_turns are simulated before final end_turn
-        $min_required_pause_turns = 3;
-        $max_required_pause_turns = 5;
-        $max_pause_turns = rand($min_required_pause_turns, $max_required_pause_turns);
-        $use_pause_turn = $pause_turn_count < $max_pause_turns;
-
-        // decide which sentence to stop at
-        if ($use_pause_turn) {
-            $sentences_to_send = [array_shift($sentences)];
-            $stop_reason = 'pause_turn';
-        } else {
-            $sentences_to_send = $sentences;
-            $stop_reason = 'end_turn';
-        }
-
-        $mock_text = implode(' ', $sentences_to_send);
-
-        // mock non-streaming response
-        if ($this->stream === false) {
-            return (object) [
-                'result' => (object) [
-                    'id' => 'msg_' . uniqid(),
-                    'type' => 'message',
-                    'role' => 'assistant',
-                    'model' => $this->model,
-                    'content' => [
-                        (object) [
-                            'type' => 'text',
-                            'text' => $mock_text
-                        ]
-                    ],
-                    'stop_reason' => $stop_reason,
-                    'stop_sequence' => null,
-                    'usage' => (object) [
-                        'input_tokens' => 150,
-                        'cache_creation_input_tokens' => 0,
-                        'cache_read_input_tokens' => 0,
-                        'output_tokens' => 50
-                    ]
-                ]
-            ];
-        }
-
-        // mock streaming response by calling stream callback
-        $stream_callback = $this->getStreamCallback();
-        if ($stream_callback !== null) {
-            // split mock text into word chunks for streaming simulation
-            $words = explode(' ', $mock_text);
-            $text_chunks = [];
-            for ($words__key = 0; $words__key < count($words); $words__key++) {
-                if ($words__key === 0) {
-                    $text_chunks[] = $words[$words__key];
-                } else {
-                    $text_chunks[] = ' ' . $words[$words__key];
-                }
-            }
-
-            // simulate streaming chunks from anthropic
-            $mock_chunks = [
-                "event: message_start\ndata: " .
-                json_encode([
-                    'type' => 'message_start',
-                    'message' => [
-                        'id' => 'msg_' . uniqid(),
-                        'type' => 'message',
-                        'role' => 'assistant',
-                        'model' => $this->model,
-                        'content' => [],
-                        'stop_reason' => null,
-                        'stop_sequence' => null,
-                        'usage' => [
-                            'input_tokens' => 150,
-                            'cache_creation_input_tokens' => 0,
-                            'cache_read_input_tokens' => 0,
-                            'output_tokens' => 1
-                        ]
-                    ]
-                ]) .
-                "\n\n",
-                "event: content_block_start\ndata: " .
-                json_encode([
-                    'type' => 'content_block_start',
-                    'index' => 0,
-                    'content_block' => ['type' => 'text', 'text' => '']
-                ]) .
-                "\n\n"
-            ];
-
-            // add dynamic content_block_delta events for each word chunk with jitter
-            foreach ($text_chunks as $text_chunk__value) {
-                $mock_chunks[] =
-                    "event: content_block_delta\ndata: " .
-                    json_encode([
-                        'type' => 'content_block_delta',
-                        'index' => 0,
-                        'delta' => ['type' => 'text_delta', 'text' => $text_chunk__value]
-                    ]) .
-                    "\n\n";
-                usleep(rand(20000, 80000));
-            }
-
-            // add closing events
-            $mock_chunks[] =
-                "event: message_delta\ndata: " .
-                json_encode([
-                    'type' => 'message_delta',
-                    'delta' => ['stop_reason' => $stop_reason, 'stop_sequence' => null],
-                    'usage' => ['output_tokens' => 50]
-                ]) .
-                "\n\n";
-            $mock_chunks[] =
-                "event: content_block_stop\ndata: " .
-                json_encode([
-                    'type' => 'content_block_stop',
-                    'index' => 0
-                ]) .
-                "\n\n";
-            $mock_chunks[] = "event: message_stop\ndata: " . json_encode(['type' => 'message_stop']) . "\n\n";
-
-            foreach ($mock_chunks as $mock_chunk__value) {
-                $stream_callback($mock_chunk__value);
-            }
-        }
-
-        return (object) ['result' => (object) []];
-    }
-}
-
-class ai_cliproxyapi extends ai_openrouter
-{
-    public ?string $provider = 'CLIProxyAPI';
-    public ?string $title = 'CLIProxyAPI';
-    public ?string $name = 'cliproxyapi';
-
-    public ?string $icon = <<<'SVG'
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6.5H16V4.5L21 8L16 11.5V9.5H3Z"/><path d="M21 14.5H8V12.5L3 16L8 19.5V17.5H21Z"/></svg>
-    SVG;
-    protected ?string $url = 'http://127.0.0.1:8317/v1';
-
-    public ?bool $supports_mcp_remote = false;
-
-    public ?bool $supports_stream = true;
-
-    public function fetchModelsFromProvider(): array
-    {
-        $models = parent::fetchModelsFromProvider();
-        foreach ($models as $model_key => $model) {
-            if (($model['owned_by'] ?? null) === 'antigravity' && !str_starts_with((string) $model['name'], 'gemini')) {
-                unset($models[$model_key]);
-                continue;
-            }
-            $models[$model_key]['supports_tools'] = true;
-            // anthropic models reject `temperature`
-            $models[$model_key]['supports_temperature'] = !str_starts_with((string) $model['name'], 'claude');
-            if (!str_starts_with((string) $model['name'], 'gpt-5')) {
-                continue;
-            }
-            $models[$model_key]['supports_effort'] = true;
-            $models[$model_key]['efforts'] = $this->getEffortValues();
-        }
-        return $models;
-    }
-
-    protected function modifyArgs(?array $args): ?array
-    {
-        $args = $this->modifyArgsLocal($args);
-        if ($this->effort !== null) {
-            $args['reasoning'] = ['effort' => $this->effort];
-        }
-        return $args;
-    }
-
-    public function ping(): bool
-    {
-        try {
-            $response = __::curl(
-                url: $this->url . '/models',
-                method: 'GET',
-                headers: ['Authorization' => 'Bearer ' . $this->api_key],
-                timeout: 30
-            );
-            return ($response->status ?? 0) >= 200 && ($response->status ?? 0) < 300;
-        } catch (\Exception) {
-            return false;
-        }
-    }
-}
+                   
