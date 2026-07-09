@@ -118,7 +118,7 @@ aihelper::getCliApiRequests( // get all requests from a local clis
     date_from: '2026-07-01 00:00:00', // null: all
     date_until: '2026-07-31 23:59:59', // null: all
     include_body: false,
-    group_by: false // true = collapse calls into one row
+    group_by: false // true = collapse per project
 );
 
 // manually populate history
