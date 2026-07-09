@@ -709,6 +709,34 @@ abstract class aihelper
         if (isset($cache[$tool]) && time() - $cache[$tool]['time'] < 60) {
             return $cache[$tool]['limits'];
         }
+        // these provider endpoints rate-limit (429) when polled too often, and each web request starts
+        // with an empty in-memory cache — so persist the last good result to disk. serve it directly
+        // while fresh (skipping the endpoint entirely, which is what actually avoids the rate limit),
+        // and keep serving it on any fetch failure until a fresh success replaces it.
+        $cache_file =
+            sys_get_temp_dir() .
+            '/aihelper-cliusage-' .
+            $tool .
+            '-' .
+            (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) .
+            '.json';
+        $raw = is_file($cache_file) ? json_decode((string) file_get_contents($cache_file), true) : null;
+        $raw = is_array($raw) ? $raw : null;
+        $last_good = $raw !== null && !empty($raw['limits']) ? $raw['limits'] : null;
+        // a good result stays fresh for 5 min; while none exists yet, still back off 90s between
+        // attempts so a rate-limited (429) endpoint isn't re-hit on every call
+        $ttl = $last_good !== null ? 300 : 90;
+        if ($raw !== null && time() - (int) ($raw['time'] ?? 0) < $ttl) {
+            $cache[$tool] = ['time' => time(), 'limits' => $last_good];
+            return $last_good;
+        }
+        $finish = function (array $limits) use (&$cache, $tool, $cache_file, $last_good): ?array {
+            // keep the last good result on failure; record every attempt time (throttles failures too)
+            $store = !empty($limits) ? $limits : $last_good;
+            @file_put_contents($cache_file, json_encode(['time' => time(), 'limits' => $store]));
+            $cache[$tool] = ['time' => time(), 'limits' => $store];
+            return $store;
+        };
         if ($tool === 'codex') {
             $auth_files = array_values(
                 array_unique(
@@ -767,8 +795,7 @@ abstract class aihelper
                         : null
                 ];
             }
-            $cache[$tool] = ['time' => time(), 'limits' => !empty($limits) ? $limits : null];
-            return $cache[$tool]['limits'];
+            return $finish($limits);
         }
         if ($tool === 'antigravity') {
             $auth_files = array_values(
@@ -818,7 +845,7 @@ abstract class aihelper
                 $project = $project_response?->result?->cloudaicompanionProject ?? null;
             }
             if (($project ?? '') === '') {
-                return null;
+                return $finish([]);
             }
             $response = __::curl(
                 url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
@@ -829,7 +856,7 @@ abstract class aihelper
             );
             $groups = $response?->result?->groups ?? null;
             if (!is_array($groups)) {
-                return null;
+                return $finish([]);
             }
             $limits = [];
             foreach ($groups as $group) {
@@ -859,8 +886,7 @@ abstract class aihelper
                     ];
                 }
             }
-            $cache[$tool] = ['time' => time(), 'limits' => !empty($limits) ? $limits : null];
-            return $cache[$tool]['limits'];
+            return $finish($limits);
         }
 
         $auth_files = array_values(
@@ -899,24 +925,21 @@ abstract class aihelper
                 return null;
             }
         };
-        // the anthropic usage endpoint is flaky and intermittently returns an empty body — retry a
-        // few times before giving up so a valid response is used when available
+        // one attempt only — the endpoint rate-limits (429) and immediate retries just make it worse;
+        // resilience now comes from the persisted cache ($finish serves the last good result on failure)
         $limits = [];
-        for ($attempt = 0; $attempt < 3 && empty($limits); $attempt++) {
-            $response = __::curl(
-                url: 'https://api.anthropic.com/api/oauth/usage',
-                method: 'GET',
-                headers: [
-                    'Authorization' => 'Bearer ' . $access_token,
-                    'User-Agent' => 'claude-cli',
-                    'Accept' => 'application/json'
-                ],
-                timeout: 15
-            );
-            $payload = $response?->result ?? null;
-            if (!is_object($payload)) {
-                continue;
-            }
+        $response = __::curl(
+            url: 'https://api.anthropic.com/api/oauth/usage',
+            method: 'GET',
+            headers: [
+                'Authorization' => 'Bearer ' . $access_token,
+                'User-Agent' => 'claude-cli',
+                'Accept' => 'application/json'
+            ],
+            timeout: 15
+        );
+        $payload = $response?->result ?? null;
+        if (is_object($payload)) {
             // current shape: { five_hour: { utilization, resets_at }, seven_day: { ... } }.
             // prefer this — recent responses ALSO include a "limits" key that no longer matches the
             // legacy shape, so checking "limits" first would wrongly yield nothing.
@@ -961,8 +984,7 @@ abstract class aihelper
                 }
             }
         }
-        $cache[$tool] = ['time' => time(), 'limits' => !empty($limits) ? $limits : null];
-        return $cache[$tool]['limits'];
+        return $finish($limits);
     }
 
     protected function parseCliUsageLimits(string $tool, string $output): array
