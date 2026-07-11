@@ -2942,16 +2942,20 @@ abstract class aihelper
 
         // grow head forward so it doesn't END with an assistant whose tool_calls
         // result lives in middle — keep the assistant + tool result paired.
-        // also: if head currently ends WITH a tool message, that's already
-        // matched on its left (preceding assistant tool_calls in head) and ok.
+        // PARALLEL tool calls put SEVERAL consecutive `tool` messages after one
+        // assistant; the batch must be consumed completely (last may already be
+        // a `tool` of the same batch), otherwise the remaining outputs get
+        // compacted away and the provider rejects the orphaned tool_calls with
+        // "No tool output found for function call".
         while ($head_end < $tail_start) {
             $last = is_array($session[$head_end - 1] ?? null)
                 ? $session[$head_end - 1]
                 : (array) ($session[$head_end - 1] ?? []);
             $next = is_array($session[$head_end] ?? null) ? $session[$head_end] : (array) ($session[$head_end] ?? []);
             $last_has_tool_calls = ($last['role'] ?? '') === 'assistant' && !empty($last['tool_calls']);
+            $last_is_tool = ($last['role'] ?? '') === 'tool';
             $next_is_tool = ($next['role'] ?? '') === 'tool';
-            if ($last_has_tool_calls && $next_is_tool) {
+            if (($last_has_tool_calls || $last_is_tool) && $next_is_tool) {
                 $head_end++;
                 continue;
             }
