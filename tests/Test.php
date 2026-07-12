@@ -2,6 +2,62 @@
 use vielhuber\aihelper\aihelper;
 use vielhuber\stringhelper\__;
 
+final class RetryTestAihelper extends aihelper
+{
+    public int $attempts = 0;
+    public array $promptAdditions = [];
+
+    public function __construct(private array $outcomes)
+    {
+        $this->model = 'test';
+        $this->session_id = 'retry-test';
+        $this->max_tries = 1;
+    }
+
+    protected function askThis(
+        ?string $prompt = null,
+        mixed $files = null,
+        bool $add_prompt_to_session = true,
+        ?string $prev_output_text = null,
+        float $prev_costs = 0.0,
+        int $length_continuation_count = 0
+    ): array {
+        $this->attempts++;
+        $this->promptAdditions[] = $add_prompt_to_session;
+        $outcome = array_shift($this->outcomes);
+        if ($outcome === 'stream_after_text') {
+            $this->stream_text_emitted_since_tool = true;
+            throw new \RuntimeException('stream disconnected before completion');
+        }
+        if (is_string($outcome)) {
+            throw new \RuntimeException($outcome);
+        }
+        if (is_array($outcome)) {
+            return $outcome;
+        }
+        return ['response' => 'ok', 'success' => true, 'costs' => $prev_costs];
+    }
+
+    protected function makeApiCall(?array $args = null): mixed
+    {
+        return null;
+    }
+
+    protected function bringPromptInFormat(string $prompt, mixed $files = null): array
+    {
+        return [];
+    }
+
+    protected function addResponseToSession(mixed $response): void
+    {
+    }
+
+    protected function retryBackoffSeconds(int $attempt, bool $transient): int
+    {
+        return 0;
+    }
+}
+
 class Test extends \PHPUnit\Framework\TestCase
 {
     protected $run_count = 3;
@@ -40,6 +96,43 @@ class Test extends \PHPUnit\Framework\TestCase
         }
         $this->markTestSkipped('Skipped.');
         return true;
+    }
+
+    function test__transient_request_errors_are_retried(): void
+    {
+        $ai = new RetryTestAihelper([
+            'AI Request fehlgeschlagen: auth_unavailable: no auth available',
+            ['response' => ['error' => ['code' => 'auth_unavailable']], 'success' => false, 'costs' => 0.0]
+        ]);
+
+        $result = $ai->ask('test');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('ok', $result['response']);
+        $this->assertSame(3, $ai->attempts);
+        $this->assertSame([true, false, false], $ai->promptAdditions);
+    }
+
+    function test__permanent_request_errors_are_not_retried(): void
+    {
+        $ai = new RetryTestAihelper(['invalid request']);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('invalid request');
+        $ai->ask('test');
+    }
+
+    function test__interrupted_stream_is_not_retried_after_text_was_emitted(): void
+    {
+        $ai = new RetryTestAihelper(['stream_after_text']);
+
+        try {
+            $ai->ask('test');
+            $this->fail('Expected the interrupted stream to be surfaced.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('stream disconnected before completion', $exception->getMessage());
+        }
+        $this->assertSame(1, $ai->attempts);
     }
 
     function test__cli_usage_limits_parsing(): void

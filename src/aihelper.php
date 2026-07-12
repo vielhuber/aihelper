@@ -1987,18 +1987,23 @@ abstract class aihelper
         $this->stream_text_emitted_since_tool = false;
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
         $max_tries = $this->max_tries;
+        $extra_transient_retries = max(0, 3 - $this->max_tries);
+        $transient_retry = false;
+        $attempt = 0;
         while ($return['success'] === false && $max_tries > 0) {
-            if ($max_tries < $this->max_tries) {
-                $attempt = $this->max_tries - $max_tries;
-                $backoff_s = 15 * (int) pow(2, $attempt - 1);
+            if ($attempt > 0) {
+                $backoff_s = $this->retryBackoffSeconds($attempt, $transient_retry);
                 $this->log('⚠️ tries left: ' . $max_tries . ' — backoff ' . $backoff_s . 's');
-                sleep($backoff_s);
+                if ($backoff_s > 0) {
+                    sleep($backoff_s);
+                }
             }
+            $transient_retry = false;
             try {
                 $return = $this->askThis(
                     prompt: $prompt,
                     files: $files,
-                    add_prompt_to_session: $max_tries === $this->max_tries,
+                    add_prompt_to_session: $attempt === 0,
                     prev_output_text: null,
                     prev_costs: $return['costs']
                 );
@@ -2010,11 +2015,27 @@ abstract class aihelper
                         'success' => false,
                         'costs' => $return['costs'] ?? 0.0
                     ];
+                } elseif ($this->isTransientRequestError($e->getMessage())) {
+                    $this->log('⚠️ transient request error — retrying: ' . $e->getMessage());
+                    $return = [
+                        'response' => $e->getMessage(),
+                        'success' => false,
+                        'costs' => $return['costs'] ?? 0.0
+                    ];
+                    $transient_retry = true;
                 } else {
                     throw $e;
                 }
             }
+            if ($return['success'] === false && $this->isTransientRequestError($return['response'] ?? '')) {
+                $transient_retry = true;
+            }
+            if ($transient_retry && $extra_transient_retries > 0) {
+                $extra_transient_retries--;
+                $max_tries++;
+            }
             $this->log($return, 'return');
+            $attempt++;
             $max_tries--;
         }
         $this->log(
@@ -2034,6 +2055,49 @@ abstract class aihelper
             $return = $this->runLocalToolLoop($return);
         }
         return $return;
+    }
+
+    protected function isTransientRequestError(mixed $message): bool
+    {
+        if (!is_string($message)) {
+            $message = json_encode($message, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: serialize($message);
+        }
+        $message = strtolower($message);
+        if (preg_match('/\b(?:http\s*)?(?:408|502|503)\b/', $message) === 1) {
+            return true;
+        }
+        foreach (
+            [
+                'connection reset',
+                'stream disconnected before completion',
+                'stream closed before response.completed',
+                'operation timed out',
+                'request timed out'
+            ]
+            as $needle
+        ) {
+            if (str_contains($message, $needle)) {
+                return $this->stream_text_emitted_since_tool !== true;
+            }
+        }
+        foreach (
+            [
+                'auth_unavailable',
+                'no auth available',
+                'temporarily unavailable'
+            ]
+            as $needle
+        ) {
+            if (str_contains($message, $needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    protected function retryBackoffSeconds(int $attempt, bool $transient): int
+    {
+        return $transient ? min(4, (int) pow(2, $attempt - 1)) : 15 * (int) pow(2, $attempt - 1);
     }
 
     public function image(
@@ -3493,13 +3557,18 @@ abstract class aihelper
             $this->autoCompactSession();
             $return['success'] = false;
             $max_tries = $this->max_tries;
+            $extra_transient_retries = max(0, 3 - $this->max_tries);
+            $transient_retry = false;
+            $attempt = 0;
             while ($return['success'] === false && $max_tries > 0) {
-                if ($max_tries < $this->max_tries) {
-                    $attempt = $this->max_tries - $max_tries;
-                    $backoff_s = 15 * (int) pow(2, $attempt - 1);
+                if ($attempt > 0) {
+                    $backoff_s = $this->retryBackoffSeconds($attempt, $transient_retry);
                     $this->log('⚠️ tries left: ' . $max_tries . ' — backoff ' . $backoff_s . 's');
-                    sleep($backoff_s);
+                    if ($backoff_s > 0) {
+                        sleep($backoff_s);
+                    }
                 }
+                $transient_retry = false;
                 try {
                     $return = $this->askThis(
                         prompt: null,
@@ -3518,11 +3587,27 @@ abstract class aihelper
                             'success' => false,
                             'costs' => $return['costs'] ?? 0.0
                         ];
+                    } elseif ($this->isTransientRequestError($e->getMessage())) {
+                        $this->log('⚠️ transient request error (tool-loop) — retrying: ' . $e->getMessage());
+                        $return = [
+                            'response' => $e->getMessage(),
+                            'success' => false,
+                            'costs' => $return['costs'] ?? 0.0
+                        ];
+                        $transient_retry = true;
                     } else {
                         throw $e;
                     }
                 }
+                if ($return['success'] === false && $this->isTransientRequestError($return['response'] ?? '')) {
+                    $transient_retry = true;
+                }
+                if ($transient_retry && $extra_transient_retries > 0) {
+                    $extra_transient_retries--;
+                    $max_tries++;
+                }
                 $this->log($return, 'local tool loop return');
+                $attempt++;
                 $max_tries--;
             }
             $max_tool_rounds--;
