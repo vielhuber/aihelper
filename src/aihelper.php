@@ -7223,7 +7223,10 @@ class ai_google extends aihelper
                     if (!empty($models__value->inputTokenLimit)) {
                         $entry['context_length'] = (int) $models__value->inputTokenLimit;
                     }
-                    if (strpos($name, 'imagen') !== false) {
+                    if (
+                        strpos($name, 'imagen') !== false ||
+                        (str_starts_with($name, 'gemini-') && str_contains($name, '-image'))
+                    ) {
                         $entry['supports_text_to_image'] = true;
                     }
                     $models[] = $entry;
