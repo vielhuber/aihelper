@@ -35,7 +35,9 @@ $ai = aihelper::create(
             'name' => 'example-mcp',
             'url' => 'https://modelcontextprotocol.io/mcp',
             'authorization_token' => '...',
-            'allowed_tools' => ['tool_name_1', 'tool_name_2'] // optional: restrict to specific tools (null or omit = all tools allowed)
+            'allowed_tools' => ['tool_name_1', 'tool_name_2'], // optional: restrict to specific tools (null or omit = all tools allowed)
+            'default_tool_arguments' => ['tool_name_1' => ['optional_argument' => 'default']],
+            'forced_tool_arguments' => ['tool_name_1' => ['fixed_argument' => 'value']]
         ]
     ],
     mcp_servers_call_type: 'remote', // remote = provider calls mcp servers directly, local = client-side tool loop via aihelper

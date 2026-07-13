@@ -2326,6 +2326,39 @@ abstract class aihelper
         mixed $input_file = null,
         ?string $output_file = null
     ): array {
+        if (
+            $n > 1 &&
+            $this->name === 'google' &&
+            str_starts_with((string) $this->model, 'gemini-') &&
+            str_contains((string) $this->model, '-image')
+        ) {
+            $responses = [];
+            $costs = 0.0;
+            $outputInfo = $output_file !== null ? pathinfo($output_file) : null;
+            for ($imageIndex = 1; $imageIndex <= $n; $imageIndex++) {
+                $currentOutputFile = null;
+                if ($outputInfo !== null) {
+                    $outputDirectory = $outputInfo['dirname'] ?? '.';
+                    $outputBase = $outputInfo['filename'] ?? 'out';
+                    $outputExtension = isset($outputInfo['extension']) ? '.' . $outputInfo['extension'] : '';
+                    $currentOutputFile =
+                        $outputDirectory . '/' . $outputBase . '-' . $imageIndex . $outputExtension;
+                }
+                $result = $this->imageThis(
+                    prompt: $prompt,
+                    n: 1,
+                    aspect_ratio: $aspect_ratio,
+                    input_file: $input_file,
+                    output_file: $currentOutputFile
+                );
+                if (($result['success'] ?? false) !== true) {
+                    return $result;
+                }
+                $responses[] = $result['response'];
+                $costs += (float) ($result['costs'] ?? 0.0);
+            }
+            return ['response' => $responses, 'success' => true, 'costs' => $costs];
+        }
         $is_edit = $input_file !== null;
         $headers = [];
         $tmp_input = null;
@@ -3501,6 +3534,9 @@ abstract class aihelper
                             $tc['arguments'][$key] = $value;
                         }
                     }
+                    foreach ($this->mcp_servers_tools_map[$tc['name']]['forced_arguments'] ?? [] as $key => $value) {
+                        $tc['arguments'][$key] = is_callable($value) ? $value($tc['arguments']) : $value;
+                    }
                 }
                 // loop-guard: if the same (name, args) is emitted N times in a row,
                 // refuse to execute and return a forceful stop-instruction to the model.
@@ -4098,6 +4134,7 @@ abstract class aihelper
                         'url' => $url,
                         'authorization_token' => $authorization_token,
                         'default_arguments' => $h['mcp']['default_tool_arguments'][$tool['name']] ?? [],
+                        'forced_arguments' => $h['mcp']['forced_tool_arguments'][$tool['name']] ?? [],
                         'schema' => $tool_def
                     ];
                 }
