@@ -50,6 +50,7 @@ abstract class aihelper
     protected ?string $auto_compact_summary = null;
     protected ?string $auto_compact_cache = null;
     protected static ?array $artificial_analysis_models = null;
+    protected static array $cli_usage_limits_cache = [];
 
     public static function create(
         string $provider,
@@ -664,9 +665,8 @@ abstract class aihelper
         }
     }
 
-    public function getCliUsageLimits(): ?array
+    protected function getCliUsageTool(): ?string
     {
-        static $cache = [];
         $model = strtolower((string) $this->model);
         $tool = null;
         $owned_by = null;
@@ -703,11 +703,137 @@ abstract class aihelper
         ) {
             $tool = 'antigravity';
         }
+
+        return $tool;
+    }
+
+    protected function getCodexAuthentication(): ?array
+    {
+        $auth_files = array_values(
+            array_unique(
+                array_merge(
+                    ['/root/.codex/auth.json'],
+                    glob('/root/.cli-proxy-api/codex*.json') ?: [],
+                    glob('/host/data/cliproxyapi/auth/codex*.json') ?: []
+                )
+            )
+        );
+        foreach ($auth_files as $auth_file) {
+            if (!is_file($auth_file)) {
+                continue;
+            }
+            $auth = json_decode((string) file_get_contents($auth_file), true);
+            if (!is_array($auth)) {
+                continue;
+            }
+            $access_token = $auth['tokens']['access_token'] ?? ($auth['access_token'] ?? null);
+            $account_id = $auth['tokens']['account_id'] ?? ($auth['account_id'] ?? null);
+            if (($access_token ?? '') !== '' && ($account_id ?? '') !== '') {
+                return ['access_token' => $access_token, 'account_id' => $account_id];
+            }
+        }
+
+        return null;
+    }
+
+    public function getCliUsageResetCredits(): ?array
+    {
+        if ($this->getCliUsageTool() !== 'codex') {
+            return null;
+        }
+        $auth = $this->getCodexAuthentication();
+        if ($auth === null) {
+            return null;
+        }
+        $response = __::curl(
+            url: 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits',
+            method: 'GET',
+            headers: [
+                'Authorization' => 'Bearer ' . $auth['access_token'],
+                'ChatGPT-Account-Id' => $auth['account_id'],
+                'User-Agent' => 'codex-cli',
+                'Accept' => 'application/json'
+            ],
+            timeout: 15
+        );
+        $payload = $response?->result ?? null;
+        if (!is_object($payload) || !is_numeric($payload->available_count ?? null)) {
+            return null;
+        }
+        $credits = [];
+        foreach ($payload->credits ?? [] as $credit) {
+            if (!is_object($credit) || ($credit->status ?? null) !== 'available') {
+                continue;
+            }
+            $credits[] = [
+                'title' => isset($credit->title) ? (string) $credit->title : null,
+                'expires_at' => isset($credit->expires_at) ? (string) $credit->expires_at : null
+            ];
+        }
+
+        return ['available_count' => max(0, (int) $payload->available_count), 'credits' => $credits];
+    }
+
+    public function triggerCliUsageReset(): ?array
+    {
+        if ($this->getCliUsageTool() !== 'codex') {
+            return null;
+        }
+        $auth = $this->getCodexAuthentication();
+        if ($auth === null) {
+            return null;
+        }
+        $uuid = random_bytes(16);
+        $uuid[6] = chr((ord($uuid[6]) & 0x0f) | 0x40);
+        $uuid[8] = chr((ord($uuid[8]) & 0x3f) | 0x80);
+        $redeem_request_id = vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($uuid), 4));
+        $data = ['redeem_request_id' => $redeem_request_id];
+        $response = __::curl(
+            url: 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume',
+            data: $data,
+            method: 'POST',
+            headers: [
+                'Authorization' => 'Bearer ' . $auth['access_token'],
+                'ChatGPT-Account-Id' => $auth['account_id'],
+                'User-Agent' => 'codex-cli',
+                'Accept' => 'application/json'
+            ],
+            timeout: 15
+        );
+        $payload = $response?->result ?? null;
+        if (!is_object($payload) || !is_string($payload->code ?? null)) {
+            return null;
+        }
+        if ($payload->code === 'reset') {
+            unset(self::$cli_usage_limits_cache['codex']);
+            $cache_file =
+                sys_get_temp_dir() .
+                '/aihelper-cliusage-codex-' .
+                (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) .
+                '.json';
+            if (is_file($cache_file)) {
+                unlink($cache_file);
+            }
+        }
+
+        return [
+            'success' => $payload->code === 'reset',
+            'status' => $payload->code,
+            'windows_reset' => is_numeric($payload->windows_reset ?? null) ? (int) $payload->windows_reset : 0
+        ];
+    }
+
+    public function getCliUsageLimits(): ?array
+    {
+        $tool = $this->getCliUsageTool();
         if ($tool === null) {
             return null;
         }
-        if (isset($cache[$tool]) && time() - $cache[$tool]['time'] < 60) {
-            return $cache[$tool]['limits'];
+        if (
+            isset(self::$cli_usage_limits_cache[$tool]) &&
+            time() - self::$cli_usage_limits_cache[$tool]['time'] < 60
+        ) {
+            return self::$cli_usage_limits_cache[$tool]['limits'];
         }
         // these provider endpoints rate-limit (429) when polled too often, and each web request starts
         // with an empty in-memory cache — so persist the last good result to disk. serve it directly
@@ -727,51 +853,27 @@ abstract class aihelper
         // attempts so a rate-limited (429) endpoint isn't re-hit on every call
         $ttl = $last_good !== null ? 300 : 90;
         if ($raw !== null && time() - (int) ($raw['time'] ?? 0) < $ttl) {
-            $cache[$tool] = ['time' => time(), 'limits' => $last_good];
+            self::$cli_usage_limits_cache[$tool] = ['time' => time(), 'limits' => $last_good];
             return $last_good;
         }
-        $finish = function (array $limits) use (&$cache, $tool, $cache_file, $last_good): ?array {
+        $finish = function (array $limits) use ($tool, $cache_file, $last_good): ?array {
             // keep the last good result on failure; record every attempt time (throttles failures too)
             $store = !empty($limits) ? $limits : $last_good;
             @file_put_contents($cache_file, json_encode(['time' => time(), 'limits' => $store]));
-            $cache[$tool] = ['time' => time(), 'limits' => $store];
+            self::$cli_usage_limits_cache[$tool] = ['time' => time(), 'limits' => $store];
             return $store;
         };
         if ($tool === 'codex') {
-            $auth_files = array_values(
-                array_unique(
-                    array_merge(
-                        ['/root/.codex/auth.json'],
-                        glob('/root/.cli-proxy-api/codex*.json') ?: [],
-                        glob('/host/data/cliproxyapi/auth/codex*.json') ?: []
-                    )
-                )
-            );
-            $access_token = null;
-            $account_id = null;
-            foreach ($auth_files as $auth_file) {
-                if (!is_file($auth_file)) {
-                    continue;
-                }
-                $auth = json_decode((string) file_get_contents($auth_file), true);
-                if (!is_array($auth)) {
-                    continue;
-                }
-                $access_token = $auth['tokens']['access_token'] ?? ($auth['access_token'] ?? null);
-                $account_id = $auth['tokens']['account_id'] ?? ($auth['account_id'] ?? null);
-                if (($access_token ?? '') !== '' && ($account_id ?? '') !== '') {
-                    break;
-                }
-            }
-            if (($access_token ?? '') === '' || ($account_id ?? '') === '') {
+            $auth = $this->getCodexAuthentication();
+            if ($auth === null) {
                 return null;
             }
             $response = __::curl(
                 url: 'https://chatgpt.com/backend-api/wham/usage',
                 method: 'GET',
                 headers: [
-                    'Authorization' => 'Bearer ' . $access_token,
-                    'ChatGPT-Account-Id' => $account_id,
+                    'Authorization' => 'Bearer ' . $auth['access_token'],
+                    'ChatGPT-Account-Id' => $auth['account_id'],
                     'User-Agent' => 'codex-cli',
                     'Accept' => 'application/json'
                 ],
@@ -779,17 +881,31 @@ abstract class aihelper
             );
             $payload = $response?->result ?? null;
             $windows = [
-                '5-hour' => $payload?->rate_limit?->primary_window ?? null,
-                'weekly' => $payload?->rate_limit?->secondary_window ?? null
+                ['window' => $payload?->rate_limit?->primary_window ?? null, 'fallback_type' => '5-hour'],
+                ['window' => $payload?->rate_limit?->secondary_window ?? null, 'fallback_type' => 'weekly']
             ];
             $limits = [];
-            foreach ($windows as $type => $window) {
+            foreach ($windows as $window_data) {
+                $window = $window_data['window'];
                 if (!is_object($window) || !is_numeric($window->used_percent ?? null)) {
+                    continue;
+                }
+                $type = $window_data['fallback_type'];
+                if (is_numeric($window->limit_window_seconds ?? null)) {
+                    $type = match ((int) $window->limit_window_seconds) {
+                        5 * 60 * 60 => '5-hour',
+                        24 * 60 * 60 => 'daily',
+                        7 * 24 * 60 * 60 => 'weekly',
+                        30 * 24 * 60 * 60 => 'monthly',
+                        default => null
+                    };
+                }
+                if ($type === null) {
                     continue;
                 }
                 $limits[] = [
                     'type' => $type,
-                    'percent used' => (int) round((float) $window->used_percent),
+                    'percent used' => (int) round(max(0, min(100, (float) $window->used_percent))),
                     'resets_at' => is_numeric($window->reset_at ?? null)
                         ? date(\DateTimeInterface::ATOM, (int) $window->reset_at)
                         : null
@@ -870,6 +986,22 @@ abstract class aihelper
                     if (!is_object($bucket) || !is_numeric($bucket->remainingFraction ?? null)) {
                         continue;
                     }
+                    $window = strtolower(trim((string) ($bucket->window ?? '')));
+                    $type = match (true) {
+                        in_array($window, ['session', '5h', '5-hour', 'five_hour'], true),
+                        str_contains($window, '5-hour'),
+                        str_contains($window, '5 hour') => '5-hour',
+                        str_contains($window, 'weekly'),
+                        str_contains($window, 'seven_day'),
+                        str_contains($window, '7-day'),
+                        str_contains($window, '7 day') => 'weekly',
+                        str_contains($window, 'monthly'), str_contains($window, 'month') => 'monthly',
+                        str_contains($window, 'daily'), str_contains($window, 'day') => 'daily',
+                        default => null
+                    };
+                    if ($type === null) {
+                        continue;
+                    }
                     $resets_at = null;
                     if (($bucket->resetTime ?? null) !== null) {
                         try {
@@ -880,7 +1012,7 @@ abstract class aihelper
                         }
                     }
                     $limits[] = [
-                        'type' => (string) ($bucket->window ?? ''),
+                        'type' => $type,
                         'percent used' => (int) round(100 - max(0, min(1, (float) $bucket->remainingFraction)) * 100),
                         'resets_at' => $resets_at
                     ];
@@ -952,7 +1084,7 @@ abstract class aihelper
                 }
                 $limits[] = [
                     'type' => $type,
-                    'percent used' => (int) round((float) $window->utilization),
+                    'percent used' => (int) round(max(0, min(100, (float) $window->utilization))),
                     'resets_at' => $format_reset($window->resets_at ?? null)
                 ];
             }
@@ -977,7 +1109,7 @@ abstract class aihelper
                     }
                     $limits[] = [
                         'type' => $type,
-                        'percent used' => (int) round((float) $limit->percent),
+                        'percent used' => (int) round(max(0, min(100, (float) $limit->percent))),
                         'resets_at' => $format_reset($limit->resets_at ?? null)
                     ];
                     $usedTypes[$type] = true;
@@ -3359,6 +3491,17 @@ abstract class aihelper
             $this->log(count($tool_calls) . ' tool call(s)', 'local tool loop');
             $tool_results = [];
             foreach ($tool_calls as $tc) {
+                if (isset($this->mcp_servers_tools_map[$tc['name']])) {
+                    foreach ($this->mcp_servers_tools_map[$tc['name']]['default_arguments'] ?? [] as $key => $value) {
+                        if (
+                            !array_key_exists($key, $tc['arguments']) ||
+                            $tc['arguments'][$key] === null ||
+                            (is_string($tc['arguments'][$key]) && trim($tc['arguments'][$key]) === '')
+                        ) {
+                            $tc['arguments'][$key] = $value;
+                        }
+                    }
+                }
                 // loop-guard: if the same (name, args) is emitted N times in a row,
                 // refuse to execute and return a forceful stop-instruction to the model.
                 $signature = $tc['name'] . '|' . json_encode($tc['arguments'], JSON_UNESCAPED_UNICODE);
@@ -3424,7 +3567,7 @@ abstract class aihelper
                         }
                         flush();
                     }
-                    $result = self::callMcpTool(
+                    $result = static::callMcpTool(
                         name: $tc['name'],
                         args: $tc['arguments'],
                         url: $server['url'],
@@ -3432,6 +3575,14 @@ abstract class aihelper
                     );
                     if ($result === null) {
                         $output = 'Error: tool call failed (no response from MCP server)';
+                    } elseif (($result['result']['isError'] ?? false) === true) {
+                        $output = json_encode(
+                            [
+                                'isError' => true,
+                                'content' => $result['result']['content'] ?? []
+                            ],
+                            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+                        );
                     } elseif (isset($result['result']['content']) && is_array($result['result']['content'])) {
                         $parts = [];
                         foreach ($result['result']['content'] as $item) {
@@ -3946,6 +4097,7 @@ abstract class aihelper
                     $this->mcp_servers_tools_map[$tool['name']] = [
                         'url' => $url,
                         'authorization_token' => $authorization_token,
+                        'default_arguments' => $h['mcp']['default_tool_arguments'][$tool['name']] ?? [],
                         'schema' => $tool_def
                     ];
                 }
