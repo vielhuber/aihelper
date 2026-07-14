@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 use vielhuber\aihelper\aihelper;
 use vielhuber\stringhelper\__;
 
@@ -103,6 +105,21 @@ class Test extends \PHPUnit\Framework\TestCase
         $ai = new RetryTestAihelper([
             'AI Request fehlgeschlagen: auth_unavailable: no auth available',
             ['response' => ['error' => ['code' => 'auth_unavailable']], 'success' => false, 'costs' => 0.0]
+        ]);
+
+        $result = $ai->ask('test');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('ok', $result['response']);
+        $this->assertSame(3, $ai->attempts);
+        $this->assertSame([true, false, false], $ai->promptAdditions);
+    }
+
+    function test__transient_stream_transport_errors_are_retried(): void
+    {
+        $ai = new RetryTestAihelper([
+            'AI Request fehlgeschlagen: Post "https://chatgpt.com/backend-api/codex/responses": EOF',
+            'AI Request fehlgeschlagen: stream error: stream ID 1; PROTOCOL_ERROR; received from peer'
         ]);
 
         $result = $ai->ask('test');

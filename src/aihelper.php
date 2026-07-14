@@ -2243,6 +2243,8 @@ abstract class aihelper
         foreach (
             [
                 'connection reset',
+                'unexpected eof',
+                'protocol_error',
                 'stream disconnected before completion',
                 'stream closed before response.completed',
                 'operation timed out',
@@ -2253,6 +2255,9 @@ abstract class aihelper
             if (str_contains($message, $needle)) {
                 return $this->stream_text_emitted_since_tool !== true;
             }
+        }
+        if (preg_match('/(?:^|:\s*)eof$/', trim($message)) === 1) {
+            return $this->stream_text_emitted_since_tool !== true;
         }
         foreach (
             [
