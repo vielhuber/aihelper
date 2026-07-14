@@ -153,8 +153,10 @@ TXT
         );
 
         $this->assertSame('5-hour', $codexLimits[0]['type']);
+        $this->assertNull($codexLimits[0]['scope']);
         $this->assertSame(8, $codexLimits[0]['percent used']);
         $this->assertSame('weekly', $codexLimits[1]['type']);
+        $this->assertNull($codexLimits[1]['scope']);
         $this->assertSame(3, $codexLimits[1]['percent used']);
         $this->assertMatchesRegularExpression('/T19:12:00/', $codexLimits[0]['resets_at']);
 
@@ -173,8 +175,10 @@ TXT
         );
 
         $this->assertSame('5-hour', $claudeLimits[0]['type']);
+        $this->assertNull($claudeLimits[0]['scope']);
         $this->assertSame(100, $claudeLimits[0]['percent used']);
         $this->assertSame('weekly', $claudeLimits[1]['type']);
+        $this->assertNull($claudeLimits[1]['scope']);
         $this->assertSame(69, $claudeLimits[1]['percent used']);
         $this->assertMatchesRegularExpression('/T17:59:00\\+02:00/', $claudeLimits[0]['resets_at']);
     }

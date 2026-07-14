@@ -880,36 +880,57 @@ abstract class aihelper
                 timeout: 15
             );
             $payload = $response?->result ?? null;
-            $windows = [
-                ['window' => $payload?->rate_limit?->primary_window ?? null, 'fallback_type' => '5-hour'],
-                ['window' => $payload?->rate_limit?->secondary_window ?? null, 'fallback_type' => 'weekly']
-            ];
-            $limits = [];
-            foreach ($windows as $window_data) {
-                $window = $window_data['window'];
-                if (!is_object($window) || !is_numeric($window->used_percent ?? null)) {
+            $rate_limits = [['rate_limit' => $payload?->rate_limit ?? null, 'scope' => null]];
+            if (is_object($payload?->code_review_rate_limit ?? null)) {
+                $rate_limits[] = ['rate_limit' => $payload->code_review_rate_limit, 'scope' => 'Code review'];
+            }
+            foreach ($payload?->additional_rate_limits ?? [] as $additional_rate_limit) {
+                if (!is_object($additional_rate_limit) || !is_object($additional_rate_limit->rate_limit ?? null)) {
                     continue;
                 }
-                $type = $window_data['fallback_type'];
-                if (is_numeric($window->limit_window_seconds ?? null)) {
-                    $type = match ((int) $window->limit_window_seconds) {
-                        5 * 60 * 60 => '5-hour',
-                        24 * 60 * 60 => 'daily',
-                        7 * 24 * 60 * 60 => 'weekly',
-                        30 * 24 * 60 * 60 => 'monthly',
-                        default => null
-                    };
-                }
-                if ($type === null) {
-                    continue;
-                }
-                $limits[] = [
-                    'type' => $type,
-                    'percent used' => (int) round(max(0, min(100, (float) $window->used_percent))),
-                    'resets_at' => is_numeric($window->reset_at ?? null)
-                        ? date(\DateTimeInterface::ATOM, (int) $window->reset_at)
-                        : null
+                $rate_limits[] = [
+                    'rate_limit' => $additional_rate_limit->rate_limit,
+                    'scope' => trim((string) ($additional_rate_limit->limit_name ?? '')) ?: null
                 ];
+            }
+            $limits = [];
+            foreach ($rate_limits as $rate_limit) {
+                if (!is_object($rate_limit['rate_limit'])) {
+                    continue;
+                }
+                foreach (
+                    [
+                        ['window' => $rate_limit['rate_limit']->primary_window ?? null, 'fallback_type' => '5-hour'],
+                        ['window' => $rate_limit['rate_limit']->secondary_window ?? null, 'fallback_type' => 'weekly']
+                    ]
+                    as $window_data
+                ) {
+                    $window = $window_data['window'];
+                    if (!is_object($window) || !is_numeric($window->used_percent ?? null)) {
+                        continue;
+                    }
+                    $type = $window_data['fallback_type'];
+                    if (is_numeric($window->limit_window_seconds ?? null)) {
+                        $type = match ((int) $window->limit_window_seconds) {
+                            5 * 60 * 60 => '5-hour',
+                            24 * 60 * 60 => 'daily',
+                            7 * 24 * 60 * 60 => 'weekly',
+                            30 * 24 * 60 * 60 => 'monthly',
+                            default => $type
+                        };
+                    }
+                    if ($type === null) {
+                        continue;
+                    }
+                    $limits[] = [
+                        'type' => $type,
+                        'scope' => $rate_limit['scope'],
+                        'percent used' => (int) round(max(0, min(100, (float) $window->used_percent))),
+                        'resets_at' => is_numeric($window->reset_at ?? null)
+                            ? date(\DateTimeInterface::ATOM, (int) $window->reset_at)
+                            : null
+                    ];
+                }
             }
             return $finish($limits);
         }
@@ -1013,6 +1034,7 @@ abstract class aihelper
                     }
                     $limits[] = [
                         'type' => $type,
+                        'scope' => null,
                         'percent used' => (int) round(100 - max(0, min(1, (float) $bucket->remainingFraction)) * 100),
                         'resets_at' => $resets_at
                     ];
@@ -1072,25 +1094,28 @@ abstract class aihelper
         );
         $payload = $response?->result ?? null;
         if (is_object($payload)) {
-            // current shape: { five_hour: { utilization, resets_at }, seven_day: { ... } }.
-            // prefer this — recent responses ALSO include a "limits" key that no longer matches the
-            // legacy shape, so checking "limits" first would wrongly yield nothing.
-            foreach (
-                ['5-hour' => $payload->five_hour ?? null, 'weekly' => $payload->seven_day ?? null]
-                as $type => $window
-            ) {
+            // Current responses expose general windows twice and scoped limits only in `limits`.
+            $used_limits = [];
+            foreach (get_object_vars($payload) as $window_name => $window) {
+                if (!preg_match('/^(five_hour|seven_day)(?:_(.+))?$/', $window_name, $window_matches)) {
+                    continue;
+                }
                 if (!is_object($window) || !is_numeric($window->utilization ?? null)) {
                     continue;
                 }
+                $type = $window_matches[1] === 'five_hour' ? '5-hour' : 'weekly';
+                $scope = isset($window_matches[2])
+                    ? ucwords(str_replace('_', ' ', (string) $window_matches[2]))
+                    : null;
                 $limits[] = [
                     'type' => $type,
+                    'scope' => $scope,
                     'percent used' => (int) round(max(0, min(100, (float) $window->utilization))),
                     'resets_at' => $format_reset($window->resets_at ?? null)
                 ];
+                $used_limits[$type . '|' . strtolower((string) $scope)] = true;
             }
-            // legacy fallback: { limits: [{ group, kind, percent, resets_at }] }
-            if (empty($limits) && is_array($payload->limits ?? null)) {
-                $usedTypes = [];
+            if (is_array($payload->limits ?? null)) {
                 foreach ($payload->limits as $limit) {
                     if (!is_object($limit) || !is_numeric($limit->percent ?? null)) {
                         continue;
@@ -1104,15 +1129,32 @@ abstract class aihelper
                     if ($type === null && str_starts_with($kind, 'weekly')) {
                         $type = 'weekly';
                     }
-                    if ($type === null || isset($usedTypes[$type])) {
+                    if ($type === null) {
+                        continue;
+                    }
+                    $scope = null;
+                    if (is_object($limit->scope ?? null)) {
+                        if (is_object($limit->scope->model ?? null)) {
+                            $scope = trim(
+                                (string) ($limit->scope->model->display_name ?? ($limit->scope->model->id ?? ''))
+                            );
+                        }
+                        if (($scope ?? '') === '' && isset($limit->scope->surface)) {
+                            $scope = trim((string) $limit->scope->surface);
+                        }
+                    }
+                    $scope = ($scope ?? '') !== '' ? $scope : null;
+                    $limit_key = $type . '|' . strtolower((string) $scope);
+                    if (isset($used_limits[$limit_key])) {
                         continue;
                     }
                     $limits[] = [
                         'type' => $type,
+                        'scope' => $scope,
                         'percent used' => (int) round(max(0, min(100, (float) $limit->percent))),
                         'resets_at' => $format_reset($limit->resets_at ?? null)
                     ];
-                    $usedTypes[$type] = true;
+                    $used_limits[$limit_key] = true;
                 }
             }
         }
@@ -1234,7 +1276,7 @@ abstract class aihelper
             if ($percent === null) {
                 continue;
             }
-            $limits[] = ['type' => $type, 'percent used' => $percent, 'resets_at' => $parseReset($text)];
+            $limits[] = ['type' => $type, 'scope' => null, 'percent used' => $percent, 'resets_at' => $parseReset($text)];
             $usedTypes[$type] = true;
         }
         return $limits;
