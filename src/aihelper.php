@@ -5194,6 +5194,21 @@ abstract class aihelper
             if (!is_string($msg)) {
                 $msg = json_encode($msg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             }
+            $msg = preg_replace(
+                '/(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,\'"}]+/',
+                '$1***',
+                $msg
+            );
+            $msg = preg_replace(
+                '/(?i)("?(?:access_token|refresh_token|id_token|client_secret|token|secret|password|api[_-]?key)"?\s*[:=]\s*")([^"]+)(")/',
+                '$1***$3',
+                $msg
+            );
+            $msg = preg_replace(
+                '/(?i)(\b[a-z0-9_]*(?:access_token|refresh_token|id_token|client_secret|token|secret|password|passwd|passphrase|api[_-]?key|private[_-]?key|access[_-]?key|authorization|cookie)\b\s*[:=]\s*)(?:"[^"]*"|\'[^\']*\'|[^\s\\,;]+)/',
+                '$1***',
+                $msg
+            );
             /*
             $msg = str_replace(["\r\n", "\r", "\n"], ' ', $msg);
             $msg = preg_replace_callback(
