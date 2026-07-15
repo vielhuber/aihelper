@@ -51,6 +51,7 @@ abstract class aihelper
     protected ?string $auto_compact_cache = null;
     protected static ?array $artificial_analysis_models = null;
     protected static array $cli_usage_limits_cache = [];
+    protected static array $cli_usage_reset_credits_cache = [];
 
     public static function create(
         string $provider,
@@ -741,9 +742,27 @@ abstract class aihelper
         if ($this->getCliUsageTool() !== 'codex') {
             return null;
         }
+        if (
+            isset(self::$cli_usage_reset_credits_cache['codex']) &&
+            time() - self::$cli_usage_reset_credits_cache['codex']['time'] < 60
+        ) {
+            return self::$cli_usage_reset_credits_cache['codex']['credits'];
+        }
+        $cache_file =
+            sys_get_temp_dir() .
+            '/aihelper-cliusage-reset-credits-codex-' .
+            (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) .
+            '.json';
+        $cached = is_file($cache_file) ? json_decode((string) file_get_contents($cache_file), true) : null;
+        $cached = is_array($cached) ? $cached : null;
+        $last_good = $cached !== null && is_array($cached['credits'] ?? null) ? $cached['credits'] : null;
+        if ($cached !== null && time() - (int) ($cached['time'] ?? 0) < 60) {
+            self::$cli_usage_reset_credits_cache['codex'] = ['time' => time(), 'credits' => $last_good];
+            return $last_good;
+        }
         $auth = $this->getCodexAuthentication();
         if ($auth === null) {
-            return null;
+            return $last_good;
         }
         $response = __::curl(
             url: 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits',
@@ -758,7 +777,9 @@ abstract class aihelper
         );
         $payload = $response?->result ?? null;
         if (!is_object($payload) || !is_numeric($payload->available_count ?? null)) {
-            return null;
+            file_put_contents($cache_file, json_encode(['time' => time(), 'credits' => $last_good]));
+            self::$cli_usage_reset_credits_cache['codex'] = ['time' => time(), 'credits' => $last_good];
+            return $last_good;
         }
         $credits = [];
         foreach ($payload->credits ?? [] as $credit) {
@@ -771,7 +792,10 @@ abstract class aihelper
             ];
         }
 
-        return ['available_count' => max(0, (int) $payload->available_count), 'credits' => $credits];
+        $result = ['available_count' => max(0, (int) $payload->available_count), 'credits' => $credits];
+        file_put_contents($cache_file, json_encode(['time' => time(), 'credits' => $result]));
+        self::$cli_usage_reset_credits_cache['codex'] = ['time' => time(), 'credits' => $result];
+        return $result;
     }
 
     public function triggerCliUsageReset(): ?array
@@ -806,6 +830,7 @@ abstract class aihelper
         }
         if ($payload->code === 'reset') {
             unset(self::$cli_usage_limits_cache['codex']);
+            unset(self::$cli_usage_reset_credits_cache['codex']);
             $cache_file =
                 sys_get_temp_dir() .
                 '/aihelper-cliusage-codex-' .
@@ -813,6 +838,14 @@ abstract class aihelper
                 '.json';
             if (is_file($cache_file)) {
                 unlink($cache_file);
+            }
+            $reset_credits_cache_file =
+                sys_get_temp_dir() .
+                '/aihelper-cliusage-reset-credits-codex-' .
+                (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) .
+                '.json';
+            if (is_file($reset_credits_cache_file)) {
+                unlink($reset_credits_cache_file);
             }
         }
 
@@ -849,9 +882,9 @@ abstract class aihelper
         $raw = is_file($cache_file) ? json_decode((string) file_get_contents($cache_file), true) : null;
         $raw = is_array($raw) ? $raw : null;
         $last_good = $raw !== null && !empty($raw['limits']) ? $raw['limits'] : null;
-        // a good result stays fresh for 5 min; while none exists yet, still back off 90s between
+        // a good result stays fresh for 1 min; while none exists yet, still back off 90s between
         // attempts so a rate-limited (429) endpoint isn't re-hit on every call
-        $ttl = $last_good !== null ? 300 : 90;
+        $ttl = $last_good !== null ? 60 : 90;
         if ($raw !== null && time() - (int) ($raw['time'] ?? 0) < $ttl) {
             self::$cli_usage_limits_cache[$tool] = ['time' => time(), 'limits' => $last_good];
             return $last_good;
