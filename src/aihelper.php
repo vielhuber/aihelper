@@ -2244,6 +2244,8 @@ abstract class aihelper
             [
                 'connection reset',
                 'unexpected eof',
+                'empty_stream',
+                'upstream stream closed before first payload',
                 'protocol_error',
                 'stream disconnected before completion',
                 'stream closed before response.completed',
