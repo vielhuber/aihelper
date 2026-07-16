@@ -144,6 +144,20 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame([true, false], $ai->promptAdditions);
     }
 
+    function test__transient_dns_errors_are_retried(): void
+    {
+        $ai = new RetryTestAihelper([
+            'AI Request fehlgeschlagen: dial tcp: lookup chatgpt.com on 127.0.0.11:53: server misbehaving'
+        ]);
+
+        $result = $ai->ask('test');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('ok', $result['response']);
+        $this->assertSame(2, $ai->attempts);
+        $this->assertSame([true, false], $ai->promptAdditions);
+    }
+
     function test__permanent_request_errors_are_not_retried(): void
     {
         $ai = new RetryTestAihelper(['invalid request']);

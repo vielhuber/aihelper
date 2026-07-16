@@ -2283,7 +2283,12 @@ abstract class aihelper
                 'stream disconnected before completion',
                 'stream closed before response.completed',
                 'operation timed out',
-                'request timed out'
+                'request timed out',
+                'server misbehaving',
+                'temporary failure in name resolution',
+                'could not resolve host',
+                'no such host',
+                'name or service not known'
             ]
             as $needle
         ) {
