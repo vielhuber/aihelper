@@ -2284,6 +2284,7 @@ abstract class aihelper
                 'stream closed before response.completed',
                 'operation timed out',
                 'request timed out',
+                'i/o timeout',
                 'server misbehaving',
                 'temporary failure in name resolution',
                 'could not resolve host',

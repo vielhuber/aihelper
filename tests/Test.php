@@ -147,6 +147,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__transient_dns_errors_are_retried(): void
     {
         $ai = new RetryTestAihelper([
+            'AI Request fehlgeschlagen: dial tcp: lookup chatgpt.com on 127.0.0.11:53: read udp 127.0.0.1:37313->127.0.0.11:53: i/o timeout',
             'AI Request fehlgeschlagen: dial tcp: lookup chatgpt.com on 127.0.0.11:53: server misbehaving'
         ]);
 
@@ -154,8 +155,8 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $this->assertTrue($result['success']);
         $this->assertSame('ok', $result['response']);
-        $this->assertSame(2, $ai->attempts);
-        $this->assertSame([true, false], $ai->promptAdditions);
+        $this->assertSame(3, $ai->attempts);
+        $this->assertSame([true, false, false], $ai->promptAdditions);
     }
 
     function test__permanent_request_errors_are_not_retried(): void
