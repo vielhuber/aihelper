@@ -159,6 +159,21 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame([true, false, false], $ai->promptAdditions);
     }
 
+    function test__transient_connection_errors_are_retried(): void
+    {
+        $ai = new RetryTestAihelper([
+            'AI Request fehlgeschlagen: dial tcp [2606:4700:4408::ac40:9bd1]:443: connect: network is unreachable',
+            'AI Request fehlgeschlagen: upstream connect error or disconnect/reset before headers. retried and the latest reset reason: connection timeout'
+        ]);
+
+        $result = $ai->ask('test');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('ok', $result['response']);
+        $this->assertSame(3, $ai->attempts);
+        $this->assertSame([true, false, false], $ai->promptAdditions);
+    }
+
     function test__permanent_request_errors_are_not_retried(): void
     {
         $ai = new RetryTestAihelper(['invalid request']);
@@ -441,6 +456,7 @@ TXT
         // fabricate a session that exceeds ~70% of test provider's ctx (128k).
         // ~90k tokens ≈ ~360k chars. use a compact mixture of roles.
         $bloat = str_repeat('Dies ist ein langer Gesprächsverlauf mit vielen Details. ', 400);
+        $path_marker = '/host/data/files/12345678-1234-1234-1234-123456789012/Datei mit Leerzeichen.docx';
         $history = [];
         // head: 10 prepended system-like prompts (matches autoCompactSession's keep_head)
         for ($i = 0; $i < 10; $i++) {
@@ -451,6 +467,7 @@ TXT
             $history[] = ['role' => 'user', 'content' => 'Frage ' . $i . ': ' . $bloat];
             $history[] = ['role' => 'assistant', 'content' => 'Antwort ' . $i . ': ' . $bloat];
         }
+        $history[20]['content'] .= ' Erzeugte Datei: ' . $path_marker;
         // tail: 6 recent messages that must stay verbatim (matches autoCompactSession's keep_tail)
         $tail_marker_user = 'TAIL_USER_MARKER_' . mt_rand(1000, 9999);
         $tail_marker_asst = 'TAIL_ASSISTANT_MARKER_' . mt_rand(1000, 9999);
@@ -507,6 +524,7 @@ TXT
             'Zusammenfassung des bisherigen Verlaufs',
             json_encode($summary_msg['content'])
         );
+        $this->assertStringContainsString($path_marker, json_encode($summary_msg['content'], JSON_UNESCAPED_SLASHES));
 
         // persistence: running summary should now live on disk under /tmp/aihelper-cache/
         $this->assertFileExists($cache_file, 'running summary must be persisted to disk');

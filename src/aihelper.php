@@ -2285,6 +2285,8 @@ abstract class aihelper
                 'operation timed out',
                 'request timed out',
                 'i/o timeout',
+                'connection timeout',
+                'network is unreachable',
                 'server misbehaving',
                 'temporary failure in name resolution',
                 'could not resolve host',
@@ -3350,6 +3352,43 @@ abstract class aihelper
             }
         }
         $transcript = implode("\n\n", $transcript_lines);
+        $preserved_paths = [];
+        $collect_paths = function (mixed $node) use (&$collect_paths, &$preserved_paths): void {
+            if (is_object($node)) {
+                $node = (array) $node;
+            }
+            if (is_array($node)) {
+                foreach ($node as $value) {
+                    $collect_paths($value);
+                }
+                return;
+            }
+            if (!is_string($node)) {
+                return;
+            }
+            $text = str_replace('\\/', '/', $node);
+            $candidate = trim($text);
+            if (
+                !str_contains($candidate, "\n") &&
+                preg_match('#^(?:/(?:host|var|tmp|home|root|mnt)/|[A-Za-z]:\\\\)#u', $candidate) === 1
+            ) {
+                $preserved_paths[rtrim($candidate, " \t.,;:!?\"'`)]}>\\")] = true;
+            }
+            if (
+                preg_match_all(
+                    '#(?<![A-Za-z0-9])(?:/(?:host|var|tmp|home|root|mnt)/[^\r\n\"\'`<>]+|[A-Za-z]:\\\\[^\r\n\"\'`<>]+)#u',
+                    $text,
+                    $matches
+                ) === false
+            ) {
+                return;
+            }
+            foreach ($matches[0] as $path) {
+                $preserved_paths[rtrim($path, " \t.,;:!?\"'`)]}>\\")] = true;
+            }
+        };
+        $collect_paths($middle);
+        $collect_paths($this->auto_compact_summary);
 
         // ---- nested summarizer call ---------------------------------------
         $system_prompt =
@@ -3364,7 +3403,7 @@ abstract class aihelper
             "\n" .
             '- Vom Nutzer geäußerte Präferenzen und Entscheidungen' .
             "\n" .
-            '- Wichtige Werte (IDs, Namen, Datumsangaben) die im weiteren Verlauf referenziert werden könnten' .
+            '- Wichtige Werte (IDs, Namen, Datumsangaben und sämtliche Dateipfade) die im weiteren Verlauf referenziert werden könnten' .
             "\n\n" .
             'Format: Markdown mit Abschnitten "Ziel", "Ausgeführte Aktionen", "Schlüsselwerte", "Offene Punkte".' .
             "\n" .
@@ -3419,6 +3458,15 @@ abstract class aihelper
         }
 
         // ---- apply result to session --------------------------------------
+        if ($preserved_paths !== []) {
+            $paths_section = "## Dateipfade\n" .
+                implode("\n", array_map(fn($path): string => '- `' . $path . '`', array_keys($preserved_paths)));
+            if ($new_summary === null) {
+                $new_summary = $paths_section;
+            } elseif (!str_contains($new_summary, $paths_section)) {
+                $new_summary .= "\n\n" . $paths_section;
+            }
+        }
         if ($new_summary === null) {
             // summarizer failed — drop middle without summary rather than
             // blocking the user. logged above so we can debug later.
