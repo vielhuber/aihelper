@@ -715,7 +715,7 @@ abstract class aihelper
                 array_merge(
                     ['/root/.codex/auth.json'],
                     glob('/root/.cli-proxy-api/codex*.json') ?: [],
-                    glob('/host/data/cliproxyapi/auth/codex*.json') ?: []
+                    glob('/host/data/server/cliproxyapi/auth/codex*.json') ?: []
                 )
             )
         );
@@ -973,7 +973,7 @@ abstract class aihelper
                     array_merge(
                         ['/root/.gemini/antigravity-cli/antigravity-oauth-token'],
                         glob('/root/.cli-proxy-api/antigravity*.json') ?: [],
-                        glob('/host/data/cliproxyapi/auth/antigravity*.json') ?: []
+                        glob('/host/data/server/cliproxyapi/auth/antigravity*.json') ?: []
                     )
                 )
             );
@@ -1081,7 +1081,7 @@ abstract class aihelper
                 array_merge(
                     ['/root/.claude/.credentials.json'],
                     glob('/root/.cli-proxy-api/claude*.json') ?: [],
-                    glob('/host/data/cliproxyapi/auth/claude*.json') ?: []
+                    glob('/host/data/server/cliproxyapi/auth/claude*.json') ?: []
                 )
             )
         );
@@ -1323,7 +1323,7 @@ abstract class aihelper
         bool $group_by = false
     ): array {
         $log_files = [];
-        foreach (['/root/.cli-proxy-api/logs', '/host/data/cliproxyapi/logs'] as $dir) {
+        foreach (['/root/.cli-proxy-api/logs', '/host/data/server/cliproxyapi/logs'] as $dir) {
             $log_files = array_merge($log_files, glob($dir . '/*.log') ?: []);
         }
         $log_files = array_values(array_unique($log_files));
@@ -1959,7 +1959,7 @@ abstract class aihelper
         $date_until_time = $date_until !== null ? strtotime($date_until) : false;
         $deleted = [];
         $bytes = 0;
-        foreach (['/root/.cli-proxy-api/logs', '/host/data/cliproxyapi/logs'] as $dir) {
+        foreach (['/root/.cli-proxy-api/logs', '/host/data/server/cliproxyapi/logs'] as $dir) {
             foreach (glob($dir . '/*.log') ?: [] as $file) {
                 // the request timestamp sits in the file head, above the body
                 $timestamp = null;
