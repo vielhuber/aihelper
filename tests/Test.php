@@ -54,7 +54,7 @@ final class RetryTestAihelper extends aihelper
     {
     }
 
-    protected function retryBackoffSeconds(int $attempt, bool $transient): int
+    protected function retryBackoffSeconds(int $attempt, bool $transient, bool $authUnavailable = false): int
     {
         return 0;
     }
@@ -113,6 +113,33 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame('ok', $result['response']);
         $this->assertSame(3, $ai->attempts);
         $this->assertSame([true, false, false], $ai->promptAdditions);
+    }
+
+    function test__auth_unavailable_uses_extended_retry_window(): void
+    {
+        $ai = new RetryTestAihelper(
+            array_fill(0, 8, 'AI Request fehlgeschlagen: auth_unavailable: no auth available')
+        );
+
+        $result = $ai->ask('test');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('ok', $result['response']);
+        $this->assertSame(9, $ai->attempts);
+        $this->assertSame([true, false, false, false, false, false, false, false, false], $ai->promptAdditions);
+    }
+
+    function test__auth_unavailable_backoff_covers_five_minutes(): void
+    {
+        $method = new \ReflectionMethod(aihelper::class, 'retryBackoffSeconds');
+        $ai = new RetryTestAihelper([]);
+        $backoffs = [];
+        for ($attempt = 1; $attempt <= 8; $attempt++) {
+            $backoffs[] = $method->invoke($ai, $attempt, true, true);
+        }
+
+        $this->assertSame([5, 10, 20, 40, 60, 60, 60, 60], $backoffs);
+        $this->assertSame(315, array_sum($backoffs));
     }
 
     function test__transient_stream_transport_errors_are_retried(): void

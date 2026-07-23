@@ -2195,17 +2195,20 @@ abstract class aihelper
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
         $max_tries = $this->max_tries;
         $extra_transient_retries = max(0, 3 - $this->max_tries);
+        $extra_auth_unavailable_retries = max(0, 9 - $this->max_tries);
         $transient_retry = false;
+        $auth_unavailable_retry = false;
         $attempt = 0;
         while ($return['success'] === false && $max_tries > 0) {
             if ($attempt > 0) {
-                $backoff_s = $this->retryBackoffSeconds($attempt, $transient_retry);
+                $backoff_s = $this->retryBackoffSeconds($attempt, $transient_retry, $auth_unavailable_retry);
                 $this->log('⚠️ tries left: ' . $max_tries . ' — backoff ' . $backoff_s . 's');
                 if ($backoff_s > 0) {
                     sleep($backoff_s);
                 }
             }
             $transient_retry = false;
+            $auth_unavailable_retry = false;
             try {
                 $return = $this->askThis(
                     prompt: $prompt,
@@ -2236,8 +2239,21 @@ abstract class aihelper
             }
             if ($return['success'] === false && $this->isTransientRequestError($return['response'] ?? '')) {
                 $transient_retry = true;
+                $retry_response = is_string($return['response'] ?? null)
+                    ? strtolower($return['response'])
+                    : strtolower(
+                        json_encode($return['response'] ?? null, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
+                    );
+                $auth_unavailable_retry =
+                    str_contains($retry_response, 'auth_unavailable') ||
+                    str_contains($retry_response, 'no auth available');
             }
-            if ($transient_retry && $extra_transient_retries > 0) {
+            if ($auth_unavailable_retry) {
+                if ($extra_auth_unavailable_retries > 0) {
+                    $extra_auth_unavailable_retries--;
+                    $max_tries++;
+                }
+            } elseif ($transient_retry && $extra_transient_retries > 0) {
                 $extra_transient_retries--;
                 $max_tries++;
             }
@@ -2317,8 +2333,11 @@ abstract class aihelper
         return false;
     }
 
-    protected function retryBackoffSeconds(int $attempt, bool $transient): int
+    protected function retryBackoffSeconds(int $attempt, bool $transient, bool $authUnavailable = false): int
     {
+        if ($authUnavailable) {
+            return min(60, 5 * (int) pow(2, $attempt - 1));
+        }
         return $transient ? min(4, (int) pow(2, $attempt - 1)) : 15 * (int) pow(2, $attempt - 1);
     }
 
@@ -3881,17 +3900,20 @@ abstract class aihelper
             $return['success'] = false;
             $max_tries = $this->max_tries;
             $extra_transient_retries = max(0, 3 - $this->max_tries);
+            $extra_auth_unavailable_retries = max(0, 9 - $this->max_tries);
             $transient_retry = false;
+            $auth_unavailable_retry = false;
             $attempt = 0;
             while ($return['success'] === false && $max_tries > 0) {
                 if ($attempt > 0) {
-                    $backoff_s = $this->retryBackoffSeconds($attempt, $transient_retry);
+                    $backoff_s = $this->retryBackoffSeconds($attempt, $transient_retry, $auth_unavailable_retry);
                     $this->log('⚠️ tries left: ' . $max_tries . ' — backoff ' . $backoff_s . 's');
                     if ($backoff_s > 0) {
                         sleep($backoff_s);
                     }
                 }
                 $transient_retry = false;
+                $auth_unavailable_retry = false;
                 try {
                     $return = $this->askThis(
                         prompt: null,
@@ -3924,8 +3946,24 @@ abstract class aihelper
                 }
                 if ($return['success'] === false && $this->isTransientRequestError($return['response'] ?? '')) {
                     $transient_retry = true;
+                    $retry_response = is_string($return['response'] ?? null)
+                        ? strtolower($return['response'])
+                        : strtolower(
+                            json_encode(
+                                $return['response'] ?? null,
+                                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                            ) ?: ''
+                        );
+                    $auth_unavailable_retry =
+                        str_contains($retry_response, 'auth_unavailable') ||
+                        str_contains($retry_response, 'no auth available');
                 }
-                if ($transient_retry && $extra_transient_retries > 0) {
+                if ($auth_unavailable_retry) {
+                    if ($extra_auth_unavailable_retries > 0) {
+                        $extra_auth_unavailable_retries--;
+                        $max_tries++;
+                    }
+                } elseif ($transient_retry && $extra_transient_retries > 0) {
                     $extra_transient_retries--;
                     $max_tries++;
                 }
