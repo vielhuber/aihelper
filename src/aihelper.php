@@ -3860,6 +3860,16 @@ abstract class aihelper
                         // try JSON-aware truncation
                         $decoded = json_decode(trim($output), true);
                         if ($decoded !== null) {
+                            $compact = json_encode(
+                                $decoded,
+                                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                            );
+                            if (is_string($compact) && mb_strlen($compact) <= $max_output_chars) {
+                                $output = $compact;
+                                $decoded = null;
+                            }
+                        }
+                        if ($decoded !== null) {
                             $truncate_json = function ($data, int $max_str = 500, int $max_arr = 5) use (
                                 &$truncate_json
                             ) {
@@ -3890,11 +3900,19 @@ abstract class aihelper
                                 $truncate_json($decoded),
                                 JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT
                             );
-                        } else {
+                            $output =
+                                $trimmed .
+                                "\n\n[... truncated from $original_len to " .
+                                mb_strlen($trimmed) .
+                                ' chars]';
+                        } elseif (mb_strlen($output) > $max_output_chars) {
                             $trimmed = mb_substr($output, 0, $max_output_chars);
+                            $output =
+                                $trimmed .
+                                "\n\n[... truncated from $original_len to " .
+                                mb_strlen($trimmed) .
+                                ' chars]';
                         }
-                        $output =
-                            $trimmed . "\n\n[... truncated from $original_len to " . mb_strlen($trimmed) . ' chars]';
                     }
                     $this->log(mb_substr($output, 0, 200), 'local tool result');
                 }
@@ -9159,11 +9177,9 @@ abstract class ai_harness extends ai_anthropic
     /**
      * Build the process arguments for a single turn.
      *
-     * @param bool $resume
-     * @param string|null $reference
      * @return array
      */
-    abstract protected function buildArgs(bool $resume, ?string $reference): array;
+    abstract protected function buildArgs(): array;
 
     /**
      * Consume one decoded harness event: emit anthropic streaming chunks
@@ -9226,10 +9242,6 @@ abstract class ai_harness extends ai_anthropic
 
     protected function resolveBinary(): ?string
     {
-        $configured = getenv('AIHELPER_' . strtoupper($this->name) . '_BINARY');
-        if (is_string($configured) && $configured !== '' && is_executable($configured)) {
-            return $configured;
-        }
         $found = trim((string) shell_exec('command -v ' . escapeshellarg($this->binaryName()) . ' 2>/dev/null'));
         return $found !== '' && is_executable($found) ? $found : null;
     }
@@ -9248,49 +9260,6 @@ abstract class ai_harness extends ai_anthropic
             throw new \RuntimeException('harness: failed to create workspace ' . $dir);
         }
         return $dir;
-    }
-
-    /**
-     * Stable uuid derived from the aihelper session id, so one chat always
-     * maps to the same harness session and stays resumable by hand.
-     *
-     * @return string
-     */
-    protected function harnessSessionId(): string
-    {
-        $hash = md5((string) $this->session_id);
-        return substr($hash, 0, 8) .
-            '-' .
-            substr($hash, 8, 4) .
-            '-4' .
-            substr($hash, 13, 3) .
-            '-a' .
-            substr($hash, 17, 3) .
-            '-' .
-            substr($hash, 20, 12);
-    }
-
-    protected function sessionRefFile(): string
-    {
-        return $this->workspace() . '/.aihelper-' . $this->name . '-session';
-    }
-
-    protected function storedSessionRef(): ?string
-    {
-        $file = $this->sessionRefFile();
-        if (!is_file($file)) {
-            return null;
-        }
-        $reference = trim((string) file_get_contents($file));
-        return $reference !== '' ? $reference : null;
-    }
-
-    protected function storeSessionRef(string $reference): void
-    {
-        if (trim($reference) === '') {
-            return;
-        }
-        file_put_contents($this->sessionRefFile(), $reference);
     }
 
     protected function harnessEnvironment(): ?array
@@ -9346,8 +9315,7 @@ abstract class ai_harness extends ai_anthropic
             throw new \RuntimeException('harness: no user prompt to hand over.');
         }
 
-        $reference = $this->storedSessionRef();
-        $command = array_merge(['setsid', $binary], $this->buildArgs($reference !== null, $reference));
+        $command = array_merge(['setsid', $binary], $this->buildArgs());
         // the mcp config carries bearer tokens and must not reach the log
         $loggable = $command;
         foreach ($loggable as $loggable__key => $loggable__value) {
@@ -9392,7 +9360,6 @@ abstract class ai_harness extends ai_anthropic
         $deadline = time() + (int) $this->timeout;
         $buffer = '';
         $errors = '';
-        $events = 0;
         $exit_code = null;
         $drain_until = null;
         while (true) {
@@ -9431,7 +9398,6 @@ abstract class ai_harness extends ai_anthropic
                     if (!is_array($event)) {
                         continue;
                     }
-                    $events++;
                     $this->handleEvent($event, $result, $emit);
                 }
             }
@@ -9467,11 +9433,6 @@ abstract class ai_harness extends ai_anthropic
             $message = trim($errors) !== '' ? trim($errors) : 'harness exited with code ' . $exit_code;
             $result->result->error = (object) ['message' => $message];
             $this->log($message, 'harness failed');
-            // a resume that yielded no event at all points at a session the
-            // harness cannot open — drop the marker so the next turn restarts
-            if ($reference !== null && $events === 0 && is_file($this->sessionRefFile())) {
-                unlink($this->sessionRefFile());
-            }
         }
 
         // the parent short-circuits into its own tool loop on a trailing
@@ -9571,7 +9532,9 @@ class ai_claudecode extends ai_harness
     {
         $overrides = [];
         if ($this->url !== null && trim($this->url) !== '') {
-            $overrides['ANTHROPIC_BASE_URL'] = rtrim($this->url, '/');
+            // claude code appends "/v1" itself, while gateway urls are usually
+            // configured with it — keeping both would request "/v1/v1/messages"
+            $overrides['ANTHROPIC_BASE_URL'] = preg_replace('#/v1/?$#', '', rtrim($this->url, '/'));
         }
         if ($this->api_key !== null && trim($this->api_key) !== '') {
             $overrides['ANTHROPIC_AUTH_TOKEN'] = $this->api_key;
@@ -9579,14 +9542,14 @@ class ai_claudecode extends ai_harness
         return $overrides === [] ? null : array_merge(getenv(), $overrides);
     }
 
-    protected function buildArgs(bool $resume, ?string $reference): array
+    protected function buildArgs(): array
     {
-        $args = ['-p', '--verbose', '--output-format', 'stream-json'];
+        // "--continue" picks the newest conversation of the working directory
+        // and falls back to a fresh one when the directory has none yet
+        $args = ['-p', '--verbose', '--output-format', 'stream-json', '--continue'];
         if ($this->stream === true) {
             $args[] = '--include-partial-messages';
         }
-        $args[] = $resume ? '--resume' : '--session-id';
-        $args[] = $resume ? (string) $reference : $this->harnessSessionId();
         if ($this->model !== null) {
             $args[] = '--model';
             $args[] = $this->model;
@@ -9623,11 +9586,8 @@ class ai_claudecode extends ai_harness
     {
         $type = $event['type'] ?? null;
 
-        // the session exists from the init event on — remembering it only
-        // after a successful result would make an aborted turn unresumable
-        // while "--session-id" refuses to reuse the very same id
         if ($type === 'system' && ($event['subtype'] ?? null) === 'init' && !empty($event['session_id'])) {
-            $this->storeSessionRef((string) $event['session_id']);
+            $this->log((string) $event['session_id'], 'harness session');
             return;
         }
 
@@ -9713,10 +9673,11 @@ class ai_codex extends ai_harness
         return 'codex';
     }
 
-    protected function buildArgs(bool $resume, ?string $reference): array
+    protected function buildArgs(): array
     {
-        // "exec resume" accepts no --sandbox flag and wants its options in
-        // front of the session id, so the mode goes through the config layer
+        // "exec resume" accepts no --sandbox flag, so the mode goes through the
+        // config layer; "--last" is filtered by working directory and starts a
+        // fresh thread when the directory has none yet
         $options = [
             '--json',
             '--skip-git-repo-check',
@@ -9731,10 +9692,7 @@ class ai_codex extends ai_harness
             $options[] = '-c';
             $options[] = 'model_reasoning_effort="' . $this->effort . '"';
         }
-        if ($resume) {
-            return array_merge(['exec', 'resume'], $options, [(string) $reference]);
-        }
-        return array_merge(['exec'], $options);
+        return array_merge(['exec', 'resume', '--last'], $options);
     }
 
     protected function handleEvent(array $event, object $result, ?\Closure $emit): void
@@ -9742,7 +9700,7 @@ class ai_codex extends ai_harness
         $type = $event['type'] ?? null;
 
         if ($type === 'thread.started' && !empty($event['thread_id'])) {
-            $this->storeSessionRef((string) $event['thread_id']);
+            $this->log((string) $event['thread_id'], 'harness session');
             $this->emitAnthropicEvent($emit, [
                 'type' => 'message_start',
                 'message' => [

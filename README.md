@@ -162,6 +162,18 @@ aihelper::callMcpTool(
 // ['jsonrpc' => '2.0', 'id' => 123, 'result' => ['content' => [['type' => 'text', 'text' => '...']]]]
 ```
 
+### cli harnesses
+
+the providers `claudecode` and `codex` drive the locally installed cli agent instead of a chat completion endpoint. it owns its system prompt, tools and history, so only the newest user turn is handed over. install both and log them in once:
+
+```
+npm i -g @anthropic-ai/claude-code @openai/codex
+claude auth login
+codex login --device-auth
+```
+
+every turn continues the newest thread of `workdir` and opens a new one only when that directory has none yet.
+
 ### streaming
 
 aihelper can stream model output to a browser using server‑sent events (see). in this mode the php backend connects to the model provider with http streaming and forwards chunks to the client as sse events in real time. see an example implementation at [/tests/stream/index.html](tests/stream/index.html).
