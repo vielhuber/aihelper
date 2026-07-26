@@ -20,6 +20,7 @@ abstract class aihelper
     protected ?float $temperature = null;
     protected ?int $timeout = null;
     protected ?string $api_key = null;
+    protected ?string $workdir = null;
     protected ?string $log = null;
     protected ?int $max_tries = null;
     protected ?bool $enable_thinking = null;
@@ -49,6 +50,7 @@ abstract class aihelper
     protected ?bool $auto_compact = null;
     protected ?string $auto_compact_summary = null;
     protected ?string $auto_compact_cache = null;
+    protected array $auto_compact_removed_messages = [];
     protected static ?array $artificial_analysis_models = null;
     protected static array $cli_usage_limits_cache = [];
     protected static array $cli_usage_reset_credits_cache = [];
@@ -69,7 +71,8 @@ abstract class aihelper
         ?bool $stream = null,
         ?string $url = null,
         ?bool $enable_thinking = null,
-        ?bool $auto_compact = null
+        ?bool $auto_compact = null,
+        ?string $workdir = null
     ): ?self {
         if ($provider === 'openai') {
             return new ai_openai(
@@ -280,6 +283,46 @@ abstract class aihelper
                 auto_compact: $auto_compact
             );
         }
+        if ($provider === 'claudecode') {
+            return new ai_claudecode(
+                model: $model,
+                effort: $effort,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream,
+                url: $url,
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact,
+                workdir: $workdir
+            );
+        }
+        if ($provider === 'codex') {
+            return new ai_codex(
+                model: $model,
+                effort: $effort,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream,
+                url: $url,
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact,
+                workdir: $workdir
+            );
+        }
         if ($provider === 'test') {
             return new ai_test(
                 model: $model,
@@ -318,6 +361,8 @@ abstract class aihelper
                 ai_lmstudio::class,
                 ai_nvidia::class,
                 ai_elevenlabs::class,
+                ai_claudecode::class,
+                ai_codex::class,
                 ai_test::class
             ]
             as $providerClass
@@ -577,8 +622,12 @@ abstract class aihelper
         ?bool $stream = null,
         ?string $url = null,
         ?bool $enable_thinking = null,
-        ?bool $auto_compact = null
+        ?bool $auto_compact = null,
+        ?string $workdir = null
     ) {
+        if ($workdir !== null) {
+            $this->workdir = $workdir;
+        }
         if ($temperature === null) {
             $temperature = 1.0;
         }
@@ -685,14 +734,17 @@ abstract class aihelper
         }
         if (
             $owned_by === 'anthropic' ||
-            ($owned_by === null && (str_contains($model, 'claude') || $this->name === 'anthropic'))
+            ($owned_by === null &&
+                (str_contains($model, 'claude') || in_array($this->name, ['anthropic', 'claudecode'], true)))
         ) {
             $tool = 'claude';
         }
         if (
             $owned_by === 'openai' ||
             ($owned_by === null &&
-                (str_contains($model, 'codex') || ($this->name === 'cliproxyapi' && str_contains($model, 'gpt'))))
+                (str_contains($model, 'codex') ||
+                    $this->name === 'codex' ||
+                    ($this->name === 'cliproxyapi' && str_contains($model, 'gpt'))))
         ) {
             $tool = 'codex';
         }
@@ -2195,20 +2247,20 @@ abstract class aihelper
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
         $max_tries = $this->max_tries;
         $extra_transient_retries = max(0, 3 - $this->max_tries);
-        $extra_auth_unavailable_retries = max(0, 9 - $this->max_tries);
+        $extra_availability_retries = max(0, 9 - $this->max_tries);
         $transient_retry = false;
-        $auth_unavailable_retry = false;
+        $availability_retry = false;
         $attempt = 0;
         while ($return['success'] === false && $max_tries > 0) {
             if ($attempt > 0) {
-                $backoff_s = $this->retryBackoffSeconds($attempt, $transient_retry, $auth_unavailable_retry);
+                $backoff_s = $this->retryBackoffSeconds($attempt, $transient_retry, $availability_retry);
                 $this->log('⚠️ tries left: ' . $max_tries . ' — backoff ' . $backoff_s . 's');
                 if ($backoff_s > 0) {
                     sleep($backoff_s);
                 }
             }
             $transient_retry = false;
-            $auth_unavailable_retry = false;
+            $availability_retry = false;
             try {
                 $return = $this->askThis(
                     prompt: $prompt,
@@ -2244,13 +2296,20 @@ abstract class aihelper
                     : strtolower(
                         json_encode($return['response'] ?? null, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
                     );
-                $auth_unavailable_retry =
+                $availability_retry =
                     str_contains($retry_response, 'auth_unavailable') ||
-                    str_contains($retry_response, 'no auth available');
+                    str_contains($retry_response, 'no auth available') ||
+                    str_contains($retry_response, 'connection refused') ||
+                    str_contains($retry_response, 'no response from provider') ||
+                    str_contains($retry_response, 'too many concurrent requests') ||
+                    str_contains($retry_response, 'temporarily unavailable') ||
+                    str_contains($retry_response, 'upstream connect error') ||
+                    str_contains($retry_response, 'connection termination') ||
+                    str_contains($retry_response, '(http 0)');
             }
-            if ($auth_unavailable_retry) {
-                if ($extra_auth_unavailable_retries > 0) {
-                    $extra_auth_unavailable_retries--;
+            if ($availability_retry) {
+                if ($extra_availability_retries > 0) {
+                    $extra_availability_retries--;
                     $max_tries++;
                 }
             } elseif ($transient_retry && $extra_transient_retries > 0) {
@@ -2286,12 +2345,14 @@ abstract class aihelper
             $message = json_encode($message, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: serialize($message);
         }
         $message = strtolower($message);
-        if (preg_match('/\b(?:http\s*)?(?:408|502|503)\b/', $message) === 1) {
+        if (preg_match('/\b(?:http\s*)?(?:408|500|502|503|504)\b/', $message) === 1) {
             return true;
         }
         foreach (
             [
                 'connection reset',
+                'upstream connect error',
+                'connection termination',
                 'unexpected eof',
                 'empty_stream',
                 'upstream stream closed before first payload',
@@ -2303,6 +2364,10 @@ abstract class aihelper
                 'i/o timeout',
                 'connection timeout',
                 'network is unreachable',
+                'connection refused',
+                'no response from provider',
+                'too many concurrent requests',
+                '(http 0)',
                 'server misbehaving',
                 'temporary failure in name resolution',
                 'could not resolve host',
@@ -2333,9 +2398,9 @@ abstract class aihelper
         return false;
     }
 
-    protected function retryBackoffSeconds(int $attempt, bool $transient, bool $authUnavailable = false): int
+    protected function retryBackoffSeconds(int $attempt, bool $transient, bool $availabilityFailure = false): int
     {
-        if ($authUnavailable) {
+        if ($availabilityFailure) {
             return min(60, 5 * (int) pow(2, $attempt - 1));
         }
         return $transient ? min(4, (int) pow(2, $attempt - 1)) : 15 * (int) pow(2, $attempt - 1);
@@ -3321,6 +3386,7 @@ abstract class aihelper
         $head = array_slice($session, 0, $head_end);
         $middle = array_slice($session, $head_end, $tail_start - $head_end);
         $tail = array_slice($session, $tail_start);
+        $this->auto_compact_removed_messages = array_merge($this->auto_compact_removed_messages, $middle);
 
         // ---- flatten middle to plain-text transcript ----------------------
         // recursive extractor (closure so we don't need a named helper) —
@@ -3784,7 +3850,10 @@ abstract class aihelper
                         $output = json_encode($result, JSON_UNESCAPED_UNICODE);
                     }
                     // truncate very large tool outputs to prevent context overflow
-                    $max_output_chars = 100000;
+                    $max_output_chars = min(
+                        500000,
+                        max(100000, (int) ($this->getContextLengthForModel() * 2))
+                    );
                     if (mb_strlen($output) > $max_output_chars) {
                         $original_len = mb_strlen($output);
                         $trimmed = $output;
@@ -3900,20 +3969,20 @@ abstract class aihelper
             $return['success'] = false;
             $max_tries = $this->max_tries;
             $extra_transient_retries = max(0, 3 - $this->max_tries);
-            $extra_auth_unavailable_retries = max(0, 9 - $this->max_tries);
+            $extra_availability_retries = max(0, 9 - $this->max_tries);
             $transient_retry = false;
-            $auth_unavailable_retry = false;
+            $availability_retry = false;
             $attempt = 0;
             while ($return['success'] === false && $max_tries > 0) {
                 if ($attempt > 0) {
-                    $backoff_s = $this->retryBackoffSeconds($attempt, $transient_retry, $auth_unavailable_retry);
+                    $backoff_s = $this->retryBackoffSeconds($attempt, $transient_retry, $availability_retry);
                     $this->log('⚠️ tries left: ' . $max_tries . ' — backoff ' . $backoff_s . 's');
                     if ($backoff_s > 0) {
                         sleep($backoff_s);
                     }
                 }
                 $transient_retry = false;
-                $auth_unavailable_retry = false;
+                $availability_retry = false;
                 try {
                     $return = $this->askThis(
                         prompt: null,
@@ -3954,13 +4023,20 @@ abstract class aihelper
                                 JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
                             ) ?: ''
                         );
-                    $auth_unavailable_retry =
+                    $availability_retry =
                         str_contains($retry_response, 'auth_unavailable') ||
-                        str_contains($retry_response, 'no auth available');
+                        str_contains($retry_response, 'no auth available') ||
+                        str_contains($retry_response, 'connection refused') ||
+                        str_contains($retry_response, 'no response from provider') ||
+                        str_contains($retry_response, 'too many concurrent requests') ||
+                        str_contains($retry_response, 'temporarily unavailable') ||
+                        str_contains($retry_response, 'upstream connect error') ||
+                        str_contains($retry_response, 'connection termination') ||
+                        str_contains($retry_response, '(http 0)');
                 }
-                if ($auth_unavailable_retry) {
-                    if ($extra_auth_unavailable_retries > 0) {
-                        $extra_auth_unavailable_retries--;
+                if ($availability_retry) {
+                    if ($extra_availability_retries > 0) {
+                        $extra_availability_retries--;
                         $max_tries++;
                     }
                 } elseif ($transient_retry && $extra_transient_retries > 0) {
@@ -5303,6 +5379,11 @@ abstract class aihelper
         return self::$sessions[$this->session_id];
     }
 
+    public function getAutoCompactRemovedMessages(): array
+    {
+        return $this->auto_compact_removed_messages;
+    }
+
     public function prependPromptToSession(string $prompt, mixed $files = null): void
     {
         $prompt = $this->trimPrompt($prompt);
@@ -5525,7 +5606,8 @@ abstract class aihelper
         $this->stream_think_tag_buf = '';
         $this->stream_callback = null;
 
-        if ($this->name === 'anthropic' || $this->name === 'test') {
+        // the cli harnesses hand over literal anthropic streaming events
+        if (in_array($this->name, ['anthropic', 'test', 'claudecode', 'codex'], true)) {
             // mimic non stream result
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -9050,6 +9132,680 @@ class ai_cliproxyapi extends ai_openrouter
             return ($response->status ?? 0) >= 200 && ($response->status ?? 0) < 300;
         } catch (\Exception) {
             return false;
+        }
+    }
+}
+
+/**
+ * Base for the local agentic CLI harnesses (Claude Code, Codex).
+ *
+ * Unlike every other provider these do not call a chat completion endpoint:
+ * they drive a local CLI process that owns its own system prompt, tool
+ * execution and conversation history. Only the newest user turn is handed
+ * over — continuity comes from a harness session keyed by the aihelper
+ * session id, which keeps the very same conversation resumable by hand from
+ * a terminal.
+ */
+abstract class ai_harness extends ai_anthropic
+{
+    public ?bool $supports_mcp_remote = false;
+
+    public ?bool $supports_stream = true;
+
+    protected ?float $harness_costs = null;
+
+    abstract protected function binaryName(): string;
+
+    /**
+     * Build the process arguments for a single turn.
+     *
+     * @param bool $resume
+     * @param string|null $reference
+     * @return array
+     */
+    abstract protected function buildArgs(bool $resume, ?string $reference): array;
+
+    /**
+     * Consume one decoded harness event: emit anthropic streaming chunks
+     * through $emit and fill the mimicked non-stream result.
+     *
+     * @param array $event
+     * @param object $result
+     * @param \Closure|null $emit
+     * @return void
+     */
+    abstract protected function handleEvent(array $event, object $result, ?\Closure $emit): void;
+
+    public function fetchModelsFromProvider(): array
+    {
+        return $this->models;
+    }
+
+    public function ping(): bool
+    {
+        return $this->resolveBinary() !== null;
+    }
+
+    /**
+     * The harness runs its own tool loop, so the local one of the parent must
+     * stay dormant — an empty tool list keeps mcp_servers_tools_map empty.
+     *
+     * @param string $schema_key
+     * @param bool $wrap_function_type
+     * @param array $strip_schema_keys
+     * @return array
+     */
+    protected function buildLocalToolsArgs(
+        string $schema_key = 'parameters',
+        bool $wrap_function_type = false,
+        array $strip_schema_keys = []
+    ): array {
+        return [];
+    }
+
+    /**
+     * The harness reports the effective price of the turn, so the token price
+     * table of the parent would only ever be an approximation.
+     *
+     * @param mixed $response
+     * @param array $return
+     * @return void
+     */
+    protected function addCosts(mixed $response, array &$return): void
+    {
+        if ($this->harness_costs === null) {
+            parent::addCosts($response, $return);
+            return;
+        }
+        $return['costs'] += round($this->harness_costs, 5);
+        if (!isset($return['output_tokens'])) {
+            $return['output_tokens'] = 0;
+        }
+        $return['output_tokens'] += (int) ($response?->result?->usage?->output_tokens ?? 0);
+    }
+
+    protected function resolveBinary(): ?string
+    {
+        $configured = getenv('AIHELPER_' . strtoupper($this->name) . '_BINARY');
+        if (is_string($configured) && $configured !== '' && is_executable($configured)) {
+            return $configured;
+        }
+        $found = trim((string) shell_exec('command -v ' . escapeshellarg($this->binaryName()) . ' 2>/dev/null'));
+        return $found !== '' && is_executable($found) ? $found : null;
+    }
+
+    protected function workspace(): string
+    {
+        $dir = $this->workdir;
+        if ($dir === null || trim($dir) === '') {
+            $dir =
+                sys_get_temp_dir() .
+                '/aihelper-harness/' .
+                preg_replace('/[^a-zA-Z0-9_\-]/', '_', (string) $this->session_id);
+        }
+        $dir = rtrim($dir, '/');
+        if (!is_dir($dir) && !mkdir($dir, 0777, true) && !is_dir($dir)) {
+            throw new \RuntimeException('harness: failed to create workspace ' . $dir);
+        }
+        return $dir;
+    }
+
+    /**
+     * Stable uuid derived from the aihelper session id, so one chat always
+     * maps to the same harness session and stays resumable by hand.
+     *
+     * @return string
+     */
+    protected function harnessSessionId(): string
+    {
+        $hash = md5((string) $this->session_id);
+        return substr($hash, 0, 8) .
+            '-' .
+            substr($hash, 8, 4) .
+            '-4' .
+            substr($hash, 13, 3) .
+            '-a' .
+            substr($hash, 17, 3) .
+            '-' .
+            substr($hash, 20, 12);
+    }
+
+    protected function sessionRefFile(): string
+    {
+        return $this->workspace() . '/.aihelper-' . $this->name . '-session';
+    }
+
+    protected function storedSessionRef(): ?string
+    {
+        $file = $this->sessionRefFile();
+        if (!is_file($file)) {
+            return null;
+        }
+        $reference = trim((string) file_get_contents($file));
+        return $reference !== '' ? $reference : null;
+    }
+
+    protected function storeSessionRef(string $reference): void
+    {
+        if (trim($reference) === '') {
+            return;
+        }
+        file_put_contents($this->sessionRefFile(), $reference);
+    }
+
+    protected function harnessEnvironment(): ?array
+    {
+        return null;
+    }
+
+    protected function emitAnthropicEvent(?\Closure $emit, array $event): void
+    {
+        if ($emit === null) {
+            return;
+        }
+        $emit(
+            'event: ' .
+                ($event['type'] ?? 'message_delta') .
+                "\n" .
+                'data: ' .
+                json_encode($event, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) .
+                "\n\n"
+        );
+    }
+
+    protected function makeApiCall(?array $args = null): mixed
+    {
+        $binary = $this->resolveBinary();
+        if ($binary === null) {
+            throw new \RuntimeException('harness: binary "' . $this->binaryName() . '" not found.');
+        }
+
+        $prompt = '';
+        foreach (array_reverse($args['messages'] ?? []) as $message) {
+            if (($message['role'] ?? null) !== 'user') {
+                continue;
+            }
+            $content = $message['content'] ?? '';
+            if (is_string($content)) {
+                $prompt = $content;
+                break;
+            }
+            if (is_array($content)) {
+                $texts = [];
+                foreach ($content as $block) {
+                    $text = is_array($block) ? $block['text'] ?? null : $block->text ?? null;
+                    if ($text !== null) {
+                        $texts[] = $text;
+                    }
+                }
+                $prompt = implode(PHP_EOL, $texts);
+                break;
+            }
+        }
+        if (trim($prompt) === '') {
+            throw new \RuntimeException('harness: no user prompt to hand over.');
+        }
+
+        $reference = $this->storedSessionRef();
+        $command = array_merge(['setsid', $binary], $this->buildArgs($reference !== null, $reference));
+        // the mcp config carries bearer tokens and must not reach the log
+        $loggable = $command;
+        foreach ($loggable as $loggable__key => $loggable__value) {
+            if ($loggable__value === '--mcp-config' && isset($loggable[$loggable__key + 1])) {
+                $loggable[$loggable__key + 1] = '(redacted)';
+            }
+        }
+        $this->log(implode(' ', $loggable), 'harness command');
+
+        $process = proc_open(
+            $command,
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+            $this->workspace(),
+            $this->harnessEnvironment()
+        );
+        if (!is_resource($process)) {
+            throw new \RuntimeException('harness: failed to spawn ' . $binary);
+        }
+        $pid = (int) (proc_get_status($process)['pid'] ?? 0);
+
+        fwrite($pipes[0], $prompt);
+        fclose($pipes[0]);
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+
+        $this->harness_costs = null;
+        $emit = $this->getStreamCallback();
+        $result = (object) [
+            'result' => (object) [
+                'content' => [],
+                'stop_reason' => null,
+                'usage' => (object) [
+                    'input_tokens' => 0,
+                    'cache_creation_input_tokens' => 0,
+                    'cache_read_input_tokens' => 0,
+                    'output_tokens' => 0
+                ]
+            ]
+        ];
+
+        $deadline = time() + (int) $this->timeout;
+        $buffer = '';
+        $errors = '';
+        $events = 0;
+        $exit_code = null;
+        $drain_until = null;
+        while (true) {
+            $read = [];
+            if (!feof($pipes[1])) {
+                $read[] = $pipes[1];
+            }
+            if (!feof($pipes[2])) {
+                $read[] = $pipes[2];
+            }
+            if ($read === []) {
+                break;
+            }
+            $write = null;
+            $except = null;
+            if (stream_select($read, $write, $except, 1) === false) {
+                break;
+            }
+            foreach ($read as $stream) {
+                $chunk = fread($stream, 65536);
+                if ($chunk === false || $chunk === '') {
+                    continue;
+                }
+                if ($stream === $pipes[2]) {
+                    $errors .= $chunk;
+                    continue;
+                }
+                $buffer .= $chunk;
+                while (($position = strpos($buffer, "\n")) !== false) {
+                    $line = trim(substr($buffer, 0, $position));
+                    $buffer = substr($buffer, $position + 1);
+                    if ($line === '' || $line[0] !== '{') {
+                        continue;
+                    }
+                    $event = json_decode($line, true);
+                    if (!is_array($event)) {
+                        continue;
+                    }
+                    $events++;
+                    $this->handleEvent($event, $result, $emit);
+                }
+            }
+            // a lingering grandchild can hold the pipes open after the harness
+            // itself is gone, so the process state ends the loop, not eof
+            if ($drain_until === null) {
+                $status = proc_get_status($process);
+                if ($status['running'] === false) {
+                    $exit_code = (int) $status['exitcode'];
+                    $drain_until = microtime(true) + 2;
+                }
+            } elseif (microtime(true) >= $drain_until) {
+                break;
+            }
+            if (time() >= $deadline) {
+                $this->terminateProcess($process, $pid);
+                throw new \RuntimeException('harness: timeout after ' . $this->timeout . ' seconds.');
+            }
+        }
+
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $closed = proc_close($process);
+        if ($exit_code === null) {
+            $exit_code = $closed;
+        }
+
+        if (
+            $result->result->stop_reason === null &&
+            empty($result->result->content) &&
+            ($result->result->error ?? null) === null
+        ) {
+            $message = trim($errors) !== '' ? trim($errors) : 'harness exited with code ' . $exit_code;
+            $result->result->error = (object) ['message' => $message];
+            $this->log($message, 'harness failed');
+            // a resume that yielded no event at all points at a session the
+            // harness cannot open — drop the marker so the next turn restarts
+            if ($reference !== null && $events === 0 && is_file($this->sessionRefFile())) {
+                unlink($this->sessionRefFile());
+            }
+        }
+
+        // the parent short-circuits into its own tool loop on a trailing
+        // "tool_use" stop reason — the harness has already run its tools
+        if ($this->stream === true && ($this->stream_response?->result ?? null) !== null) {
+            if ($result->result->stop_reason !== null) {
+                $this->stream_response->result->stop_reason = $result->result->stop_reason;
+            }
+            if (($result->result->error ?? null) !== null && empty($this->stream_response->result->content)) {
+                $this->stream_response->result->error = $result->result->error;
+            }
+        }
+
+        return $result;
+    }
+
+    protected function terminateProcess(mixed $process, int $pid): void
+    {
+        $group = $pid > 0 ? posix_getpgid($pid) : false;
+        if ($group !== false && $group > 0 && $group !== posix_getpgrp()) {
+            posix_kill(-$group, SIGTERM);
+            usleep(500000);
+            posix_kill(-$group, SIGKILL);
+        }
+        proc_terminate($process, SIGKILL);
+        proc_close($process);
+    }
+}
+
+class ai_claudecode extends ai_harness
+{
+    public ?string $provider = 'Anthropic';
+
+    public ?string $title = 'Claude Code';
+
+    public ?string $name = 'claudecode';
+
+    public ?string $icon = null;
+
+    protected ?string $url = null;
+
+    public array $models = [
+        [
+            'name' => 'claude-opus-5',
+            'context_length' => 200000,
+            'max_output_tokens' => 64000,
+            'costs' => ['input' => 0.000005, 'input_cached' => 0.0000005, 'output' => 0.000025],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
+            'default' => true
+        ],
+        [
+            'name' => 'claude-sonnet-5',
+            'context_length' => 200000,
+            'max_output_tokens' => 64000,
+            'costs' => ['input' => 0.000003, 'input_cached' => 0.0000003, 'output' => 0.000015],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
+            'default' => false
+        ],
+        [
+            'name' => 'claude-haiku-4-5-20251001',
+            'context_length' => 200000,
+            'max_output_tokens' => 64000,
+            'costs' => ['input' => 0.000001, 'input_cached' => 0.0000001, 'output' => 0.000005],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
+            'default' => false
+        ]
+    ];
+
+    protected function binaryName(): string
+    {
+        return 'claude';
+    }
+
+    /**
+     * Route the harness through a configured gateway (e.g. cliproxyapi).
+     * Without one the cli uses its own login and inherits the environment
+     * unchanged — replacing it wholesale could strip what the cli needs.
+     *
+     * @return array|null
+     */
+    protected function harnessEnvironment(): ?array
+    {
+        $overrides = [];
+        if ($this->url !== null && trim($this->url) !== '') {
+            $overrides['ANTHROPIC_BASE_URL'] = rtrim($this->url, '/');
+        }
+        if ($this->api_key !== null && trim($this->api_key) !== '') {
+            $overrides['ANTHROPIC_AUTH_TOKEN'] = $this->api_key;
+        }
+        return $overrides === [] ? null : array_merge(getenv(), $overrides);
+    }
+
+    protected function buildArgs(bool $resume, ?string $reference): array
+    {
+        $args = ['-p', '--verbose', '--output-format', 'stream-json'];
+        if ($this->stream === true) {
+            $args[] = '--include-partial-messages';
+        }
+        $args[] = $resume ? '--resume' : '--session-id';
+        $args[] = $resume ? (string) $reference : $this->harnessSessionId();
+        if ($this->model !== null) {
+            $args[] = '--model';
+            $args[] = $this->model;
+        }
+        if (in_array($this->effort, ['low', 'medium', 'high', 'xhigh', 'max'], true)) {
+            $args[] = '--effort';
+            $args[] = $this->effort;
+        }
+        $args[] = '--permission-mode';
+        $args[] = getenv('AIHELPER_CLAUDECODE_PERMISSION_MODE') ?: 'bypassPermissions';
+
+        $servers = [];
+        foreach ($this->mcp_servers ?? [] as $servers__key => $servers__value) {
+            if (empty($servers__value['url'])) {
+                continue;
+            }
+            $name = $servers__value['id'] ?? ($servers__value['name'] ?? 'mcp-server-' . ($servers__key + 1));
+            $entry = ['type' => 'http', 'url' => rtrim($servers__value['url'], '/') . '/'];
+            if (!empty($servers__value['authorization_token'])) {
+                $entry['headers'] = ['Authorization' => 'Bearer ' . $servers__value['authorization_token']];
+            }
+            $servers[$name] = $entry;
+        }
+        if ($servers !== []) {
+            $args[] = '--mcp-config';
+            $args[] = json_encode(['mcpServers' => $servers], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $args[] = '--strict-mcp-config';
+        }
+
+        return $args;
+    }
+
+    protected function handleEvent(array $event, object $result, ?\Closure $emit): void
+    {
+        $type = $event['type'] ?? null;
+
+        // the session exists from the init event on — remembering it only
+        // after a successful result would make an aborted turn unresumable
+        // while "--session-id" refuses to reuse the very same id
+        if ($type === 'system' && ($event['subtype'] ?? null) === 'init' && !empty($event['session_id'])) {
+            $this->storeSessionRef((string) $event['session_id']);
+            return;
+        }
+
+        // claude code forwards the literal anthropic streaming events, so the
+        // parser of the parent can consume them unchanged
+        if ($type === 'stream_event' && isset($event['event']['type'])) {
+            $this->emitAnthropicEvent($emit, $event['event']);
+            return;
+        }
+
+        if ($type === 'assistant' && is_array($event['message']['content'] ?? null)) {
+            foreach ($event['message']['content'] as $content__value) {
+                if (($content__value['type'] ?? null) !== 'text' || !isset($content__value['text'])) {
+                    continue;
+                }
+                $result->result->content[] = (object) ['type' => 'text', 'text' => $content__value['text']];
+            }
+            return;
+        }
+
+        if ($type !== 'result') {
+            return;
+        }
+        $result->result->stop_reason = $event['stop_reason'] ?? 'end_turn';
+        $result->result->usage = (object) [
+            'input_tokens' => (int) ($event['usage']['input_tokens'] ?? 0),
+            'cache_creation_input_tokens' => (int) ($event['usage']['cache_creation_input_tokens'] ?? 0),
+            'cache_read_input_tokens' => (int) ($event['usage']['cache_read_input_tokens'] ?? 0),
+            'output_tokens' => (int) ($event['usage']['output_tokens'] ?? 0)
+        ];
+        $this->harness_costs = (float) ($event['total_cost_usd'] ?? 0);
+        if (($event['is_error'] ?? false) === true) {
+            $result->result->error = (object) [
+                'message' => trim((string) ($event['result'] ?? 'harness run failed'))
+            ];
+        }
+    }
+}
+
+class ai_codex extends ai_harness
+{
+    public ?string $provider = 'OpenAI';
+
+    public ?string $title = 'Codex';
+
+    public ?string $name = 'codex';
+
+    public ?string $icon = null;
+
+    protected ?string $url = null;
+
+    public array $models = [
+        [
+            'name' => 'gpt-5.6-sol',
+            'context_length' => 400000,
+            'max_output_tokens' => 128000,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
+            'default' => true
+        ],
+        [
+            'name' => 'gpt-5.5-codex',
+            'context_length' => 400000,
+            'max_output_tokens' => 128000,
+            'costs' => ['input' => 0.00000125, 'input_cached' => 0.000000125, 'output' => 0.00001],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
+            'default' => false
+        ]
+    ];
+
+    protected function binaryName(): string
+    {
+        return 'codex';
+    }
+
+    protected function buildArgs(bool $resume, ?string $reference): array
+    {
+        // "exec resume" accepts no --sandbox flag and wants its options in
+        // front of the session id, so the mode goes through the config layer
+        $options = [
+            '--json',
+            '--skip-git-repo-check',
+            '-c',
+            'sandbox_mode="' . (getenv('AIHELPER_CODEX_SANDBOX') ?: 'workspace-write') . '"'
+        ];
+        if ($this->model !== null) {
+            $options[] = '--model';
+            $options[] = $this->model;
+        }
+        if (in_array($this->effort, ['minimal', 'low', 'medium', 'high', 'xhigh'], true)) {
+            $options[] = '-c';
+            $options[] = 'model_reasoning_effort="' . $this->effort . '"';
+        }
+        if ($resume) {
+            return array_merge(['exec', 'resume'], $options, [(string) $reference]);
+        }
+        return array_merge(['exec'], $options);
+    }
+
+    protected function handleEvent(array $event, object $result, ?\Closure $emit): void
+    {
+        $type = $event['type'] ?? null;
+
+        if ($type === 'thread.started' && !empty($event['thread_id'])) {
+            $this->storeSessionRef((string) $event['thread_id']);
+            $this->emitAnthropicEvent($emit, [
+                'type' => 'message_start',
+                'message' => [
+                    'type' => 'message',
+                    'role' => 'assistant',
+                    'model' => (string) $this->model,
+                    'content' => [],
+                    'stop_reason' => null,
+                    'usage' => ['input_tokens' => 0, 'output_tokens' => 0]
+                ]
+            ]);
+            return;
+        }
+
+        // codex reports whole items instead of token deltas, so one completed
+        // item becomes one closed content block
+        if ($type === 'item.completed') {
+            $item_type = $event['item']['type'] ?? null;
+            $text = (string) ($event['item']['text'] ?? '');
+            if ($text === '' || !in_array($item_type, ['agent_message', 'reasoning'], true)) {
+                return;
+            }
+            $thinking = $item_type === 'reasoning';
+            $this->emitAnthropicEvent($emit, [
+                'type' => 'content_block_start',
+                'index' => 0,
+                'content_block' => $thinking ? ['type' => 'thinking', 'thinking' => ''] : ['type' => 'text', 'text' => '']
+            ]);
+            $this->emitAnthropicEvent($emit, [
+                'type' => 'content_block_delta',
+                'index' => 0,
+                'delta' => $thinking
+                    ? ['type' => 'thinking_delta', 'thinking' => $text]
+                    : ['type' => 'text_delta', 'text' => $text]
+            ]);
+            $this->emitAnthropicEvent($emit, ['type' => 'content_block_stop', 'index' => 0]);
+            if (!$thinking) {
+                $result->result->content[] = (object) ['type' => 'text', 'text' => $text];
+            }
+            return;
+        }
+
+        if ($type === 'turn.completed') {
+            $result->result->stop_reason = 'end_turn';
+            $result->result->usage = (object) [
+                'input_tokens' => (int) ($event['usage']['input_tokens'] ?? 0),
+                'cache_creation_input_tokens' => (int) ($event['usage']['cache_write_input_tokens'] ?? 0),
+                'cache_read_input_tokens' => (int) ($event['usage']['cached_input_tokens'] ?? 0),
+                'output_tokens' => (int) ($event['usage']['output_tokens'] ?? 0)
+            ];
+            $this->emitAnthropicEvent($emit, [
+                'type' => 'message_delta',
+                'delta' => ['stop_reason' => 'end_turn', 'stop_sequence' => null],
+                'usage' => (array) $result->result->usage
+            ]);
+            $this->emitAnthropicEvent($emit, ['type' => 'message_stop']);
+            return;
+        }
+
+        if ($type === 'turn.failed' || $type === 'error') {
+            $result->result->error = (object) [
+                'message' => (string) ($event['error']['message'] ?? ($event['message'] ?? 'codex turn failed'))
+            ];
         }
     }
 }

@@ -22,7 +22,7 @@ composer require vielhuber/aihelper
 use vielhuber\aihelper\aihelper;
 
 $ai = aihelper::create(
-    provider: 'anthropic', // anthropic|google|openai|xai|deepseek|openrouter|cliproxyapi|elevenlabs|nvidia|llamacpp|lmstudio
+    provider: 'anthropic', // anthropic|google|openai|xai|deepseek|openrouter|cliproxyapi|elevenlabs|nvidia|llamacpp|lmstudio|claudecode|codex
     model: 'claude-opus-4-1', // claude-opus-4-1|gemini-2.5-pro|gpt-5|grok-4|deepseek-chat|qwen/qwen3-coder-next|...
     effort: null, // null|none|minimal|low|medium|high|xhigh|max — reasoning effort, ignored when the provider/model has no supported reasoning control
     temperature: 1.0, // controls the randomness of the text generated
@@ -46,7 +46,8 @@ $ai = aihelper::create(
     stream: false,
     url: null, // overwrite connection url (e.g. for llamacpp/lmstudio)
     enable_thinking: null, // true|false|null — force reasoning/thinking on/off; null = provider default (see below)
-    auto_compact: false // true = transparently compact the session when it approaches the model's context window
+    auto_compact: false, // true = transparently compact the session when it approaches the model's context window
+    workdir: null // working directory of the cli harness providers (claudecode/codex)
 );
 
 $ai->ask(prompt: 'Wer wurde 2018 Fußball-Weltmeister?');
