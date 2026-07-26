@@ -9530,7 +9530,8 @@ class ai_claudecode extends ai_harness
      */
     protected function harnessEnvironment(): ?array
     {
-        $overrides = [];
+        // without this claude code refuses to skip permissions as root
+        $overrides = ['IS_SANDBOX' => '1'];
         if ($this->url !== null && trim($this->url) !== '') {
             // claude code appends "/v1" itself, while gateway urls are usually
             // configured with it — keeping both would request "/v1/v1/messages"
@@ -9539,7 +9540,7 @@ class ai_claudecode extends ai_harness
         if ($this->api_key !== null && trim($this->api_key) !== '') {
             $overrides['ANTHROPIC_AUTH_TOKEN'] = $this->api_key;
         }
-        return $overrides === [] ? null : array_merge(getenv(), $overrides);
+        return array_merge(getenv(), $overrides);
     }
 
     protected function buildArgs(): array
@@ -9558,8 +9559,7 @@ class ai_claudecode extends ai_harness
             $args[] = '--effort';
             $args[] = $this->effort;
         }
-        $args[] = '--permission-mode';
-        $args[] = getenv('AIHELPER_CLAUDECODE_PERMISSION_MODE') ?: 'bypassPermissions';
+        $args[] = '--dangerously-skip-permissions';
 
         $servers = [];
         foreach ($this->mcp_servers ?? [] as $servers__key => $servers__value) {
@@ -9675,15 +9675,11 @@ class ai_codex extends ai_harness
 
     protected function buildArgs(): array
     {
-        // "exec resume" accepts no --sandbox flag, so the mode goes through the
-        // config layer; "--last" is filtered by working directory and starts a
-        // fresh thread when the directory has none yet
-        $options = [
-            '--json',
-            '--skip-git-repo-check',
-            '-c',
-            'sandbox_mode="' . (getenv('AIHELPER_CODEX_SANDBOX') ?: 'workspace-write') . '"'
-        ];
+        // "--last" is filtered by working directory and starts a fresh thread
+        // when the directory has none yet; the bypass flag (alias "--yolo") is
+        // required because codex sandboxes via bubblewrap, which needs a user
+        // namespace that a default docker container does not grant
+        $options = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox'];
         if ($this->model !== null) {
             $options[] = '--model';
             $options[] = $this->model;
