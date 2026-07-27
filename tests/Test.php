@@ -58,6 +58,17 @@ final class RetryTestAihelper extends aihelper
     {
         return 0;
     }
+
+    public function authenticationIsExpired(array $auth): bool
+    {
+        return $this->isCliAuthenticationExpired($auth);
+    }
+
+    public function cliUsageCacheKey(string $provider, string $tool): string
+    {
+        $this->name = $provider;
+        return $this->getCliUsageCacheKey($tool);
+    }
 }
 
 class Test extends \PHPUnit\Framework\TestCase
@@ -115,7 +126,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame([true, false, false], $ai->promptAdditions);
     }
 
-    function test__auth_unavailable_uses_extended_retry_window(): void
+    function test__auth_unavailable_stops_after_three_attempts(): void
     {
         $ai = new RetryTestAihelper(
             array_fill(0, 8, 'AI Request fehlgeschlagen: auth_unavailable: no auth available')
@@ -123,13 +134,13 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $result = $ai->ask('test');
 
-        $this->assertTrue($result['success']);
-        $this->assertSame('ok', $result['response']);
-        $this->assertSame(9, $ai->attempts);
-        $this->assertSame([true, false, false, false, false, false, false, false, false], $ai->promptAdditions);
+        $this->assertFalse($result['success']);
+        $this->assertSame('AI Request fehlgeschlagen: auth_unavailable: no auth available', $result['response']);
+        $this->assertSame(3, $ai->attempts);
+        $this->assertSame([true, false, false], $ai->promptAdditions);
     }
 
-    function test__auth_unavailable_backoff_covers_five_minutes(): void
+    function test__availability_backoff_covers_five_minutes(): void
     {
         $method = new \ReflectionMethod(aihelper::class, 'retryBackoffSeconds');
         $ai = new RetryTestAihelper([]);
@@ -169,6 +180,39 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame('ok', $result['response']);
         $this->assertSame(2, $ai->attempts);
         $this->assertSame([true, false], $ai->promptAdditions);
+    }
+
+    function test__empty_success_response_is_retried(): void
+    {
+        $ai = new RetryTestAihelper([['response' => '', 'success' => true, 'costs' => 0.0]]);
+
+        $result = $ai->ask('test');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('ok', $result['response']);
+        $this->assertSame(2, $ai->attempts);
+        $this->assertSame([true, false], $ai->promptAdditions);
+    }
+
+    function test__cli_authentication_expiry_formats_are_recognized(): void
+    {
+        $ai = new RetryTestAihelper([]);
+
+        $this->assertTrue($ai->authenticationIsExpired(['expired' => date(DATE_ATOM, time() - 60)]));
+        $this->assertFalse($ai->authenticationIsExpired(['expired' => date(DATE_ATOM, time() + 60)]));
+        $this->assertTrue($ai->authenticationIsExpired(['claudeAiOauth' => ['expiresAt' => (time() - 60) * 1000]]));
+        $this->assertFalse($ai->authenticationIsExpired(['claudeAiOauth' => ['expiresAt' => (time() + 60) * 1000]]));
+        $this->assertFalse($ai->authenticationIsExpired(['access_token' => 'token']));
+    }
+
+    function test__cli_usage_caches_are_isolated_by_authentication_source(): void
+    {
+        $ai = new RetryTestAihelper([]);
+
+        $this->assertSame('claude-cliproxyapi', $ai->cliUsageCacheKey('cliproxyapi', 'claude'));
+        $this->assertSame('claude-native', $ai->cliUsageCacheKey('claudecode', 'claude'));
+        $this->assertSame('codex-cliproxyapi', $ai->cliUsageCacheKey('cliproxyapi', 'codex'));
+        $this->assertSame('codex-native', $ai->cliUsageCacheKey('codex', 'codex'));
     }
 
     function test__transient_dns_errors_are_retried(): void

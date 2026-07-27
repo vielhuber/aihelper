@@ -762,21 +762,16 @@ abstract class aihelper
 
     protected function getCodexAuthentication(): ?array
     {
-        $auth_files = array_values(
-            array_unique(
-                array_merge(
-                    ['/root/.codex/auth.json'],
-                    glob('/root/.cli-proxy-api/codex*.json') ?: [],
-                    glob('/host/data/server/cliproxyapi/auth/codex*.json') ?: []
-                )
-            )
-        );
+        $auth_files =
+            $this->name === 'cliproxyapi'
+                ? (glob('/host/data/server/cliproxyapi/auth/codex*.json') ?: [])
+                : ['/root/.codex/auth.json'];
         foreach ($auth_files as $auth_file) {
             if (!is_file($auth_file)) {
                 continue;
             }
             $auth = json_decode((string) file_get_contents($auth_file), true);
-            if (!is_array($auth)) {
+            if (!is_array($auth) || $this->isCliAuthenticationExpired($auth)) {
                 continue;
             }
             $access_token = $auth['tokens']['access_token'] ?? ($auth['access_token'] ?? null);
@@ -789,27 +784,52 @@ abstract class aihelper
         return null;
     }
 
+    protected function getCliUsageCacheKey(string $tool): string
+    {
+        return $tool . ($this->name === 'cliproxyapi' ? '-cliproxyapi' : '-native');
+    }
+
+    protected function isCliAuthenticationExpired(array $auth): bool
+    {
+        $expiresAt = $auth['expired'] ?? ($auth['expires_at'] ?? null);
+        if (is_numeric($auth['claudeAiOauth']['expiresAt'] ?? null)) {
+            $expiresAt = (int) floor((float) $auth['claudeAiOauth']['expiresAt'] / 1000);
+        }
+        if ($expiresAt === null || $expiresAt === '') {
+            return false;
+        }
+        if (is_numeric($expiresAt)) {
+            return (int) $expiresAt <= time();
+        }
+        $expiresAtTimestamp = strtotime((string) $expiresAt);
+        return $expiresAtTimestamp !== false && $expiresAtTimestamp <= time();
+    }
+
     public function getCliUsageResetCredits(): ?array
     {
-        if ($this->getCliUsageTool() !== 'codex') {
+        $tool = $this->getCliUsageTool();
+        if ($tool !== 'codex') {
             return null;
         }
+        $cacheKey = $this->getCliUsageCacheKey($tool);
         if (
-            isset(self::$cli_usage_reset_credits_cache['codex']) &&
-            time() - self::$cli_usage_reset_credits_cache['codex']['time'] < 60
+            isset(self::$cli_usage_reset_credits_cache[$cacheKey]) &&
+            time() - self::$cli_usage_reset_credits_cache[$cacheKey]['time'] < 60
         ) {
-            return self::$cli_usage_reset_credits_cache['codex']['credits'];
+            return self::$cli_usage_reset_credits_cache[$cacheKey]['credits'];
         }
         $cache_file =
             sys_get_temp_dir() .
-            '/aihelper-cliusage-reset-credits-codex-' .
+            '/aihelper-cliusage-reset-credits-' .
+            $cacheKey .
+            '-' .
             (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) .
             '.json';
         $cached = is_file($cache_file) ? json_decode((string) file_get_contents($cache_file), true) : null;
         $cached = is_array($cached) ? $cached : null;
         $last_good = $cached !== null && is_array($cached['credits'] ?? null) ? $cached['credits'] : null;
         if ($cached !== null && time() - (int) ($cached['time'] ?? 0) < 60) {
-            self::$cli_usage_reset_credits_cache['codex'] = ['time' => time(), 'credits' => $last_good];
+            self::$cli_usage_reset_credits_cache[$cacheKey] = ['time' => time(), 'credits' => $last_good];
             return $last_good;
         }
         $auth = $this->getCodexAuthentication();
@@ -830,7 +850,7 @@ abstract class aihelper
         $payload = $response?->result ?? null;
         if (!is_object($payload) || !is_numeric($payload->available_count ?? null)) {
             file_put_contents($cache_file, json_encode(['time' => time(), 'credits' => $last_good]));
-            self::$cli_usage_reset_credits_cache['codex'] = ['time' => time(), 'credits' => $last_good];
+            self::$cli_usage_reset_credits_cache[$cacheKey] = ['time' => time(), 'credits' => $last_good];
             return $last_good;
         }
         $credits = [];
@@ -846,15 +866,17 @@ abstract class aihelper
 
         $result = ['available_count' => max(0, (int) $payload->available_count), 'credits' => $credits];
         file_put_contents($cache_file, json_encode(['time' => time(), 'credits' => $result]));
-        self::$cli_usage_reset_credits_cache['codex'] = ['time' => time(), 'credits' => $result];
+        self::$cli_usage_reset_credits_cache[$cacheKey] = ['time' => time(), 'credits' => $result];
         return $result;
     }
 
     public function triggerCliUsageReset(): ?array
     {
-        if ($this->getCliUsageTool() !== 'codex') {
+        $tool = $this->getCliUsageTool();
+        if ($tool !== 'codex') {
             return null;
         }
+        $cacheKey = $this->getCliUsageCacheKey($tool);
         $auth = $this->getCodexAuthentication();
         if ($auth === null) {
             return null;
@@ -881,11 +903,13 @@ abstract class aihelper
             return null;
         }
         if ($payload->code === 'reset') {
-            unset(self::$cli_usage_limits_cache['codex']);
-            unset(self::$cli_usage_reset_credits_cache['codex']);
+            unset(self::$cli_usage_limits_cache[$cacheKey]);
+            unset(self::$cli_usage_reset_credits_cache[$cacheKey]);
             $cache_file =
                 sys_get_temp_dir() .
-                '/aihelper-cliusage-codex-' .
+                '/aihelper-cliusage-' .
+                $cacheKey .
+                '-' .
                 (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) .
                 '.json';
             if (is_file($cache_file)) {
@@ -893,7 +917,9 @@ abstract class aihelper
             }
             $reset_credits_cache_file =
                 sys_get_temp_dir() .
-                '/aihelper-cliusage-reset-credits-codex-' .
+                '/aihelper-cliusage-reset-credits-' .
+                $cacheKey .
+                '-' .
                 (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) .
                 '.json';
             if (is_file($reset_credits_cache_file)) {
@@ -914,11 +940,12 @@ abstract class aihelper
         if ($tool === null) {
             return null;
         }
+        $cacheKey = $this->getCliUsageCacheKey($tool);
         if (
-            isset(self::$cli_usage_limits_cache[$tool]) &&
-            time() - self::$cli_usage_limits_cache[$tool]['time'] < 60
+            isset(self::$cli_usage_limits_cache[$cacheKey]) &&
+            time() - self::$cli_usage_limits_cache[$cacheKey]['time'] < 60
         ) {
-            return self::$cli_usage_limits_cache[$tool]['limits'];
+            return self::$cli_usage_limits_cache[$cacheKey]['limits'];
         }
         // these provider endpoints rate-limit (429) when polled too often, and each web request starts
         // with an empty in-memory cache — so persist the last good result to disk. serve it directly
@@ -927,7 +954,7 @@ abstract class aihelper
         $cache_file =
             sys_get_temp_dir() .
             '/aihelper-cliusage-' .
-            $tool .
+            $cacheKey .
             '-' .
             (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) .
             '.json';
@@ -938,14 +965,14 @@ abstract class aihelper
         // attempts so a rate-limited (429) endpoint isn't re-hit on every call
         $ttl = $last_good !== null ? 60 : 90;
         if ($raw !== null && time() - (int) ($raw['time'] ?? 0) < $ttl) {
-            self::$cli_usage_limits_cache[$tool] = ['time' => time(), 'limits' => $last_good];
+            self::$cli_usage_limits_cache[$cacheKey] = ['time' => time(), 'limits' => $last_good];
             return $last_good;
         }
-        $finish = function (array $limits) use ($tool, $cache_file, $last_good): ?array {
+        $finish = function (array $limits) use ($cacheKey, $cache_file, $last_good): ?array {
             // keep the last good result on failure; record every attempt time (throttles failures too)
             $store = !empty($limits) ? $limits : $last_good;
-            @file_put_contents($cache_file, json_encode(['time' => time(), 'limits' => $store]));
-            self::$cli_usage_limits_cache[$tool] = ['time' => time(), 'limits' => $store];
+            file_put_contents($cache_file, json_encode(['time' => time(), 'limits' => $store]));
+            self::$cli_usage_limits_cache[$cacheKey] = ['time' => time(), 'limits' => $store];
             return $store;
         };
         if ($tool === 'codex') {
@@ -1128,22 +1155,17 @@ abstract class aihelper
             return $finish($limits);
         }
 
-        $auth_files = array_values(
-            array_unique(
-                array_merge(
-                    ['/root/.claude/.credentials.json'],
-                    glob('/root/.cli-proxy-api/claude*.json') ?: [],
-                    glob('/host/data/server/cliproxyapi/auth/claude*.json') ?: []
-                )
-            )
-        );
+        $auth_files =
+            $this->name === 'cliproxyapi'
+                ? (glob('/host/data/server/cliproxyapi/auth/claude*.json') ?: [])
+                : ['/root/.claude/.credentials.json'];
         $access_token = null;
         foreach ($auth_files as $auth_file) {
             if (!is_file($auth_file)) {
                 continue;
             }
             $auth = json_decode((string) file_get_contents($auth_file), true);
-            if (!is_array($auth)) {
+            if (!is_array($auth) || $this->isCliAuthenticationExpired($auth)) {
                 continue;
             }
             $access_token = $auth['claudeAiOauth']['accessToken'] ?? ($auth['access_token'] ?? null);
@@ -1651,10 +1673,15 @@ abstract class aihelper
                 $response['body'] ?? ''
             ]);
             foreach ($usage_bodies as $usage_body) {
-                if (!preg_match_all('/"usage"\s*:\s*(\{(?:[^{}]|(?1))*\})/', $usage_body, $matches)) {
+                $usageMatches = [];
+                if (!preg_match_all('/"usage"\s*:\s*(\{(?:[^{}]|(?1))*\})/', $usage_body, $usageMatches)) {
                     continue;
                 }
-                foreach ($matches[1] as $usage_json) {
+                $usageJsonMatches = $usageMatches[1] ?? [];
+                if (!is_array($usageJsonMatches)) {
+                    continue;
+                }
+                foreach ($usageJsonMatches as $usage_json) {
                     $fragment = json_decode($usage_json, true);
                     if (is_array($fragment)) {
                         $usage = $merge_usage($usage ?? [], $fragment);
@@ -2289,26 +2316,41 @@ abstract class aihelper
                     throw $e;
                 }
             }
+            if (
+                ($return['success'] ?? false) === true &&
+                (($return['response'] ?? null) === null ||
+                    (is_string($return['response']) && trim($return['response']) === '')) &&
+                !($this->mcp_servers_call_type === 'local' && !empty($this->mcp_servers_tools_map))
+            ) {
+                $return['response'] = 'No response from provider.';
+                $return['success'] = false;
+            }
+            $retryResponse = '';
             if ($return['success'] === false && $this->isTransientRequestError($return['response'] ?? '')) {
                 $transient_retry = true;
-                $retry_response = is_string($return['response'] ?? null)
+                $retryResponse = is_string($return['response'] ?? null)
                     ? strtolower($return['response'])
                     : strtolower(
                         json_encode($return['response'] ?? null, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
                     );
                 $availability_retry =
-                    str_contains($retry_response, 'auth_unavailable') ||
-                    str_contains($retry_response, 'no auth available') ||
-                    str_contains($retry_response, 'connection refused') ||
-                    str_contains($retry_response, 'no response from provider') ||
-                    str_contains($retry_response, 'too many concurrent requests') ||
-                    str_contains($retry_response, 'temporarily unavailable') ||
-                    str_contains($retry_response, 'upstream connect error') ||
-                    str_contains($retry_response, 'connection termination') ||
-                    str_contains($retry_response, '(http 0)');
+                    str_contains($retryResponse, 'auth_unavailable') ||
+                    str_contains($retryResponse, 'no auth available') ||
+                    str_contains($retryResponse, 'connection refused') ||
+                    str_contains($retryResponse, 'no response from provider') ||
+                    str_contains($retryResponse, 'too many concurrent requests') ||
+                    str_contains($retryResponse, 'temporarily unavailable') ||
+                    str_contains($retryResponse, 'upstream connect error') ||
+                    str_contains($retryResponse, 'connection termination') ||
+                    str_contains($retryResponse, '(http 0)');
             }
             if ($availability_retry) {
-                if ($extra_availability_retries > 0) {
+                $maximum_availability_tries =
+                    str_contains($retryResponse, 'auth_unavailable') ||
+                    str_contains($retryResponse, 'no auth available')
+                        ? 3
+                        : 9;
+                if ($attempt + 1 < $maximum_availability_tries && $extra_availability_retries > 0) {
                     $extra_availability_retries--;
                     $max_tries++;
                 }
@@ -3968,8 +4010,6 @@ abstract class aihelper
                     ];
                 }
             }
-            // truncate older tool outputs in session to prevent context overflow
-            $this->truncateOlderToolOutputs();
             $this->stubOversizedFileBlocks();
             $this->emitStreamBlockSeparator();
 
@@ -4031,9 +4071,10 @@ abstract class aihelper
                         throw $e;
                     }
                 }
+                $retryResponse = '';
                 if ($return['success'] === false && $this->isTransientRequestError($return['response'] ?? '')) {
                     $transient_retry = true;
-                    $retry_response = is_string($return['response'] ?? null)
+                    $retryResponse = is_string($return['response'] ?? null)
                         ? strtolower($return['response'])
                         : strtolower(
                             json_encode(
@@ -4042,18 +4083,23 @@ abstract class aihelper
                             ) ?: ''
                         );
                     $availability_retry =
-                        str_contains($retry_response, 'auth_unavailable') ||
-                        str_contains($retry_response, 'no auth available') ||
-                        str_contains($retry_response, 'connection refused') ||
-                        str_contains($retry_response, 'no response from provider') ||
-                        str_contains($retry_response, 'too many concurrent requests') ||
-                        str_contains($retry_response, 'temporarily unavailable') ||
-                        str_contains($retry_response, 'upstream connect error') ||
-                        str_contains($retry_response, 'connection termination') ||
-                        str_contains($retry_response, '(http 0)');
+                        str_contains($retryResponse, 'auth_unavailable') ||
+                        str_contains($retryResponse, 'no auth available') ||
+                        str_contains($retryResponse, 'connection refused') ||
+                        str_contains($retryResponse, 'no response from provider') ||
+                        str_contains($retryResponse, 'too many concurrent requests') ||
+                        str_contains($retryResponse, 'temporarily unavailable') ||
+                        str_contains($retryResponse, 'upstream connect error') ||
+                        str_contains($retryResponse, 'connection termination') ||
+                        str_contains($retryResponse, '(http 0)');
                 }
                 if ($availability_retry) {
-                    if ($extra_availability_retries > 0) {
+                    $maximum_availability_tries =
+                        str_contains($retryResponse, 'auth_unavailable') ||
+                        str_contains($retryResponse, 'no auth available')
+                            ? 3
+                            : 9;
+                    if ($attempt + 1 < $maximum_availability_tries && $extra_availability_retries > 0) {
                         $extra_availability_retries--;
                         $max_tries++;
                     }
@@ -4193,119 +4239,6 @@ abstract class aihelper
         }
         flush();
         $this->stream_text_emitted_since_tool = false;
-    }
-
-    protected function truncateOlderToolOutputs(int $max_chars = 25000): void
-    {
-        $session = &self::$sessions[$this->session_id];
-        // find tool output entries and truncate all except the last batch
-        // (the last batch was just added and should remain intact)
-        $is_tool_output = function (mixed $e): bool {
-            if (!is_array($e)) {
-                return false;
-            }
-            if (isset($e['type']) && $e['type'] === 'function_call_output') {
-                return true;
-            }
-            if (isset($e['role']) && $e['role'] === 'tool') {
-                return true;
-            }
-            if (isset($e['role']) && $e['role'] === 'user') {
-                foreach ($e['content'] ?? [] as $b) {
-                    if ((is_object($b) ? $b->type ?? null : $b['type'] ?? null) === 'tool_result') {
-                        return true;
-                    }
-                }
-                foreach ($e['parts'] ?? [] as $p) {
-                    if (is_object($p) ? isset($p->functionResponse) : isset($p['functionResponse'])) {
-                        return true;
-                    }
-                }
-            }
-            return false;
-        };
-        $last_tool_output_idx = -1;
-        for ($i = count($session) - 1; $i >= 0; $i--) {
-            if ($is_tool_output($session[$i])) {
-                $last_tool_output_idx = $i;
-                break;
-            }
-        }
-        for ($i = 0; $i < count($session); $i++) {
-            if ($i >= $last_tool_output_idx) {
-                break;
-            }
-            $entry = &$session[$i];
-            if (!is_array($entry)) {
-                continue;
-            }
-            // openai responses api: function_call_output
-            if (
-                isset($entry['type']) &&
-                $entry['type'] === 'function_call_output' &&
-                isset($entry['output']) &&
-                is_string($entry['output'])
-            ) {
-                if (mb_strlen($entry['output']) > $max_chars) {
-                    $entry['output'] = mb_substr($entry['output'], 0, $max_chars) . "\n[... truncated ...]";
-                }
-            }
-            // chat completions: role=tool
-            if (
-                isset($entry['role']) &&
-                $entry['role'] === 'tool' &&
-                isset($entry['content']) &&
-                is_string($entry['content'])
-            ) {
-                if (mb_strlen($entry['content']) > $max_chars) {
-                    $entry['content'] = mb_substr($entry['content'], 0, $max_chars) . "\n[... truncated ...]";
-                }
-            }
-            // anthropic: role=user with tool_result blocks
-            if (
-                isset($entry['role']) &&
-                $entry['role'] === 'user' &&
-                isset($entry['content']) &&
-                is_array($entry['content'])
-            ) {
-                foreach ($entry['content'] as &$block) {
-                    $type = is_object($block) ? $block->type ?? null : $block['type'] ?? null;
-                    if ($type === 'tool_result') {
-                        $content = is_object($block) ? $block->content ?? null : $block['content'] ?? null;
-                        if (is_string($content) && mb_strlen($content) > $max_chars) {
-                            $truncated = mb_substr($content, 0, $max_chars) . "\n[... truncated ...]";
-                            if (is_object($block)) {
-                                $block->content = $truncated;
-                            } else {
-                                $block['content'] = $truncated;
-                            }
-                        }
-                    }
-                }
-            }
-            // google: role=user with functionResponse parts
-            if (
-                isset($entry['role']) &&
-                $entry['role'] === 'user' &&
-                isset($entry['parts']) &&
-                is_array($entry['parts'])
-            ) {
-                foreach ($entry['parts'] as &$part) {
-                    $fr = is_object($part) ? $part->functionResponse ?? null : $part['functionResponse'] ?? null;
-                    if ($fr !== null) {
-                        $result = is_object($fr) ? $fr->response->result ?? null : $fr['response']['result'] ?? null;
-                        if (is_string($result) && mb_strlen($result) > $max_chars) {
-                            $truncated = mb_substr($result, 0, $max_chars) . "\n[... truncated ...]";
-                            if (is_object($fr)) {
-                                $fr->response->result = $truncated;
-                            } else {
-                                $part['functionResponse']['response']['result'] = $truncated;
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 
     protected function buildLocalToolsArgs(
