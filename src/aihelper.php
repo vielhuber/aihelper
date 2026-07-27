@@ -9177,15 +9177,16 @@ abstract class ai_harness extends ai_anthropic
     }
 
     /**
-     * Wrap a command for the remote login-less shell. Node lives in nvm, whose
-     * init only runs for interactive shells — so it is sourced explicitly.
+     * Wrap a command for the remote shell. An ssh command runs with the bare
+     * default PATH: the shell init that would add the native installer path
+     * and nvm only runs for interactive shells, so both are added by hand.
      *
      * @param string $command
      * @return string
      */
     protected function remoteShell(string $command): string
     {
-        return '. "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ' . $command;
+        return 'export PATH="$HOME/.local/bin:$PATH"; . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ' . $command;
     }
 
     /**
