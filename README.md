@@ -174,6 +174,19 @@ codex login --device-auth
 
 every turn continues the newest thread of `workdir` and opens a new one only when that directory has none yet.
 
+set `ssh_host` to run the agent on another machine instead of locally — the working directory, the login and the threads are then that machine's:
+
+```php
+$ai = aihelper::create(
+    provider: 'claudecode',
+    workdir: '/var/www/project',
+    ssh_host: 'host.docker.internal',
+    ssh_user: 'root',
+    ssh_port: 22,                        // optional
+    ssh_key: '/root/.ssh/id_ed25519'     // optional
+);
+```
+
 ### streaming
 
 aihelper can stream model output to a browser using server‑sent events (see). in this mode the php backend connects to the model provider with http streaming and forwards chunks to the client as sse events in real time. see an example implementation at [/tests/stream/index.html](tests/stream/index.html).

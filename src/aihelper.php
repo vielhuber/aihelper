@@ -21,6 +21,10 @@ abstract class aihelper
     protected ?int $timeout = null;
     protected ?string $api_key = null;
     protected ?string $workdir = null;
+    protected ?string $ssh_host = null;
+    protected ?string $ssh_user = null;
+    protected ?int $ssh_port = null;
+    protected ?string $ssh_key = null;
     protected ?string $log = null;
     protected ?int $max_tries = null;
     protected ?bool $enable_thinking = null;
@@ -72,7 +76,11 @@ abstract class aihelper
         ?string $url = null,
         ?bool $enable_thinking = null,
         ?bool $auto_compact = null,
-        ?string $workdir = null
+        ?string $workdir = null,
+        ?string $ssh_host = null,
+        ?string $ssh_user = null,
+        ?int $ssh_port = null,
+        ?string $ssh_key = null
     ): ?self {
         if ($provider === 'openai') {
             return new ai_openai(
@@ -300,7 +308,11 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                workdir: $workdir
+                workdir: $workdir,
+                ssh_host: $ssh_host,
+                ssh_user: $ssh_user,
+                ssh_port: $ssh_port,
+                ssh_key: $ssh_key
             );
         }
         if ($provider === 'codex') {
@@ -320,7 +332,11 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                workdir: $workdir
+                workdir: $workdir,
+                ssh_host: $ssh_host,
+                ssh_user: $ssh_user,
+                ssh_port: $ssh_port,
+                ssh_key: $ssh_key
             );
         }
         if ($provider === 'test') {
@@ -623,10 +639,26 @@ abstract class aihelper
         ?string $url = null,
         ?bool $enable_thinking = null,
         ?bool $auto_compact = null,
-        ?string $workdir = null
+        ?string $workdir = null,
+        ?string $ssh_host = null,
+        ?string $ssh_user = null,
+        ?int $ssh_port = null,
+        ?string $ssh_key = null
     ) {
         if ($workdir !== null) {
             $this->workdir = $workdir;
+        }
+        if ($ssh_host !== null) {
+            $this->ssh_host = $ssh_host;
+        }
+        if ($ssh_user !== null) {
+            $this->ssh_user = $ssh_user;
+        }
+        if ($ssh_port !== null) {
+            $this->ssh_port = $ssh_port;
+        }
+        if ($ssh_key !== null) {
+            $this->ssh_key = $ssh_key;
         }
         if ($temperature === null) {
             $temperature = 1.0;
@@ -9105,6 +9137,8 @@ abstract class ai_harness extends ai_anthropic
 
     protected ?float $harness_costs = null;
 
+    protected ?string $harness_run_id = null;
+
     abstract protected function binaryName(): string;
 
     /**
@@ -9132,7 +9166,26 @@ abstract class ai_harness extends ai_anthropic
 
     public function ping(): bool
     {
-        return $this->resolveBinary() !== null;
+        if (!$this->isRemote()) {
+            return $this->resolveBinary() !== null;
+        }
+        $probe = array_merge($this->sshCommand(), [
+            $this->remoteShell('command -v ' . escapeshellarg($this->binaryName()) . ' >/dev/null')
+        ]);
+        exec(implode(' ', array_map('escapeshellarg', $probe)) . ' 2>/dev/null', $output, $status);
+        return $status === 0;
+    }
+
+    /**
+     * Wrap a command for the remote login-less shell. Node lives in nvm, whose
+     * init only runs for interactive shells — so it is sourced explicitly.
+     *
+     * @param string $command
+     * @return string
+     */
+    protected function remoteShell(string $command): string
+    {
+        return '. "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ' . $command;
     }
 
     /**
@@ -9175,6 +9228,9 @@ abstract class ai_harness extends ai_anthropic
 
     protected function resolveBinary(): ?string
     {
+        if ($this->isRemote()) {
+            return $this->binaryName();
+        }
         $found = trim((string) shell_exec('command -v ' . escapeshellarg($this->binaryName()) . ' 2>/dev/null'));
         return $found !== '' && is_executable($found) ? $found : null;
     }
@@ -9189,15 +9245,67 @@ abstract class ai_harness extends ai_anthropic
                 preg_replace('/[^a-zA-Z0-9_\-]/', '_', (string) $this->session_id);
         }
         $dir = rtrim($dir, '/');
+        if ($this->isRemote()) {
+            return $dir;
+        }
         if (!is_dir($dir) && !mkdir($dir, 0777, true) && !is_dir($dir)) {
             throw new \RuntimeException('harness: failed to create workspace ' . $dir);
         }
         return $dir;
     }
 
+    protected function isRemote(): bool
+    {
+        return $this->ssh_host !== null && trim($this->ssh_host) !== '';
+    }
+
+    /**
+     * The ssh invocation without the remote command. Non-interactive defaults
+     * are forced: an unattended run must never block on a prompt.
+     *
+     * @return array
+     */
+    protected function sshCommand(): array
+    {
+        $command = [
+            'ssh',
+            '-T',
+            '-o',
+            'BatchMode=yes',
+            '-o',
+            'StrictHostKeyChecking=accept-new',
+            '-o',
+            'ConnectTimeout=10'
+        ];
+        if ($this->ssh_key !== null && trim($this->ssh_key) !== '') {
+            $command[] = '-i';
+            $command[] = $this->ssh_key;
+        }
+        if ($this->ssh_port !== null) {
+            $command[] = '-p';
+            $command[] = (string) $this->ssh_port;
+        }
+        $command[] =
+            $this->ssh_user !== null && trim($this->ssh_user) !== ''
+                ? $this->ssh_user . '@' . $this->ssh_host
+                : (string) $this->ssh_host;
+        return $command;
+    }
+
+    /**
+     * Environment the harness itself needs, without the inherited one.
+     *
+     * @return array
+     */
+    protected function harnessEnvironmentOverrides(): array
+    {
+        return [];
+    }
+
     protected function harnessEnvironment(): ?array
     {
-        return null;
+        $overrides = $this->harnessEnvironmentOverrides();
+        return $overrides === [] ? null : array_merge(getenv(), $overrides);
     }
 
     protected function emitAnthropicEvent(?\Closure $emit, array $event): void
@@ -9248,7 +9356,29 @@ abstract class ai_harness extends ai_anthropic
             throw new \RuntimeException('harness: no user prompt to hand over.');
         }
 
-        $command = array_merge(['setsid', $binary], $this->buildArgs());
+        $this->harness_run_id = md5(uniqid('', true));
+        if ($this->isRemote()) {
+            // the whole invocation becomes one remote shell line: the run id
+            // tags the process tree so an abort can find it again, and the
+            // working directory is created on the machine that owns it
+            $inner = array_merge([$binary], $this->buildArgs());
+            $script =
+                'mkdir -p ' .
+                escapeshellarg($this->workspace()) .
+                ' && cd ' .
+                escapeshellarg($this->workspace()) .
+                ' && exec ' .
+                implode(' ', array_map('escapeshellarg', $inner));
+            $exports = ['AIHELPER_RUN_ID=' . escapeshellarg((string) $this->harness_run_id)];
+            foreach ($this->harnessEnvironmentOverrides() as $name => $value) {
+                $exports[] = $name . '=' . escapeshellarg((string) $value);
+            }
+            $command = array_merge($this->sshCommand(), [
+                implode(' ', $exports) . ' setsid bash -c ' . escapeshellarg($this->remoteShell($script))
+            ]);
+        } else {
+            $command = array_merge(['setsid', $binary], $this->buildArgs());
+        }
         // the mcp config carries bearer tokens and must not reach the log
         $loggable = $command;
         foreach ($loggable as $loggable__key => $loggable__value) {
@@ -9262,8 +9392,8 @@ abstract class ai_harness extends ai_anthropic
             $command,
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
-            $this->workspace(),
-            $this->harnessEnvironment()
+            $this->isRemote() ? null : $this->workspace(),
+            $this->isRemote() ? null : $this->harnessEnvironment()
         );
         if (!is_resource($process)) {
             throw new \RuntimeException('harness: failed to spawn ' . $binary);
@@ -9384,6 +9514,18 @@ abstract class ai_harness extends ai_anthropic
 
     protected function terminateProcess(mixed $process, int $pid): void
     {
+        if ($this->isRemote() && $this->harness_run_id !== null) {
+            $tag = 'AIHELPER_RUN_ID=' . $this->harness_run_id;
+            foreach (['TERM', 'KILL'] as $signal) {
+                $kill = array_merge($this->sshCommand(), [
+                    'pkill -' . $signal . ' -f ' . escapeshellarg($tag)
+                ]);
+                exec(implode(' ', array_map('escapeshellarg', $kill)) . ' >/dev/null 2>&1');
+                if ($signal === 'TERM') {
+                    usleep(500000);
+                }
+            }
+        }
         $group = $pid > 0 ? posix_getpgid($pid) : false;
         if ($group !== false && $group > 0 && $group !== posix_getpgrp()) {
             posix_kill(-$group, SIGTERM);
@@ -9461,7 +9603,7 @@ class ai_claudecode extends ai_harness
      *
      * @return array|null
      */
-    protected function harnessEnvironment(): ?array
+    protected function harnessEnvironmentOverrides(): array
     {
         // without this claude code refuses to skip permissions as root
         $overrides = ['IS_SANDBOX' => '1'];
@@ -9473,7 +9615,7 @@ class ai_claudecode extends ai_harness
         if ($this->api_key !== null && trim($this->api_key) !== '') {
             $overrides['ANTHROPIC_AUTH_TOKEN'] = $this->api_key;
         }
-        return array_merge(getenv(), $overrides);
+        return $overrides;
     }
 
     protected function buildArgs(): array
