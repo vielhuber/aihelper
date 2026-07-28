@@ -305,12 +305,14 @@ ROUTER;
         $this->assertNotFalse($counterFile);
         $routerFile = sys_get_temp_dir() . '/aihelper-mcp-retry-router-' . getmypid() . '.php';
         $this->assertNotFalse(file_put_contents($routerFile, self::MCP_RETRY_ROUTER));
+        // the null device is named differently on windows, where /dev/null does not exist
+        $nullDevice = DIRECTORY_SEPARATOR === '\\' ? 'NUL' : '/dev/null';
         $process = proc_open(
             [PHP_BINARY, '-S', '127.0.0.1:' . $port, $routerFile],
             [
-                0 => ['file', '/dev/null', 'r'],
-                1 => ['file', '/dev/null', 'a'],
-                2 => ['file', '/dev/null', 'a']
+                0 => ['file', $nullDevice, 'r'],
+                1 => ['file', $nullDevice, 'a'],
+                2 => ['file', $nullDevice, 'a']
             ],
             $pipes,
             __DIR__,
