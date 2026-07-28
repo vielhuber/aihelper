@@ -437,11 +437,10 @@ ROUTER;
         $this->assertLessThanOrEqual(100000, strlen($truncated));
         $this->assertStringContainsString('1795 more items, 1800 total', $truncated);
         $this->assertStringContainsString('truncated from', $truncated);
-        $this->assertMatchesRegularExpression(
-            '#complete structured result persisted at (/tmp/aihelper-tool-results/[^;\]]+\.json)#',
-            $truncated
-        );
-        preg_match('#complete structured result persisted at (/tmp/aihelper-tool-results/[^;\]]+\.json)#', $truncated, $matches);
+        // the temp directory differs per platform, so only the marker is matched
+        $persistedPattern = '#complete structured result persisted at ([^;\]]*aihelper-tool-results[^;\]]+\.json)#';
+        $this->assertMatchesRegularExpression($persistedPattern, $truncated);
+        preg_match($persistedPattern, $truncated, $matches);
         $this->assertFileExists($matches[1]);
         $this->assertSame($records, json_decode((string) file_get_contents($matches[1]), true, 512, JSON_THROW_ON_ERROR));
         $retruncated = $method->invoke(new RetryTestAihelper([]), $truncated, 50000);

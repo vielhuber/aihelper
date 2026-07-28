@@ -4924,7 +4924,7 @@ abstract class aihelper
         $persisted_path = null;
         if (
             preg_match(
-                '#complete structured result persisted at (/tmp/aihelper-tool-results/[^;\]]+)#',
+                '#complete structured result persisted at ([^;\]]*aihelper-tool-results[^;\]]+)#',
                 $output,
                 $persisted_path_match
             ) === 1
