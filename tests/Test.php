@@ -255,6 +255,44 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame([true, false, false], $ai->promptAdditions);
     }
 
+    // php's built-in server needs the router as a file on disk; it only exists
+    // for this one test, so it is written out instead of being checked in
+    private const MCP_RETRY_ROUTER = <<<'ROUTER'
+<?php
+declare(strict_types=1);
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
+    http_response_code(204);
+    return;
+}
+
+$counterFile = (string) getenv('MCP_RETRY_COUNTER');
+$attempt = is_file($counterFile) ? (int) file_get_contents($counterFile) + 1 : 1;
+file_put_contents($counterFile, (string) $attempt);
+
+if ($attempt < 3) {
+    http_response_code(502);
+    echo 'temporary gateway failure';
+    return;
+}
+
+header('Content-Type: text/event-stream');
+echo 'event: message' . "\n";
+echo 'data: ' . json_encode([
+    'jsonrpc' => '2.0',
+    'id' => 1,
+    'result' => [
+        'tools' => [
+            [
+                'name' => 'test_tool',
+                'description' => 'Test tool',
+                'inputSchema' => ['type' => 'object', 'properties' => []]
+            ]
+        ]
+    ]
+]) . "\n\n";
+ROUTER;
+
     function test__transient_mcp_tool_discovery_errors_are_retried(): void
     {
         $socket = stream_socket_server('tcp://127.0.0.1:0', $errorCode, $errorMessage);
@@ -265,8 +303,10 @@ class Test extends \PHPUnit\Framework\TestCase
         $port = (int) mb_substr($address, (int) mb_strrpos($address, ':') + 1);
         $counterFile = tempnam(sys_get_temp_dir(), 'aihelper-mcp-retry-');
         $this->assertNotFalse($counterFile);
+        $routerFile = sys_get_temp_dir() . '/aihelper-mcp-retry-router-' . getmypid() . '.php';
+        $this->assertNotFalse(file_put_contents($routerFile, self::MCP_RETRY_ROUTER));
         $process = proc_open(
-            [PHP_BINARY, '-S', '127.0.0.1:' . $port, __DIR__ . '/McpRetryServer.php'],
+            [PHP_BINARY, '-S', '127.0.0.1:' . $port, $routerFile],
             [
                 0 => ['file', '/dev/null', 'r'],
                 1 => ['file', '/dev/null', 'a'],
@@ -304,6 +344,7 @@ class Test extends \PHPUnit\Framework\TestCase
             proc_terminate($process);
             proc_close($process);
             unlink($counterFile);
+            unlink($routerFile);
         }
     }
 
