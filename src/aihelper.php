@@ -2431,6 +2431,7 @@ abstract class aihelper
                 'empty_stream',
                 'upstream stream closed before first payload',
                 'protocol_error',
+                'internal_error; received from peer',
                 'stream disconnected before completion',
                 'stream closed before response.completed',
                 'operation timed out',

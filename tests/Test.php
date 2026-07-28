@@ -316,13 +316,13 @@ ROUTER;
             ],
             $pipes,
             __DIR__,
-            ['MCP_RETRY_COUNTER' => $counterFile]
+            array_merge(getenv(), ['MCP_RETRY_COUNTER' => $counterFile])
         );
         $this->assertIsResource($process);
 
         try {
             $ready = false;
-            for ($attempt = 0; $attempt < 50; $attempt++) {
+            for ($attempt = 0; $attempt < 150; $attempt++) {
                 $connection = curl_init('http://127.0.0.1:' . $port);
                 curl_setopt($connection, CURLOPT_RETURNTRANSFER, true);
                 curl_setopt($connection, CURLOPT_CONNECTTIMEOUT_MS, 100);
@@ -333,7 +333,7 @@ ROUTER;
                     $ready = true;
                     break;
                 }
-                usleep(20000);
+                usleep(100000);
             }
             $this->assertTrue($ready);
 
@@ -615,6 +615,20 @@ ROUTER;
         $this->assertSame('ok', $result['response']);
         $this->assertSame(3, $ai->attempts);
         $this->assertSame([true, false, false], $ai->promptAdditions);
+    }
+
+    function test__transient_http2_stream_errors_are_retried(): void
+    {
+        $ai = new RetryTestAihelper([
+            'AI Request fehlgeschlagen: stream error: stream ID 1; INTERNAL_ERROR; received from peer'
+        ]);
+
+        $result = $ai->ask('test');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('ok', $result['response']);
+        $this->assertSame(2, $ai->attempts);
+        $this->assertSame([true, false], $ai->promptAdditions);
     }
 
     function test__permanent_request_errors_are_not_retried(): void
