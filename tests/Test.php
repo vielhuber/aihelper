@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 use vielhuber\aihelper\aihelper;
+use vielhuber\aihelper\ai_claudecode;
+use vielhuber\aihelper\ai_google;
 use vielhuber\stringhelper\__;
 
 final class RetryTestAihelper extends aihelper
@@ -69,6 +71,133 @@ final class RetryTestAihelper extends aihelper
         $this->name = $provider;
         return $this->getCliUsageCacheKey($tool);
     }
+
+    public function localTools(string $url): array
+    {
+        $this->mcp_servers = [['url' => $url]];
+        return $this->buildLocalToolsArgs();
+    }
+}
+
+final class ToolImageTestAihelper extends aihelper
+{
+    public static array $mcpResponse = [];
+
+    public function __construct(string $provider)
+    {
+        $this->name = $provider;
+        $this->model = 'test';
+        $this->session_id = 'tool-image-test-' . $provider;
+        $this->max_tries = 1;
+        $this->mcp_servers_tools_map = [
+            'render_image' => [
+                'url' => 'https://example.test/mcp',
+                'authorization_token' => null
+            ]
+        ];
+        if ($provider === 'google') {
+            self::$sessions[$this->session_id] = [
+                [
+                    'role' => 'model',
+                    'parts' => [
+                        ['functionCall' => ['name' => 'render_image', 'args' => []]]
+                    ]
+                ]
+            ];
+            return;
+        }
+        if (in_array($provider, ['anthropic', 'xai', 'deepseek'], true)) {
+            self::$sessions[$this->session_id] = [
+                [
+                    'role' => 'assistant',
+                    'content' => [
+                        ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'render_image', 'input' => []]
+                    ]
+                ]
+            ];
+            return;
+        }
+        if (in_array($provider, ['openrouter', 'llamacpp', 'nvidia', 'cliproxyapi'], true)) {
+            self::$sessions[$this->session_id] = [
+                [
+                    'role' => 'assistant',
+                    'tool_calls' => [
+                        [
+                            'id' => 'call_1',
+                            'function' => ['name' => 'render_image', 'arguments' => '{}']
+                        ]
+                    ]
+                ]
+            ];
+            return;
+        }
+        self::$sessions[$this->session_id] = [
+            ['type' => 'function_call', 'call_id' => 'call_1', 'name' => 'render_image', 'arguments' => '{}']
+        ];
+    }
+
+    public static function callMcpTool(
+        ?string $name = null,
+        ?array $args = [],
+        ?string $url = null,
+        ?string $authorization_token = null
+    ): ?array {
+        return self::$mcpResponse;
+    }
+
+    public function runToolLoop(): array
+    {
+        return $this->runLocalToolLoop(['response' => '', 'success' => true, 'costs' => 0.0]);
+    }
+
+    public function session(): array
+    {
+        return self::$sessions[$this->session_id];
+    }
+
+    protected function askThis(
+        ?string $prompt = null,
+        mixed $files = null,
+        bool $add_prompt_to_session = true,
+        ?string $prev_output_text = null,
+        float $prev_costs = 0.0,
+        int $length_continuation_count = 0
+    ): array {
+        if ($this->name === 'google') {
+            self::$sessions[$this->session_id][] = ['role' => 'model', 'parts' => [['text' => 'done']]];
+        }
+        if (in_array($this->name, ['anthropic', 'xai', 'deepseek'], true)) {
+            self::$sessions[$this->session_id][] = [
+                'role' => 'assistant',
+                'content' => [['type' => 'text', 'text' => 'done']]
+            ];
+        }
+        if (in_array($this->name, ['openrouter', 'llamacpp', 'nvidia', 'cliproxyapi'], true)) {
+            self::$sessions[$this->session_id][] = ['role' => 'assistant', 'content' => 'done'];
+        }
+        if (!in_array(
+            $this->name,
+            ['google', 'anthropic', 'xai', 'deepseek', 'openrouter', 'llamacpp', 'nvidia', 'cliproxyapi'],
+            true
+        )) {
+            self::$sessions[$this->session_id][] = ['type' => 'message', 'role' => 'assistant', 'content' => []];
+        }
+        return ['response' => 'done', 'success' => true, 'costs' => $prev_costs];
+    }
+
+    protected function makeApiCall(?array $args = null): mixed
+    {
+        return null;
+    }
+
+    protected function bringPromptInFormat(string $prompt, mixed $files = null): array
+    {
+        return [];
+    }
+
+    protected function addResponseToSession(mixed $response): void
+    {
+    }
 }
 
 class Test extends \PHPUnit\Framework\TestCase
@@ -126,6 +255,58 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame([true, false, false], $ai->promptAdditions);
     }
 
+    function test__transient_mcp_tool_discovery_errors_are_retried(): void
+    {
+        $socket = stream_socket_server('tcp://127.0.0.1:0', $errorCode, $errorMessage);
+        $this->assertNotFalse($socket, $errorMessage);
+        $address = stream_socket_get_name($socket, false);
+        $this->assertIsString($address);
+        fclose($socket);
+        $port = (int) mb_substr($address, (int) mb_strrpos($address, ':') + 1);
+        $counterFile = tempnam(sys_get_temp_dir(), 'aihelper-mcp-retry-');
+        $this->assertNotFalse($counterFile);
+        $process = proc_open(
+            [PHP_BINARY, '-S', '127.0.0.1:' . $port, __DIR__ . '/McpRetryServer.php'],
+            [
+                0 => ['file', '/dev/null', 'r'],
+                1 => ['file', '/dev/null', 'a'],
+                2 => ['file', '/dev/null', 'a']
+            ],
+            $pipes,
+            __DIR__,
+            ['MCP_RETRY_COUNTER' => $counterFile]
+        );
+        $this->assertIsResource($process);
+
+        try {
+            $ready = false;
+            for ($attempt = 0; $attempt < 50; $attempt++) {
+                $connection = curl_init('http://127.0.0.1:' . $port);
+                curl_setopt($connection, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($connection, CURLOPT_CONNECTTIMEOUT_MS, 100);
+                curl_setopt($connection, CURLOPT_TIMEOUT_MS, 100);
+                curl_exec($connection);
+                $httpCode = curl_getinfo($connection, CURLINFO_HTTP_CODE);
+                if ($httpCode === 204) {
+                    $ready = true;
+                    break;
+                }
+                usleep(20000);
+            }
+            $this->assertTrue($ready);
+
+            $tools = (new RetryTestAihelper([]))->localTools('http://127.0.0.1:' . $port);
+
+            $this->assertCount(1, $tools);
+            $this->assertSame('test_tool', $tools[0]['name']);
+            $this->assertSame('3', trim((string) file_get_contents($counterFile)));
+        } finally {
+            proc_terminate($process);
+            proc_close($process);
+            unlink($counterFile);
+        }
+    }
+
     function test__auth_unavailable_stops_after_three_attempts(): void
     {
         $ai = new RetryTestAihelper(
@@ -166,6 +347,154 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame('ok', $result['response']);
         $this->assertSame(3, $ai->attempts);
         $this->assertSame([true, false, false], $ai->promptAdditions);
+    }
+
+    function test__local_tool_output_keeps_compact_results_within_budget(): void
+    {
+        $records = array_fill(0, 1800, [
+            'id' => str_repeat('a', 65),
+            'from' => '4915112345678',
+            'to' => '4915158754691',
+            'timestamp' => '2026-07-27T17:00:00+02:00'
+        ]);
+        $output = json_encode($records, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $method = new \ReflectionMethod(aihelper::class, 'truncateLocalToolOutput');
+
+        $this->assertGreaterThan(256000, strlen($output));
+        $this->assertLessThan(288000, strlen($output));
+        $this->assertSame($output, $method->invoke(new RetryTestAihelper([]), $output, 288000));
+    }
+
+    function test__local_tool_output_compacts_json_without_losing_records(): void
+    {
+        $records = [
+            ['id' => 'one', 'body' => 'First message'],
+            ['id' => 'two', 'body' => 'Second message']
+        ];
+        $output = json_encode($records, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+        $method = new \ReflectionMethod(aihelper::class, 'truncateLocalToolOutput');
+        $compacted = $method->invoke(new RetryTestAihelper([]), $output, 10000);
+
+        $this->assertLessThan(strlen($output), strlen($compacted));
+        $this->assertSame($records, json_decode($compacted, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    function test__local_tool_output_compacts_results_above_budget(): void
+    {
+        $records = array_fill(0, 1800, [
+            'id' => str_repeat('a', 200),
+            'from' => '4915112345678',
+            'to' => '4915158754691',
+            'timestamp' => '2026-07-27T17:00:00+02:00'
+        ]);
+        $output = json_encode($records, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $method = new \ReflectionMethod(aihelper::class, 'truncateLocalToolOutput');
+        $truncated = $method->invoke(new RetryTestAihelper([]), $output, 100000);
+
+        $this->assertLessThanOrEqual(100000, strlen($truncated));
+        $this->assertStringContainsString('1795 more items, 1800 total', $truncated);
+        $this->assertStringContainsString('truncated from', $truncated);
+        $this->assertMatchesRegularExpression(
+            '#complete structured result persisted at (/tmp/aihelper-tool-results/[^;\]]+\.json)#',
+            $truncated
+        );
+        preg_match('#complete structured result persisted at (/tmp/aihelper-tool-results/[^;\]]+\.json)#', $truncated, $matches);
+        $this->assertFileExists($matches[1]);
+        $this->assertSame($records, json_decode((string) file_get_contents($matches[1]), true, 512, JSON_THROW_ON_ERROR));
+        $retruncated = $method->invoke(new RetryTestAihelper([]), $truncated, 50000);
+        $this->assertLessThanOrEqual(50000, strlen($retruncated));
+        $this->assertStringContainsString('complete structured result persisted at ' . $matches[1], $retruncated);
+        unlink($matches[1]);
+    }
+
+    function test__local_tool_output_includes_marker_within_small_budget(): void
+    {
+        $method = new \ReflectionMethod(aihelper::class, 'truncateLocalToolOutput');
+        $truncated = $method->invoke(new RetryTestAihelper([]), str_repeat('a', 1000), 100);
+
+        $this->assertSame(100, strlen($truncated));
+        $this->assertStringContainsString('truncated from 1000 chars', $truncated);
+    }
+
+    function test__mcp_images_are_forwarded_as_multimodal_tool_results(): void
+    {
+        $imageData = base64_encode('test-image');
+        ToolImageTestAihelper::$mcpResponse = [
+            'result' => [
+                'content' => [
+                    ['type' => 'text', 'text' => 'Rendered page 1.'],
+                    ['type' => 'image', 'mimeType' => 'image/png', 'data' => $imageData]
+                ]
+            ]
+        ];
+
+        $chatCompletions = new ToolImageTestAihelper('cliproxyapi');
+        $this->assertTrue($chatCompletions->runToolLoop()['success']);
+        $chatSession = $chatCompletions->session();
+        $this->assertSame('Rendered page 1.', $chatSession[1]['content']);
+        $this->assertSame('image_url', $chatSession[2]['content'][1]['type']);
+        $this->assertSame('data:image/png;base64,' . $imageData, $chatSession[2]['content'][1]['image_url']['url']);
+
+        $anthropic = new ToolImageTestAihelper('anthropic');
+        $this->assertTrue($anthropic->runToolLoop()['success']);
+        $anthropicSession = $anthropic->session();
+        $this->assertSame('Rendered page 1.', $anthropicSession[1]['content'][0]['content'][0]['text']);
+        $this->assertSame('image', $anthropicSession[1]['content'][0]['content'][1]['type']);
+        $this->assertSame($imageData, $anthropicSession[1]['content'][0]['content'][1]['source']['data']);
+
+        $google = new ToolImageTestAihelper('google');
+        $this->assertTrue($google->runToolLoop()['success']);
+        $googleSession = $google->session();
+        $this->assertSame('Rendered page 1.', $googleSession[1]['parts'][0]['functionResponse']['response']['result']);
+        $this->assertSame($imageData, $googleSession[1]['parts'][1]['inlineData']['data']);
+
+        $responses = new ToolImageTestAihelper('openai');
+        $this->assertTrue($responses->runToolLoop()['success']);
+        $responsesSession = $responses->session();
+        $this->assertSame('Rendered page 1.', $responsesSession[1]['output'][0]['text']);
+        $this->assertSame('input_image', $responsesSession[1]['output'][1]['type']);
+        $this->assertSame('data:image/png;base64,' . $imageData, $responsesSession[1]['output'][1]['image_url']);
+    }
+
+    function test__claude_code_uses_explicit_stream_json_input(): void
+    {
+        $harness = (new \ReflectionClass(ai_claudecode::class))->newInstanceWithoutConstructor();
+        $args = (new \ReflectionMethod(ai_claudecode::class, 'buildArgs'))->invoke($harness);
+        $input = (new \ReflectionMethod(ai_claudecode::class, 'harnessInput'))->invoke($harness, 'Hello');
+
+        $this->assertContains('--input-format', $args);
+        $this->assertContains('stream-json', $args);
+        $this->assertSame(
+            [
+                'type' => 'user',
+                'message' => [
+                    'role' => 'user',
+                    'content' => [['type' => 'text', 'text' => 'Hello']]
+                ]
+            ],
+            json_decode(trim($input), true, 512, JSON_THROW_ON_ERROR)
+        );
+    }
+
+    function test__harness_waits_for_process_group_leader(): void
+    {
+        $source = file_get_contents(__DIR__ . '/../src/aihelper.php');
+
+        $this->assertIsString($source);
+        $this->assertStringContainsString("['setsid', '--wait', \$binary]", $source);
+        $this->assertStringContainsString("' setsid --wait bash -c '", $source);
+    }
+
+    function test__google_stream_preserves_plain_json_errors(): void
+    {
+        $ai = (new \ReflectionClass(ai_google::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($ai, true);
+        $callback = (new \ReflectionMethod(aihelper::class, 'getStreamCallback'))->invoke($ai);
+
+        $callback(json_encode(['error' => ['message' => 'API key not valid.']], JSON_THROW_ON_ERROR) . "\n");
+
+        $response = (new \ReflectionProperty(aihelper::class, 'stream_response'))->getValue($ai);
+        $this->assertSame('API key not valid.', $response->result->error->message);
     }
 
     function test__empty_stream_before_first_payload_is_retried(): void
@@ -539,15 +868,26 @@ TXT
             $history[] = ['role' => 'assistant', 'content' => 'Antwort ' . $i . ': ' . $bloat];
         }
         $history[20]['content'] .= ' Erzeugte Datei: ' . $path_marker;
-        // tail: 6 recent messages that must stay verbatim (matches autoCompactSession's keep_tail)
+        // tail: retain the current unanswered tool result, but compact a large
+        // earlier result that already has an assistant response.
         $tail_marker_user = 'TAIL_USER_MARKER_' . mt_rand(1000, 9999);
         $tail_marker_asst = 'TAIL_ASSISTANT_MARKER_' . mt_rand(1000, 9999);
+        $processed_tool_payload = str_repeat('processed payload ', 5000);
+        $pending_tool_payload = str_repeat('pending payload ', 5000);
         $history[] = ['role' => 'user', 'content' => $tail_marker_user . ' frage 1'];
-        $history[] = ['role' => 'assistant', 'content' => $tail_marker_asst . ' antwort 1'];
-        $history[] = ['role' => 'user', 'content' => $tail_marker_user . ' frage 2'];
-        $history[] = ['role' => 'assistant', 'content' => $tail_marker_asst . ' antwort 2'];
-        $history[] = ['role' => 'user', 'content' => $tail_marker_user . ' frage 3'];
-        $history[] = ['role' => 'assistant', 'content' => $tail_marker_asst . ' antwort 3'];
+        $history[] = [
+            'role' => 'assistant',
+            'content' => null,
+            'tool_calls' => [['id' => 'processed', 'function' => ['name' => 'read', 'arguments' => '{}']]]
+        ];
+        $history[] = ['role' => 'tool', 'tool_call_id' => 'processed', 'content' => $processed_tool_payload];
+        $history[] = ['role' => 'assistant', 'content' => $tail_marker_asst . ' antwort'];
+        $history[] = [
+            'role' => 'assistant',
+            'content' => null,
+            'tool_calls' => [['id' => 'pending', 'function' => ['name' => 'read', 'arguments' => '{}']]]
+        ];
+        $history[] = ['role' => 'tool', 'tool_call_id' => 'pending', 'content' => $pending_tool_payload];
 
         $message_count_before = count($history);
         $this->assertGreaterThan(9, $message_count_before);
@@ -576,14 +916,16 @@ TXT
                 $session_after[$i]['content']
             );
         }
-        // tail is preserved verbatim (last 6 messages unchanged)
+        // the processed payload is compacted; the unanswered result and its
+        // matching call remain available verbatim.
         $tail_after = array_slice($session_after, -6);
         $this->assertStringContainsString($tail_marker_user, $tail_after[0]['content']);
-        $this->assertStringContainsString($tail_marker_asst, $tail_after[1]['content']);
-        $this->assertStringContainsString($tail_marker_user, $tail_after[2]['content']);
+        $this->assertSame('processed', $tail_after[1]['tool_calls'][0]['id']);
+        $this->assertStringContainsString('während Kontext-Kompression entfernt', $tail_after[2]['content']);
+        $this->assertStringNotContainsString('processed payload', $tail_after[2]['content']);
         $this->assertStringContainsString($tail_marker_asst, $tail_after[3]['content']);
-        $this->assertStringContainsString($tail_marker_user, $tail_after[4]['content']);
-        $this->assertStringContainsString($tail_marker_asst, $tail_after[5]['content']);
+        $this->assertSame('pending', $tail_after[4]['tool_calls'][0]['id']);
+        $this->assertSame($pending_tool_payload, $tail_after[5]['content']);
 
         // summary message sits between head and tail (index = keep_head),
         // carries the banner text. content shape differs per provider
@@ -595,6 +937,7 @@ TXT
             'Zusammenfassung des bisherigen Verlaufs',
             json_encode($summary_msg['content'])
         );
+        $this->assertStringContainsString('Frage 0', json_encode($summary_msg['content'], JSON_UNESCAPED_UNICODE));
         $this->assertStringContainsString($path_marker, json_encode($summary_msg['content'], JSON_UNESCAPED_SLASHES));
 
         // persistence: running summary should now live on disk under /tmp/aihelper-cache/

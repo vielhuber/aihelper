@@ -3186,11 +3186,10 @@ abstract class aihelper
     }
 
     /**
-     * Replace inline image content blocks across all known provider shapes
-     * with a tiny text stub. Used after a successful compaction to evict
-     * base64-heavy attachments from `head` and `tail` so subsequent compacts
-     * see a realistic baseline. The summary call that ran beforehand already
-     * carried the model's interpretation of the image forward in prose.
+     * Replace processed oversized tool and image payloads across all known
+     * provider shapes with a small text stub. The currently unanswered tool
+     * result is excluded by autoCompactSession(), so the next model call still
+     * receives its complete input.
      *
      * Recognises:
      *  - OpenAI: ["type" => "image_url", "image_url" => ["url" => "data:..."]]
@@ -3198,17 +3197,22 @@ abstract class aihelper
      *  - Google: ["inline_data" => ["mime_type" => "image/...", "data" => "..."]]
      *  - bare data URIs anywhere in the tree (fallback)
      */
-    private static function replaceInlineImagesWithStubs(mixed $node, int &$count): mixed
+    private static function replaceOversizedContextPayloadsWithStubs(mixed $node, int &$count): mixed
     {
         $stub_text =
-            '[Bild aus früherem Turn entfernt während Kontext-Kompression — Inhalt in Zusammenfassung erhalten]';
+            '[Großer Tool- oder Bildinhalt aus früherem Turn während Kontext-Kompression entfernt — Inhalt in Zusammenfassung erhalten]';
 
         if (is_array($node)) {
             // detect known image-container shapes and swap the whole block out
             $is_openai_image = isset($node['type']) && $node['type'] === 'image_url' && isset($node['image_url']);
             $is_anthropic_image = isset($node['type']) && $node['type'] === 'image' && isset($node['source']);
+            $is_mcp_image =
+                isset($node['type']) &&
+                $node['type'] === 'image' &&
+                isset($node['data']) &&
+                is_string($node['data']);
             $is_google_image = isset($node['inline_data']) && is_array($node['inline_data']);
-            if ($is_openai_image || $is_anthropic_image) {
+            if ($is_openai_image || $is_anthropic_image || $is_mcp_image) {
                 $count++;
                 return ['type' => 'text', 'text' => $stub_text];
             }
@@ -3216,9 +3220,45 @@ abstract class aihelper
                 $count++;
                 return ['text' => $stub_text];
             }
+            if (
+                ($node['role'] ?? null) === 'tool' &&
+                isset($node['content']) &&
+                is_string($node['content']) &&
+                mb_strlen($node['content']) > 60000
+            ) {
+                $count++;
+                $node['content'] = $stub_text . ' (' . mb_strlen($node['content']) . ' Zeichen)';
+            }
+            if (
+                ($node['type'] ?? null) === 'tool_result' &&
+                isset($node['content']) &&
+                is_string($node['content']) &&
+                mb_strlen($node['content']) > 60000
+            ) {
+                $count++;
+                $node['content'] = $stub_text . ' (' . mb_strlen($node['content']) . ' Zeichen)';
+            }
+            if (
+                ($node['type'] ?? null) === 'function_call_output' &&
+                isset($node['output']) &&
+                is_string($node['output']) &&
+                mb_strlen($node['output']) > 60000
+            ) {
+                $count++;
+                $node['output'] = $stub_text . ' (' . mb_strlen($node['output']) . ' Zeichen)';
+            }
+            if (
+                isset($node['functionResponse']['response']['result']) &&
+                is_string($node['functionResponse']['response']['result']) &&
+                mb_strlen($node['functionResponse']['response']['result']) > 60000
+            ) {
+                $count++;
+                $node['functionResponse']['response']['result'] =
+                    $stub_text . ' (' . mb_strlen($node['functionResponse']['response']['result']) . ' Zeichen)';
+            }
             $out = [];
             foreach ($node as $k => $v) {
-                $out[$k] = self::replaceInlineImagesWithStubs($v, $count);
+                $out[$k] = self::replaceOversizedContextPayloadsWithStubs($v, $count);
             }
             return $out;
         }
@@ -3226,8 +3266,10 @@ abstract class aihelper
             $arr = (array) $node;
             $is_openai_image = ($arr['type'] ?? null) === 'image_url' && isset($arr['image_url']);
             $is_anthropic_image = ($arr['type'] ?? null) === 'image' && isset($arr['source']);
+            $is_mcp_image =
+                ($arr['type'] ?? null) === 'image' && isset($arr['data']) && is_string($arr['data']);
             $is_google_image = isset($arr['inline_data']);
-            if ($is_openai_image || $is_anthropic_image) {
+            if ($is_openai_image || $is_anthropic_image || $is_mcp_image) {
                 $count++;
                 return (object) ['type' => 'text', 'text' => $stub_text];
             }
@@ -3237,7 +3279,7 @@ abstract class aihelper
             }
             $out = clone $node;
             foreach (get_object_vars($out) as $k => $v) {
-                $out->$k = self::replaceInlineImagesWithStubs($v, $count);
+                $out->$k = self::replaceOversizedContextPayloadsWithStubs($v, $count);
             }
             return $out;
         }
@@ -3607,8 +3649,10 @@ abstract class aihelper
                 }
                 if (is_array($result) && ($result['success'] ?? false) === true) {
                     $text = is_string($result['response'] ?? null) ? trim($result['response']) : '';
-                    if ($text !== '') {
+                    if ($text !== '' && preg_match('/^#{1,3}\s+(?:Ziel|Ausgef.uhrte Aktionen|Schl.sselwerte|Offene Punkte)\b/miu', $text) === 1) {
                         $new_summary = $text;
+                    } elseif ($text !== '') {
+                        $this->log('⚠️ auto_compact: summarizer returned an unusable summary');
                     }
                 }
             }
@@ -3617,6 +3661,26 @@ abstract class aihelper
         }
 
         // ---- apply result to session --------------------------------------
+        if ($new_summary === null) {
+            $fallback_transcript = trim($transcript);
+            $fallback_limit = 24000;
+            if (mb_strlen($fallback_transcript) > $fallback_limit) {
+                $fallback_transcript =
+                    mb_substr($fallback_transcript, 0, intdiv($fallback_limit, 2)) .
+                    "\n\n[... Verlauf für die Komprimierung gekürzt ...]\n\n" .
+                    mb_substr($fallback_transcript, -intdiv($fallback_limit, 2));
+            }
+            $prior_summary = trim((string) $this->auto_compact_summary);
+            if ($prior_summary !== '' && $fallback_transcript !== '') {
+                $new_summary = $prior_summary . "\n\n## Neu hinzugekommener Verlauf\n\n" . $fallback_transcript;
+            }
+            if ($prior_summary !== '' && $fallback_transcript === '') {
+                $new_summary = $prior_summary;
+            }
+            if ($prior_summary === '' && $fallback_transcript !== '') {
+                $new_summary = "## Ziel und Verlauf\n\n" . $fallback_transcript;
+            }
+        }
         if ($preserved_paths !== []) {
             $paths_section = "## Dateipfade\n" .
                 implode("\n", array_map(fn($path): string => '- `' . $path . '`', array_keys($preserved_paths)));
@@ -3627,10 +3691,7 @@ abstract class aihelper
             }
         }
         if ($new_summary === null) {
-            // summarizer failed — drop middle without summary rather than
-            // blocking the user. logged above so we can debug later.
-            $this->log('⚠️ auto_compact: summarizer returned empty, dropping middle without summary');
-            self::$sessions[$this->session_id] = array_merge($head, $tail);
+            $this->log('⚠️ auto_compact: summarizer returned empty, keeping the original session');
             return;
         }
         $this->auto_compact_summary = $new_summary;
@@ -3638,17 +3699,62 @@ abstract class aihelper
             "[Zusammenfassung des bisherigen Verlaufs — die zwischen den initialen Instruktionen und den letzten Turns liegenden Nachrichten wurden komprimiert]\n\n" .
             $new_summary;
         $summary_message = $this->bringPromptInFormat($summary_banner);
-        // strip inline image attachments from head + tail once the summary has
-        // captured what the model extracted from them. otherwise a single big
-        // image in the first user turn sits unreachable in `head` forever and
-        // every subsequent compact runs against the same bloated baseline
-        // (62-loop observed in the wild). the summary always carries forward
-        // whatever the assistant already pulled out of the image.
-        $images_removed = 0;
-        $head = self::replaceInlineImagesWithStubs($head, $images_removed);
-        $tail = self::replaceInlineImagesWithStubs($tail, $images_removed);
-        if ($images_removed > 0) {
-            $this->log('🖼️ auto_compact: stripped ' . $images_removed . ' image attachment(s) from head/tail');
+        // Processed large payloads are represented by the summary. Keep only
+        // the final unanswered tool result intact for the immediate next call.
+        $pending_tail_start = count($tail);
+        while ($pending_tail_start > 0) {
+            $pending_entry = is_array($tail[$pending_tail_start - 1] ?? null)
+                ? $tail[$pending_tail_start - 1]
+                : (array) ($tail[$pending_tail_start - 1] ?? []);
+            $is_pending_tool_result = ($pending_entry['role'] ?? null) === 'tool';
+            $is_pending_function_result = ($pending_entry['type'] ?? null) === 'function_call_output';
+            $is_pending_anthropic_result =
+                ($pending_entry['role'] ?? null) === 'user' &&
+                is_array($pending_entry['content'] ?? null) &&
+                array_filter(
+                    $pending_entry['content'],
+                    static fn(mixed $block): bool =>
+                        is_array($block) && ($block['type'] ?? null) === 'tool_result'
+                ) !== [];
+            $is_pending_google_result =
+                ($pending_entry['role'] ?? null) === 'user' &&
+                is_array($pending_entry['parts'] ?? null) &&
+                array_filter(
+                    $pending_entry['parts'],
+                    static fn(mixed $part): bool => is_array($part) && isset($part['functionResponse'])
+                ) !== [];
+            $is_pending_image_message =
+                ($pending_entry['role'] ?? null) === 'user' &&
+                is_array($pending_entry['content'] ?? null) &&
+                array_filter(
+                    $pending_entry['content'],
+                    static fn(mixed $block): bool =>
+                        is_array($block) && in_array($block['type'] ?? null, ['image', 'image_url', 'input_image'], true)
+                ) !== [];
+            if (
+                !$is_pending_tool_result &&
+                !$is_pending_function_result &&
+                !$is_pending_anthropic_result &&
+                !$is_pending_google_result &&
+                !$is_pending_image_message
+            ) {
+                break;
+            }
+            $pending_tail_start--;
+        }
+        $payloads_removed = 0;
+        $head = self::replaceOversizedContextPayloadsWithStubs($head, $payloads_removed);
+        $processed_tail = self::replaceOversizedContextPayloadsWithStubs(
+            array_slice($tail, 0, $pending_tail_start),
+            $payloads_removed
+        );
+        $tail = array_merge($processed_tail, array_slice($tail, $pending_tail_start));
+        if ($payloads_removed > 0) {
+            $this->log(
+                '🖼️ auto_compact: stripped ' .
+                    $payloads_removed .
+                    ' processed large tool/image payload(s) from head/tail'
+            );
         }
         self::$sessions[$this->session_id] = array_merge($head, [$summary_message], $tail);
         // persist a full JSON snapshot (summary + compacted session). on the
@@ -3819,6 +3925,7 @@ abstract class aihelper
             $this->log(count($tool_calls) . ' tool call(s)', 'local tool loop');
             $tool_results = [];
             foreach ($tool_calls as $tc) {
+                $tool_images = [];
                 if (isset($this->mcp_servers_tools_map[$tc['name']])) {
                     foreach ($this->mcp_servers_tools_map[$tc['name']]['default_arguments'] ?? [] as $key => $value) {
                         if (
@@ -3917,85 +4024,82 @@ abstract class aihelper
                     } elseif (isset($result['result']['content']) && is_array($result['result']['content'])) {
                         $parts = [];
                         foreach ($result['result']['content'] as $item) {
+                            if (($item['type'] ?? null) === 'image' && is_string($item['data'] ?? null)) {
+                                $tool_images[] = [
+                                    'data' => $item['data'],
+                                    'mime_type' => $item['mimeType'] ?? $item['mime_type'] ?? 'image/png'
+                                ];
+                                continue;
+                            }
                             $parts[] = $item['text'] ?? json_encode($item, JSON_UNESCAPED_UNICODE);
                         }
                         $output = implode("\n", $parts);
+                        if ($output === '' && $tool_images !== []) {
+                            $output =
+                                'Tool returned ' .
+                                count($tool_images) .
+                                ' image' .
+                                (count($tool_images) === 1 ? '' : 's') .
+                                '.';
+                        }
                     } else {
                         $output = json_encode($result, JSON_UNESCAPED_UNICODE);
                     }
-                    // truncate very large tool outputs to prevent context overflow
                     $max_output_chars = min(
-                        500000,
-                        max(100000, (int) ($this->getContextLengthForModel() * 2))
+                        150000,
+                        max(50000, (int) ($this->getContextLengthForModel() * 0.75))
                     );
-                    if (mb_strlen($output) > $max_output_chars) {
-                        $original_len = mb_strlen($output);
-                        $trimmed = $output;
-                        // try JSON-aware truncation
-                        $decoded = json_decode(trim($output), true);
-                        if ($decoded !== null) {
-                            $compact = json_encode(
-                                $decoded,
-                                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-                            );
-                            if (is_string($compact) && mb_strlen($compact) <= $max_output_chars) {
-                                $output = $compact;
-                                $decoded = null;
-                            }
-                        }
-                        if ($decoded !== null) {
-                            $truncate_json = function ($data, int $max_str = 500, int $max_arr = 5) use (
-                                &$truncate_json
-                            ) {
-                                if (is_array($data) && array_is_list($data)) {
-                                    $sliced = array_map(
-                                        fn($v) => $truncate_json($v, $max_str, $max_arr),
-                                        array_slice($data, 0, $max_arr)
-                                    );
-                                    if (count($data) > $max_arr) {
-                                        $sliced[] =
-                                            '[... ' .
-                                            (count($data) - $max_arr) .
-                                            ' more items, ' .
-                                            count($data) .
-                                            ' total]';
-                                    }
-                                    return $sliced;
-                                }
-                                if (is_array($data)) {
-                                    return array_map(fn($v) => $truncate_json($v, $max_str, $max_arr), $data);
-                                }
-                                if (is_string($data) && mb_strlen($data) > $max_str) {
-                                    return mb_substr($data, 0, $max_str) . '... [' . mb_strlen($data) . ' chars]';
-                                }
-                                return $data;
-                            };
-                            $trimmed = json_encode(
-                                $truncate_json($decoded),
-                                JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT
-                            );
-                            $output =
-                                $trimmed .
-                                "\n\n[... truncated from $original_len to " .
-                                mb_strlen($trimmed) .
-                                ' chars]';
-                        } elseif (mb_strlen($output) > $max_output_chars) {
-                            $trimmed = mb_substr($output, 0, $max_output_chars);
-                            $output =
-                                $trimmed .
-                                "\n\n[... truncated from $original_len to " .
-                                mb_strlen($trimmed) .
-                                ' chars]';
-                        }
-                    }
+                    $output = $this->truncateLocalToolOutput($output, $max_output_chars);
                     $this->log(mb_substr($output, 0, 200), 'local tool result');
                 }
                 // record the hash of this round's output for the cumulative
                 // loop-guard. this happens unconditionally (also for unknown-
                 // tool errors) so a model that keeps calling a non-existent
                 // tool also gets caught after $cumulative_threshold attempts.
-                $signature_results[$signature][] = md5((string) $output);
-                $tool_results[] = ['id' => $tc['id'], 'name' => $tc['name'], 'output' => $output];
+                $result_signature = (string) $output;
+                foreach ($tool_images as $tool_image) {
+                    $result_signature .= '|' . $tool_image['mime_type'] . ':' . hash('sha256', $tool_image['data']);
+                }
+                $signature_results[$signature][] = md5($result_signature);
+                $tool_results[] = [
+                    'id' => $tc['id'],
+                    'name' => $tc['name'],
+                    'output' => $output,
+                    'images' => $tool_images
+                ];
+            }
+            $max_tool_batch_chars = min(
+                150000,
+                max(50000, (int) ($this->getContextLengthForModel() * 0.75))
+            );
+            $tool_batch_chars = array_sum(
+                array_map(fn(array $result): int => mb_strlen($result['output']), $tool_results)
+            );
+            if ($tool_batch_chars > $max_tool_batch_chars && $tool_results !== []) {
+                $remaining_indices = array_keys($tool_results);
+                $remaining_chars = $max_tool_batch_chars;
+                while ($remaining_indices !== []) {
+                    $max_result_chars = max(1, intdiv($remaining_chars, count($remaining_indices)));
+                    $oversized_indices = [];
+                    foreach ($remaining_indices as $result_index) {
+                        $result_length = mb_strlen($tool_results[$result_index]['output']);
+                        if ($result_length > $max_result_chars) {
+                            $oversized_indices[] = $result_index;
+                            continue;
+                        }
+                        $remaining_chars -= $result_length;
+                    }
+                    if (count($oversized_indices) === count($remaining_indices)) {
+                        foreach ($oversized_indices as $result_index) {
+                            $tool_results[$result_index]['output'] = $this->truncateLocalToolOutput(
+                                $tool_results[$result_index]['output'],
+                                $max_result_chars
+                            );
+                        }
+                        break;
+                    }
+                    $remaining_indices = $oversized_indices;
+                }
             }
             // append tool results in provider-specific format
             if ($is_google) {
@@ -4007,6 +4111,14 @@ abstract class aihelper
                             'response' => ['result' => $tr['output']]
                         ]
                     ];
+                    foreach ($tr['images'] ?? [] as $tool_image) {
+                        $response_parts[] = [
+                            'inlineData' => [
+                                'mimeType' => $tool_image['mime_type'],
+                                'data' => $tool_image['data']
+                            ]
+                        ];
+                    }
                 }
                 self::$sessions[$this->session_id][] = [
                     'role' => 'user',
@@ -4015,10 +4127,21 @@ abstract class aihelper
             } elseif ($is_anthropic) {
                 $result_blocks = [];
                 foreach ($tool_results as $tr) {
+                    $result_content = [['type' => 'text', 'text' => $tr['output']]];
+                    foreach ($tr['images'] ?? [] as $tool_image) {
+                        $result_content[] = [
+                            'type' => 'image',
+                            'source' => [
+                                'type' => 'base64',
+                                'media_type' => $tool_image['mime_type'],
+                                'data' => $tool_image['data']
+                            ]
+                        ];
+                    }
                     $result_blocks[] = [
                         'type' => 'tool_result',
                         'tool_use_id' => $tr['id'],
-                        'content' => $tr['output']
+                        'content' => $result_content
                     ];
                 }
                 self::$sessions[$this->session_id][] = [
@@ -4033,12 +4156,44 @@ abstract class aihelper
                         'content' => $tr['output']
                     ];
                 }
+                $image_content = [];
+                foreach ($tool_results as $tr) {
+                    foreach ($tr['images'] ?? [] as $tool_image) {
+                        $image_content[] = [
+                            'type' => 'image_url',
+                            'image_url' => [
+                                'url' =>
+                                    'data:' . $tool_image['mime_type'] . ';base64,' . $tool_image['data'],
+                                'detail' => 'auto'
+                            ]
+                        ];
+                    }
+                }
+                if ($image_content !== []) {
+                    array_unshift($image_content, [
+                        'type' => 'text',
+                        'text' => 'Images returned by the preceding tool call.'
+                    ]);
+                    self::$sessions[$this->session_id][] = [
+                        'role' => 'user',
+                        'content' => $image_content
+                    ];
+                }
             } else {
                 foreach ($tool_results as $tr) {
+                    $function_output = [['type' => 'input_text', 'text' => $tr['output']]];
+                    foreach ($tr['images'] ?? [] as $tool_image) {
+                        $function_output[] = [
+                            'type' => 'input_image',
+                            'image_url' =>
+                                'data:' . $tool_image['mime_type'] . ';base64,' . $tool_image['data'],
+                            'detail' => 'auto'
+                        ];
+                    }
                     self::$sessions[$this->session_id][] = [
                         'type' => 'function_call_output',
                         'call_id' => $tr['id'],
-                        'output' => $tr['output']
+                        'output' => $function_output
                     ];
                 }
             }
@@ -4329,19 +4484,45 @@ abstract class aihelper
                 $response = curl_multi_getcontent($h['ch']);
                 $httpCode = curl_getinfo($h['ch'], CURLINFO_HTTP_CODE);
                 curl_multi_remove_handle($mh, $h['ch']);
-                if ($httpCode < 200 || $httpCode >= 300 || !$response) {
-                    $fetch_failed[] = ($h['mcp']['url'] ?? '?') . ' (http ' . $httpCode . ')';
-                    continue;
-                }
-                if (strpos($response, 'event: message') !== false) {
-                    preg_match('/^data: (.+)$/m', $response, $matches);
-                    if (isset($matches[1])) {
-                        $response = trim($matches[1]);
+                $toolsData = null;
+                $failureReason = '(http ' . $httpCode . ')';
+                for ($attempt = 0; $attempt < 3; $attempt++) {
+                    if ($attempt > 0) {
+                        usleep($attempt * 500000);
+                        $response = curl_exec($h['ch']);
+                        $httpCode = curl_getinfo($h['ch'], CURLINFO_HTTP_CODE);
                     }
+                    $curlError = curl_error($h['ch']);
+                    if ($httpCode < 200 || $httpCode >= 300 || !is_string($response) || $response === '') {
+                        $failureReason =
+                            '(http ' . $httpCode . ($curlError !== '' ? ', ' . $curlError : '') . ')';
+                        $retryable =
+                            $httpCode === 0 ||
+                            $httpCode === 408 ||
+                            $httpCode === 425 ||
+                            $httpCode === 429 ||
+                            ($httpCode >= 500 && $httpCode <= 599);
+                        if ($retryable && $attempt < 2) {
+                            continue;
+                        }
+                        break;
+                    }
+                    if (strpos($response, 'event: message') !== false) {
+                        $matches = [];
+                        preg_match('/^data: (.+)$/m', $response, $matches);
+                        if (isset($matches[1])) {
+                            $response = trim($matches[1]);
+                        }
+                    }
+                    $toolsData = json_decode($response, true);
+                    if (isset($toolsData['result']['tools']) && is_array($toolsData['result']['tools'])) {
+                        break;
+                    }
+                    $failureReason = '(unparseable tools/list response)';
+                    $toolsData = null;
                 }
-                $toolsData = json_decode($response, true);
-                if (!isset($toolsData['result']['tools']) || !is_array($toolsData['result']['tools'])) {
-                    $fetch_failed[] = ($h['mcp']['url'] ?? '?') . ' (unparseable tools/list response)';
+                if ($toolsData === null) {
+                    $fetch_failed[] = ($h['mcp']['url'] ?? '?') . ' ' . $failureReason;
                     continue;
                 }
                 $url = $h['mcp']['url'] ?? null;
@@ -4735,6 +4916,101 @@ abstract class aihelper
     abstract protected function bringPromptInFormat(string $prompt, mixed $files = null): array;
 
     abstract protected function addResponseToSession(mixed $response): void;
+
+    protected function truncateLocalToolOutput(string $output, int $max_length): string
+    {
+        $original_length = mb_strlen($output);
+        $persisted_path = null;
+        if (
+            preg_match(
+                '#complete structured result persisted at (/tmp/aihelper-tool-results/[^;\]]+)#',
+                $output,
+                $persisted_path_match
+            ) === 1
+        ) {
+            $persisted_path = $persisted_path_match[1];
+        }
+        $decoded = json_decode(trim($output), true);
+        if (is_array($decoded)) {
+            $compact = json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (is_string($compact)) {
+                $output = $compact;
+            }
+        }
+        if (mb_strlen($output) <= $max_length) {
+            return $output;
+        }
+
+        if ($persisted_path === null && is_array($decoded) && $this->session_id !== null && $this->session_id !== '') {
+            $result_directory =
+                sys_get_temp_dir() .
+                '/aihelper-tool-results/' .
+                preg_replace('/[^a-zA-Z0-9_-]/', '_', $this->session_id);
+            if ((is_dir($result_directory) || mkdir($result_directory, 0700, true)) && is_writable($result_directory)) {
+                chmod($result_directory, 0700);
+                $persisted_path = $result_directory . '/' . hash('sha256', $output) . '.json';
+                if (
+                    (!is_file($persisted_path) && file_put_contents($persisted_path, $output, LOCK_EX) === false) ||
+                    !chmod($persisted_path, 0600)
+                ) {
+                    $persisted_path = null;
+                }
+            }
+        }
+
+        $append_marker = static function (string $trimmed) use (
+            $max_length,
+            $original_length,
+            $persisted_path
+        ): string {
+            $marker = "\n\n[... truncated from $original_length chars";
+            if ($persisted_path !== null) {
+                $marker .= '; complete structured result persisted at ' . $persisted_path;
+            }
+            $marker .= ']';
+            if (mb_strlen($marker) >= $max_length) {
+                return mb_substr($marker, 0, $max_length);
+            }
+            return mb_substr($trimmed, 0, $max_length - mb_strlen($marker)) . $marker;
+        };
+
+        if (is_array($decoded)) {
+            $truncate_json = function (mixed $data, int $max_string = 500, int $max_items = 5) use (
+                &$truncate_json
+            ): mixed {
+                if (is_array($data) && array_is_list($data)) {
+                    $sliced = array_map(
+                        fn(mixed $value): mixed => $truncate_json($value, $max_string, $max_items),
+                        array_slice($data, 0, $max_items)
+                    );
+                    if (count($data) > $max_items) {
+                        $sliced[] =
+                            '[... ' . (count($data) - $max_items) . ' more items, ' . count($data) . ' total]';
+                    }
+                    return $sliced;
+                }
+                if (is_array($data)) {
+                    return array_map(
+                        fn(mixed $value): mixed => $truncate_json($value, $max_string, $max_items),
+                        $data
+                    );
+                }
+                if (is_string($data) && mb_strlen($data) > $max_string) {
+                    return mb_substr($data, 0, $max_string) . '... [' . mb_strlen($data) . ' chars]';
+                }
+                return $data;
+            };
+            $trimmed = json_encode(
+                $truncate_json($decoded),
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            );
+            if (is_string($trimmed)) {
+                return $append_marker($trimmed);
+            }
+        }
+
+        return $append_marker($output);
+    }
 
     protected function truncateMcpToolResultContent(mixed $content, int $max_length = 500): mixed
     {
@@ -6429,6 +6705,14 @@ abstract class aihelper
             $this->stream_callback = function ($chunk) {
                 $this->log($chunk, 'chunk');
                 $this->stream_buffer_in .= $chunk;
+
+                $parsedChunk = json_decode(trim($chunk), true);
+                if (is_array($parsedChunk) && isset($parsedChunk['error'])) {
+                    $this->stream_response->result->error = (object) [
+                        'message' => self::extractErrorMessage($parsedChunk['error'])
+                    ];
+                    return strlen($chunk);
+                }
 
                 while (($pos = strpos($this->stream_buffer_in, "\n")) !== false) {
                     $line = rtrim(substr($this->stream_buffer_in, 0, $pos), "\r");
@@ -9318,6 +9602,11 @@ abstract class ai_harness extends ai_anthropic
         return $overrides === [] ? null : array_merge(getenv(), $overrides);
     }
 
+    protected function harnessInput(string $prompt): string
+    {
+        return $prompt;
+    }
+
     protected function emitAnthropicEvent(?\Closure $emit, array $event): void
     {
         if ($emit === null) {
@@ -9384,10 +9673,10 @@ abstract class ai_harness extends ai_anthropic
                 $exports[] = $name . '=' . escapeshellarg((string) $value);
             }
             $command = array_merge($this->sshCommand(), [
-                implode(' ', $exports) . ' setsid bash -c ' . escapeshellarg($this->remoteShell($script))
+                implode(' ', $exports) . ' setsid --wait bash -c ' . escapeshellarg($this->remoteShell($script))
             ]);
         } else {
-            $command = array_merge(['setsid', $binary], $this->buildArgs());
+            $command = array_merge(['setsid', '--wait', $binary], $this->buildArgs());
         }
         // the mcp config carries bearer tokens and must not reach the log
         $loggable = $command;
@@ -9410,7 +9699,7 @@ abstract class ai_harness extends ai_anthropic
         }
         $pid = (int) (proc_get_status($process)['pid'] ?? 0);
 
-        fwrite($pipes[0], $prompt);
+        fwrite($pipes[0], $this->harnessInput($prompt));
         fclose($pipes[0]);
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
@@ -9634,7 +9923,15 @@ class ai_claudecode extends ai_harness
     {
         // "--continue" picks the newest conversation of the working directory
         // and falls back to a fresh one when the directory has none yet
-        $args = ['-p', '--verbose', '--output-format', 'stream-json', '--continue'];
+        $args = [
+            '-p',
+            '--verbose',
+            '--input-format',
+            'stream-json',
+            '--output-format',
+            'stream-json',
+            '--continue'
+        ];
         if ($this->stream === true) {
             $args[] = '--include-partial-messages';
         }
@@ -9667,6 +9964,21 @@ class ai_claudecode extends ai_harness
         }
 
         return $args;
+    }
+
+    protected function harnessInput(string $prompt): string
+    {
+        return
+            json_encode(
+                [
+                    'type' => 'user',
+                    'message' => [
+                        'role' => 'user',
+                        'content' => [['type' => 'text', 'text' => $prompt]]
+                    ]
+                ],
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+            ) . "\n";
     }
 
     protected function handleEvent(array $event, object $result, ?\Closure $emit): void
