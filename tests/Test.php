@@ -2,9 +2,6 @@
 declare(strict_types=1);
 
 use vielhuber\aihelper\aihelper;
-use vielhuber\aihelper\ai_claudecode;
-use vielhuber\aihelper\ai_google;
-use vielhuber\aihelper\ai_opencode;
 use vielhuber\stringhelper\__;
 
 final class RetryTestAihelper extends aihelper
@@ -53,9 +50,7 @@ final class RetryTestAihelper extends aihelper
         return [];
     }
 
-    protected function addResponseToSession(mixed $response): void
-    {
-    }
+    protected function addResponseToSession(mixed $response): void {}
 
     protected function retryBackoffSeconds(int $attempt, bool $transient, bool $authUnavailable = false): int
     {
@@ -100,9 +95,7 @@ final class ToolImageTestAihelper extends aihelper
             self::$sessions[$this->session_id] = [
                 [
                     'role' => 'model',
-                    'parts' => [
-                        ['functionCall' => ['name' => 'render_image', 'args' => []]]
-                    ]
+                    'parts' => [['functionCall' => ['name' => 'render_image', 'args' => []]]]
                 ]
             ];
             return;
@@ -111,9 +104,7 @@ final class ToolImageTestAihelper extends aihelper
             self::$sessions[$this->session_id] = [
                 [
                     'role' => 'assistant',
-                    'content' => [
-                        ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'render_image', 'input' => []]
-                    ]
+                    'content' => [['type' => 'tool_use', 'id' => 'call_1', 'name' => 'render_image', 'input' => []]]
                 ]
             ];
             return;
@@ -176,11 +167,13 @@ final class ToolImageTestAihelper extends aihelper
         if (in_array($this->name, ['openrouter', 'llamacpp', 'nvidia', 'cliproxyapi'], true)) {
             self::$sessions[$this->session_id][] = ['role' => 'assistant', 'content' => 'done'];
         }
-        if (!in_array(
-            $this->name,
-            ['google', 'anthropic', 'xai', 'deepseek', 'openrouter', 'llamacpp', 'nvidia', 'cliproxyapi'],
-            true
-        )) {
+        if (
+            !in_array(
+                $this->name,
+                ['google', 'anthropic', 'xai', 'deepseek', 'openrouter', 'llamacpp', 'nvidia', 'cliproxyapi'],
+                true
+            )
+        ) {
             self::$sessions[$this->session_id][] = ['type' => 'message', 'role' => 'assistant', 'content' => []];
         }
         return ['response' => 'done', 'success' => true, 'costs' => $prev_costs];
@@ -196,9 +189,7 @@ final class ToolImageTestAihelper extends aihelper
         return [];
     }
 
-    protected function addResponseToSession(mixed $response): void
-    {
-    }
+    protected function addResponseToSession(mixed $response): void {}
 }
 
 class Test extends \PHPUnit\Framework\TestCase
@@ -259,40 +250,40 @@ class Test extends \PHPUnit\Framework\TestCase
     // php's built-in server needs the router as a file on disk; it only exists
     // for this one test, so it is written out instead of being checked in
     private const MCP_RETRY_ROUTER = <<<'ROUTER'
-<?php
-declare(strict_types=1);
+    <?php
+    declare(strict_types=1);
 
-if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
-    http_response_code(204);
-    return;
-}
+    if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
+        http_response_code(204);
+        return;
+    }
 
-$counterFile = (string) getenv('MCP_RETRY_COUNTER');
-$attempt = is_file($counterFile) ? (int) file_get_contents($counterFile) + 1 : 1;
-file_put_contents($counterFile, (string) $attempt);
+    $counterFile = (string) getenv('MCP_RETRY_COUNTER');
+    $attempt = is_file($counterFile) ? (int) file_get_contents($counterFile) + 1 : 1;
+    file_put_contents($counterFile, (string) $attempt);
 
-if ($attempt < 3) {
-    http_response_code(502);
-    echo 'temporary gateway failure';
-    return;
-}
+    if ($attempt < 3) {
+        http_response_code(502);
+        echo 'temporary gateway failure';
+        return;
+    }
 
-header('Content-Type: text/event-stream');
-echo 'event: message' . "\n";
-echo 'data: ' . json_encode([
-    'jsonrpc' => '2.0',
-    'id' => 1,
-    'result' => [
-        'tools' => [
-            [
-                'name' => 'test_tool',
-                'description' => 'Test tool',
-                'inputSchema' => ['type' => 'object', 'properties' => []]
+    header('Content-Type: text/event-stream');
+    echo 'event: message' . "\n";
+    echo 'data: ' . json_encode([
+        'jsonrpc' => '2.0',
+        'id' => 1,
+        'result' => [
+            'tools' => [
+                [
+                    'name' => 'test_tool',
+                    'description' => 'Test tool',
+                    'inputSchema' => ['type' => 'object', 'properties' => []]
+                ]
             ]
         ]
-    ]
-]) . "\n\n";
-ROUTER;
+    ]) . "\n\n";
+    ROUTER;
 
     function test__transient_mcp_tool_discovery_errors_are_retried(): void
     {
@@ -353,9 +344,7 @@ ROUTER;
 
     function test__auth_unavailable_stops_after_three_attempts(): void
     {
-        $ai = new RetryTestAihelper(
-            array_fill(0, 8, 'AI Request fehlgeschlagen: auth_unavailable: no auth available')
-        );
+        $ai = new RetryTestAihelper(array_fill(0, 8, 'AI Request fehlgeschlagen: auth_unavailable: no auth available'));
 
         $result = $ai->ask('test');
 
@@ -411,10 +400,7 @@ ROUTER;
 
     function test__local_tool_output_compacts_json_without_losing_records(): void
     {
-        $records = [
-            ['id' => 'one', 'body' => 'First message'],
-            ['id' => 'two', 'body' => 'Second message']
-        ];
+        $records = [['id' => 'one', 'body' => 'First message'], ['id' => 'two', 'body' => 'Second message']];
         $output = json_encode($records, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
         $method = new \ReflectionMethod(aihelper::class, 'truncateLocalToolOutput');
         $compacted = $method->invoke(new RetryTestAihelper([]), $output, 10000);
@@ -443,7 +429,10 @@ ROUTER;
         $this->assertMatchesRegularExpression($persistedPattern, $truncated);
         preg_match($persistedPattern, $truncated, $matches);
         $this->assertFileExists($matches[1]);
-        $this->assertSame($records, json_decode((string) file_get_contents($matches[1]), true, 512, JSON_THROW_ON_ERROR));
+        $this->assertSame(
+            $records,
+            json_decode((string) file_get_contents($matches[1]), true, 512, JSON_THROW_ON_ERROR)
+        );
         $retruncated = $method->invoke(new RetryTestAihelper([]), $truncated, 50000);
         $this->assertLessThanOrEqual(50000, strlen($retruncated));
         $this->assertStringContainsString('complete structured result persisted at ' . $matches[1], $retruncated);
@@ -501,9 +490,9 @@ ROUTER;
 
     function test__claude_code_uses_explicit_stream_json_input(): void
     {
-        $harness = (new \ReflectionClass(ai_claudecode::class))->newInstanceWithoutConstructor();
-        $args = (new \ReflectionMethod(ai_claudecode::class, 'buildArgs'))->invoke($harness);
-        $input = (new \ReflectionMethod(ai_claudecode::class, 'harnessInput'))->invoke($harness, 'Hello');
+        $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_claudecode::class))->newInstanceWithoutConstructor();
+        $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_claudecode::class, 'buildArgs'))->invoke($harness);
+        $input = (new \ReflectionMethod(\vielhuber\aihelper\ai_claudecode::class, 'harnessInput'))->invoke($harness, 'Hello');
 
         $this->assertContains('--input-format', $args);
         $this->assertContains('stream-json', $args);
@@ -521,24 +510,14 @@ ROUTER;
 
     function test__opencode_uses_json_mode_and_maps_variant(): void
     {
-        $harness = (new \ReflectionClass(ai_opencode::class))->newInstanceWithoutConstructor();
+        $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_opencode::class))->newInstanceWithoutConstructor();
         (new \ReflectionProperty(aihelper::class, 'model'))->setValue($harness, 'opencode-go/glm-5.2');
         (new \ReflectionProperty(aihelper::class, 'effort'))->setValue($harness, 'high');
-        $args = (new \ReflectionMethod(ai_opencode::class, 'buildArgs'))->invoke($harness);
-        $environment = (new \ReflectionMethod(ai_opencode::class, 'harnessEnvironmentOverrides'))->invoke($harness);
+        $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_opencode::class, 'buildArgs'))->invoke($harness);
+        $environment = (new \ReflectionMethod(\vielhuber\aihelper\ai_opencode::class, 'harnessEnvironmentOverrides'))->invoke($harness);
 
         $this->assertSame(
-            [
-                'run',
-                '--continue',
-                '--format',
-                'json',
-                '--auto',
-                '--model',
-                'opencode-go/glm-5.2',
-                '--variant',
-                'high'
-            ],
+            ['run', '--continue', '--format', 'json', '--auto', '--model', 'opencode-go/glm-5.2', '--variant', 'high'],
             $args
         );
         $this->assertSame('true', $environment['OPENCODE_DISABLE_CLAUDE_CODE']);
@@ -547,7 +526,7 @@ ROUTER;
 
     function test__opencode_maps_json_events_to_harness_result(): void
     {
-        $harness = (new \ReflectionClass(ai_opencode::class))->newInstanceWithoutConstructor();
+        $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_opencode::class))->newInstanceWithoutConstructor();
         (new \ReflectionProperty(aihelper::class, 'model'))->setValue($harness, 'opencode-go/glm-5.2');
         $result = (object) [
             'result' => (object) [
@@ -561,14 +540,9 @@ ROUTER;
                 ]
             ]
         ];
-        $handler = new \ReflectionMethod(ai_opencode::class, 'handleEvent');
+        $handler = new \ReflectionMethod(\vielhuber\aihelper\ai_opencode::class, 'handleEvent');
         $handler->invoke($harness, ['type' => 'step_start', 'sessionID' => 'session-1'], $result, null);
-        $handler->invoke(
-            $harness,
-            ['type' => 'text', 'part' => ['text' => "  Done\n"]],
-            $result,
-            null
-        );
+        $handler->invoke($harness, ['type' => 'text', 'part' => ['text' => "  Done\n"]], $result, null);
         $handler->invoke(
             $harness,
             [
@@ -616,14 +590,15 @@ ROUTER;
 
     function test__remote_harness_reuses_preflight_connection(): void
     {
-        $harness = (new \ReflectionClass(ai_claudecode::class))->newInstanceWithoutConstructor();
+        $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_claudecode::class))->newInstanceWithoutConstructor();
         foreach (
             [
                 'ssh_host' => 'host.docker.internal',
                 'ssh_user' => 'root',
                 'ssh_port' => 22,
                 'ssh_key' => '/tmp/harness-key'
-            ] as $property => $value
+            ]
+            as $property => $value
         ) {
             (new \ReflectionProperty($harness, $property))->setValue($harness, $value);
         }
@@ -631,14 +606,16 @@ ROUTER;
 
         $this->assertContains('ControlMaster=auto', $command);
         $this->assertContains('ControlPersist=60', $command);
-        $controlPath = current(array_filter($command, fn(string $argument): bool => str_starts_with($argument, 'ControlPath=')));
+        $controlPath = current(
+            array_filter($command, fn(string $argument): bool => str_starts_with($argument, 'ControlPath='))
+        );
         $this->assertIsString($controlPath);
         $this->assertMatchesRegularExpression('#^ControlPath=/tmp/aihelper-ssh-[a-f0-9]{32}$#', $controlPath);
     }
 
     function test__google_stream_preserves_plain_json_errors(): void
     {
-        $ai = (new \ReflectionClass(ai_google::class))->newInstanceWithoutConstructor();
+        $ai = (new \ReflectionClass(\vielhuber\aihelper\ai_google::class))->newInstanceWithoutConstructor();
         (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($ai, true);
         $callback = (new \ReflectionMethod(aihelper::class, 'getStreamCallback'))->invoke($ai);
 
@@ -770,12 +747,12 @@ ROUTER;
             $ai,
             'codex',
             <<<'TXT'
-│  Context window:              73% left (77.6K used / 258K)                             │
-│  5h limit:                    [██████████████████░░] 92% left (resets 19:12)           │
-│  Weekly limit:                [███████████████████░] 97% left (resets 03:03 on 6 Jul)  │
-│  GPT-5.3-Codex-Spark limit:                                                            │
-│  5h limit:                    [████████████████████] 100% left (resets 15:52)          │
-TXT
+            │  Context window:              73% left (77.6K used / 258K)                             │
+            │  5h limit:                    [██████████████████░░] 92% left (resets 19:12)           │
+            │  Weekly limit:                [███████████████████░] 97% left (resets 03:03 on 6 Jul)  │
+            │  GPT-5.3-Codex-Spark limit:                                                            │
+            │  5h limit:                    [████████████████████] 100% left (resets 15:52)          │
+            TXT
         );
 
         $this->assertSame('5-hour', $codexLimits[0]['type']);
@@ -790,14 +767,14 @@ TXT
             $ai,
             'claude',
             <<<'TXT'
-Current session
-██████████████████████████████████████████████████ 100% used
-Resets 5:59pm (Europe/Berlin)
+            Current session
+            ██████████████████████████████████████████████████ 100% used
+            Resets 5:59pm (Europe/Berlin)
 
-Current week (all models)
-██████████████████████████████████▌ 69% used
-Resets Jun 30, 4:59pm (Europe/Berlin)
-TXT
+            Current week (all models)
+            ██████████████████████████████████▌ 69% used
+            Resets Jun 30, 4:59pm (Europe/Berlin)
+            TXT
         );
 
         $this->assertSame('5-hour', $claudeLimits[0]['type']);
@@ -819,36 +796,40 @@ TXT
         $statement = $connection->prepare('INSERT INTO message (time_created, data) VALUES (:time_created, :data)');
         $statement->execute([
             'time_created' => (time() - 60) * 1000,
-            'data' => json_encode([
-                'role' => 'assistant',
-                'providerID' => 'opencode-go',
-                'modelID' => 'glm-5.2',
-                'cost' => 0.25,
-                'tokens' => [
-                    'total' => 150,
-                    'input' => 100,
-                    'output' => 20,
-                    'reasoning' => 30,
-                    'cache' => ['read' => 40, 'write' => 10]
-                ]
-            ], JSON_THROW_ON_ERROR)
+            'data' => json_encode(
+                [
+                    'role' => 'assistant',
+                    'providerID' => 'opencode-go',
+                    'modelID' => 'glm-5.2',
+                    'cost' => 0.25,
+                    'tokens' => [
+                        'total' => 150,
+                        'input' => 100,
+                        'output' => 20,
+                        'reasoning' => 30,
+                        'cache' => ['read' => 40, 'write' => 10]
+                    ]
+                ],
+                JSON_THROW_ON_ERROR
+            )
         ]);
         $statement->execute([
             'time_created' => (time() - 60) * 1000,
-            'data' => json_encode([
-                'role' => 'assistant',
-                'providerID' => 'other',
-                'modelID' => 'ignored',
-                'cost' => 99
-            ], JSON_THROW_ON_ERROR)
+            'data' => json_encode(
+                [
+                    'role' => 'assistant',
+                    'providerID' => 'other',
+                    'modelID' => 'ignored',
+                    'cost' => 99
+                ],
+                JSON_THROW_ON_ERROR
+            )
         ]);
 
         $previousDataHome = getenv('XDG_DATA_HOME');
         putenv('XDG_DATA_HOME=' . $dataHome);
         $limits = aihelper::create(provider: 'opencode')->getCliUsageLimits();
-        $previousDataHome === false
-            ? putenv('XDG_DATA_HOME')
-            : putenv('XDG_DATA_HOME=' . $previousDataHome);
+        $previousDataHome === false ? putenv('XDG_DATA_HOME') : putenv('XDG_DATA_HOME=' . $previousDataHome);
 
         $this->assertSame('5-hour', $limits[0]['type']);
         $this->assertSame(1, $limits[0]['requests']);
@@ -1674,7 +1655,10 @@ TXT
                 $i_url = 1;
                 $i_prompt = 1;
                 $mcp_servers = [];
-                while (($_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
+                while (
+                    ($_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') !=
+                    ''
+                ) {
                     $mcp_servers[] = [
                         'url' => $_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
                         'authorization_token' => $return->result->access_token
@@ -1693,8 +1677,10 @@ TXT
                     mcp_servers: $mcp_servers
                 );
                 while (
-                    ($_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != '' &&
-                    ($_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != ''
+                    ($_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') !=
+                        '' &&
+                    ($_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') !=
+                        ''
                 ) {
                     $return = $ai_mcp->ask(
                         $_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)]
@@ -1912,8 +1898,12 @@ TXT
         for ($run = 1; $run <= 2; $run++) {
             $mcp_servers_all = [];
             $i_cur = 1;
-            while (($_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_cur, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
-                $mcp_servers_all[] = $_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_cur, 2, '0', STR_PAD_LEFT) . '_URL'];
+            while (
+                ($_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_cur, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') !=
+                ''
+            ) {
+                $mcp_servers_all[] =
+                    $_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_cur, 2, '0', STR_PAD_LEFT) . '_URL'];
                 $i_cur++;
             }
             // randomize mcp servers
@@ -2161,7 +2151,8 @@ TXT
         while (($_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != '') {
             $prompts[] = [
                 'prompt' => $_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)],
-                'answer' => $_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)] ?? ''
+                'answer' =>
+                    $_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)] ?? ''
             ];
             $i_prompt++;
         }
