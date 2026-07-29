@@ -9562,6 +9562,21 @@ abstract class ai_harness extends ai_anthropic
      */
     protected function sshCommand(): array
     {
+        $controlPath =
+            '/tmp/aihelper-ssh-' .
+            substr(
+                hash(
+                    'sha256',
+                    implode('|', [
+                        (string) $this->ssh_host,
+                        (string) $this->ssh_user,
+                        (string) $this->ssh_port,
+                        (string) $this->ssh_key
+                    ])
+                ),
+                0,
+                32
+            );
         $command = [
             'ssh',
             '-T',
@@ -9570,7 +9585,13 @@ abstract class ai_harness extends ai_anthropic
             '-o',
             'StrictHostKeyChecking=accept-new',
             '-o',
-            'ConnectTimeout=10'
+            'ConnectTimeout=10',
+            '-o',
+            'ControlMaster=auto',
+            '-o',
+            'ControlPersist=60',
+            '-o',
+            'ControlPath=' . $controlPath
         ];
         if ($this->ssh_key !== null && trim($this->ssh_key) !== '') {
             $command[] = '-i';
@@ -9654,6 +9675,32 @@ abstract class ai_harness extends ai_anthropic
         }
         if (trim($prompt) === '') {
             throw new \RuntimeException('harness: no user prompt to hand over.');
+        }
+
+        if ($this->isRemote()) {
+            $preflight = array_merge($this->sshCommand(), ['true']);
+            $preflightStatus = 1;
+            $preflightOutput = [];
+            for ($attempt = 1; $attempt <= 3; $attempt++) {
+                $preflightOutput = [];
+                exec(
+                    implode(' ', array_map('escapeshellarg', $preflight)) . ' 2>&1',
+                    $preflightOutput,
+                    $preflightStatus
+                );
+                if ($preflightStatus === 0) {
+                    break;
+                }
+                if ($attempt < 3) {
+                    sleep($attempt);
+                }
+            }
+            if ($preflightStatus !== 0) {
+                throw new \RuntimeException(
+                    'harness: SSH connection failed: ' .
+                        (trim(implode(PHP_EOL, $preflightOutput)) ?: 'unknown SSH error')
+                );
+            }
         }
 
         $this->harness_run_id = md5(uniqid('', true));

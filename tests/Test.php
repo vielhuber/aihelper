@@ -527,6 +527,28 @@ ROUTER;
         $this->assertStringContainsString("' setsid --wait bash -c '", $source);
     }
 
+    function test__remote_harness_reuses_preflight_connection(): void
+    {
+        $harness = (new \ReflectionClass(ai_claudecode::class))->newInstanceWithoutConstructor();
+        foreach (
+            [
+                'ssh_host' => 'host.docker.internal',
+                'ssh_user' => 'root',
+                'ssh_port' => 22,
+                'ssh_key' => '/tmp/harness-key'
+            ] as $property => $value
+        ) {
+            (new \ReflectionProperty($harness, $property))->setValue($harness, $value);
+        }
+        $command = (new \ReflectionMethod($harness, 'sshCommand'))->invoke($harness);
+
+        $this->assertContains('ControlMaster=auto', $command);
+        $this->assertContains('ControlPersist=60', $command);
+        $controlPath = current(array_filter($command, fn(string $argument): bool => str_starts_with($argument, 'ControlPath=')));
+        $this->assertIsString($controlPath);
+        $this->assertMatchesRegularExpression('#^ControlPath=/tmp/aihelper-ssh-[a-f0-9]{32}$#', $controlPath);
+    }
+
     function test__google_stream_preserves_plain_json_errors(): void
     {
         $ai = (new \ReflectionClass(ai_google::class))->newInstanceWithoutConstructor();
