@@ -4,6 +4,7 @@ declare(strict_types=1);
 use vielhuber\aihelper\aihelper;
 use vielhuber\aihelper\ai_claudecode;
 use vielhuber\aihelper\ai_google;
+use vielhuber\aihelper\ai_opencode;
 use vielhuber\stringhelper\__;
 
 final class RetryTestAihelper extends aihelper
@@ -518,6 +519,92 @@ ROUTER;
         );
     }
 
+    function test__opencode_uses_json_mode_and_maps_variant(): void
+    {
+        $harness = (new \ReflectionClass(ai_opencode::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty(aihelper::class, 'model'))->setValue($harness, 'opencode-go/glm-5.2');
+        (new \ReflectionProperty(aihelper::class, 'effort'))->setValue($harness, 'high');
+        $args = (new \ReflectionMethod(ai_opencode::class, 'buildArgs'))->invoke($harness);
+        $environment = (new \ReflectionMethod(ai_opencode::class, 'harnessEnvironmentOverrides'))->invoke($harness);
+
+        $this->assertSame(
+            [
+                'run',
+                '--continue',
+                '--format',
+                'json',
+                '--auto',
+                '--model',
+                'opencode-go/glm-5.2',
+                '--variant',
+                'high'
+            ],
+            $args
+        );
+        $this->assertSame('true', $environment['OPENCODE_DISABLE_CLAUDE_CODE']);
+        $this->assertSame('true', $environment['OPENCODE_DISABLE_EXTERNAL_SKILLS']);
+    }
+
+    function test__opencode_maps_json_events_to_harness_result(): void
+    {
+        $harness = (new \ReflectionClass(ai_opencode::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty(aihelper::class, 'model'))->setValue($harness, 'opencode-go/glm-5.2');
+        $result = (object) [
+            'result' => (object) [
+                'content' => [],
+                'stop_reason' => null,
+                'usage' => (object) [
+                    'input_tokens' => 0,
+                    'cache_creation_input_tokens' => 0,
+                    'cache_read_input_tokens' => 0,
+                    'output_tokens' => 0
+                ]
+            ]
+        ];
+        $handler = new \ReflectionMethod(ai_opencode::class, 'handleEvent');
+        $handler->invoke($harness, ['type' => 'step_start', 'sessionID' => 'session-1'], $result, null);
+        $handler->invoke(
+            $harness,
+            ['type' => 'text', 'part' => ['text' => "  Done\n"]],
+            $result,
+            null
+        );
+        $handler->invoke(
+            $harness,
+            [
+                'type' => 'step_finish',
+                'part' => [
+                    'reason' => 'stop',
+                    'tokens' => [
+                        'input' => 100,
+                        'output' => 20,
+                        'cache' => ['read' => 30, 'write' => 10]
+                    ],
+                    'cost' => 0.25
+                ]
+            ],
+            $result,
+            null
+        );
+
+        $this->assertSame("  Done\n", $result->result->content[0]->text);
+        $this->assertSame('end_turn', $result->result->stop_reason);
+        $this->assertSame(100, $result->result->usage->input_tokens);
+        $this->assertSame(20, $result->result->usage->output_tokens);
+        $this->assertSame(30, $result->result->usage->cache_read_input_tokens);
+        $this->assertSame(10, $result->result->usage->cache_creation_input_tokens);
+        $this->assertSame(0.25, (new \ReflectionProperty($harness, 'harness_costs'))->getValue($harness));
+    }
+
+    function test__opencode_exposes_only_its_harness_models(): void
+    {
+        $harness = aihelper::create(provider: 'opencode');
+
+        $this->assertNotNull($harness);
+        $this->assertCount(1, $harness->models);
+        $this->assertSame('opencode-go/glm-5.2', $harness->models[0]['name']);
+    }
+
     function test__harness_waits_for_process_group_leader(): void
     {
         $source = file_get_contents(__DIR__ . '/../src/aihelper.php');
@@ -720,6 +807,62 @@ TXT
         $this->assertNull($claudeLimits[1]['scope']);
         $this->assertSame(69, $claudeLimits[1]['percent used']);
         $this->assertMatchesRegularExpression('/T17:59:00\\+02:00/', $claudeLimits[0]['resets_at']);
+    }
+
+    function test__opencode_usage_reads_local_messages(): void
+    {
+        $dataHome = sys_get_temp_dir() . '/aihelper-opencode-' . uniqid('', true);
+        mkdir($dataHome . '/opencode', 0777, true);
+        $database = $dataHome . '/opencode/opencode.db';
+        $connection = new \PDO('sqlite:' . $database, options: [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+        $connection->exec('CREATE TABLE message (time_created INTEGER NOT NULL, data TEXT NOT NULL)');
+        $statement = $connection->prepare('INSERT INTO message (time_created, data) VALUES (:time_created, :data)');
+        $statement->execute([
+            'time_created' => (time() - 60) * 1000,
+            'data' => json_encode([
+                'role' => 'assistant',
+                'providerID' => 'opencode-go',
+                'modelID' => 'glm-5.2',
+                'cost' => 0.25,
+                'tokens' => [
+                    'total' => 150,
+                    'input' => 100,
+                    'output' => 20,
+                    'reasoning' => 30,
+                    'cache' => ['read' => 40, 'write' => 10]
+                ]
+            ], JSON_THROW_ON_ERROR)
+        ]);
+        $statement->execute([
+            'time_created' => (time() - 60) * 1000,
+            'data' => json_encode([
+                'role' => 'assistant',
+                'providerID' => 'other',
+                'modelID' => 'ignored',
+                'cost' => 99
+            ], JSON_THROW_ON_ERROR)
+        ]);
+
+        $previousDataHome = getenv('XDG_DATA_HOME');
+        putenv('XDG_DATA_HOME=' . $dataHome);
+        $limits = aihelper::create(provider: 'opencode')->getCliUsageLimits();
+        $previousDataHome === false
+            ? putenv('XDG_DATA_HOME')
+            : putenv('XDG_DATA_HOME=' . $previousDataHome);
+
+        $this->assertSame('5-hour', $limits[0]['type']);
+        $this->assertSame(1, $limits[0]['requests']);
+        $this->assertSame(2.08, $limits[0]['percent used']);
+        $this->assertTrue($limits[0]['estimated']);
+        $this->assertSame(0.25, $limits[0]['used_usd']);
+        $this->assertSame(12.0, $limits[0]['limit_usd']);
+        $this->assertSame(150, $limits[0]['tokens']['total']);
+        $this->assertSame(40, $limits[0]['tokens']['cache_read']);
+        $this->assertSame(['glm-5.2'], $limits[0]['models']);
+
+        unlink($database);
+        rmdir($dataHome . '/opencode');
+        rmdir($dataHome);
     }
 
     function test__ai_all(): void

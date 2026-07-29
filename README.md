@@ -22,7 +22,7 @@ composer require vielhuber/aihelper
 use vielhuber\aihelper\aihelper;
 
 $ai = aihelper::create(
-    provider: 'anthropic', // anthropic|google|openai|xai|deepseek|openrouter|cliproxyapi|elevenlabs|nvidia|llamacpp|lmstudio|claudecode|codex
+    provider: 'anthropic', // anthropic|google|openai|xai|deepseek|openrouter|cliproxyapi|elevenlabs|nvidia|llamacpp|lmstudio|claudecode|codex|opencode
     model: 'claude-opus-4-1', // claude-opus-4-1|gemini-2.5-pro|gpt-5|grok-4|deepseek-chat|qwen/qwen3-coder-next|...
     effort: null, // null|none|minimal|low|medium|high|xhigh|max — reasoning effort, ignored when the provider/model has no supported reasoning control
     temperature: 1.0, // controls the randomness of the text generated
@@ -47,7 +47,7 @@ $ai = aihelper::create(
     url: null, // overwrite connection url (e.g. for llamacpp/lmstudio)
     enable_thinking: null, // true|false|null — force reasoning/thinking on/off; null = provider default (see below)
     auto_compact: false, // true = transparently compact the session when it approaches the model's context window
-    workdir: null // working directory of the cli harness providers (claudecode/codex)
+    workdir: null // working directory of the cli harness providers (claudecode/codex/opencode)
 );
 
 $ai->ask(prompt: 'Wer wurde 2018 Fußball-Weltmeister?');
@@ -110,7 +110,7 @@ $ai->getSessionId() // get current session id
 
 $ai->getSessionContent() // gets messages in chat history
 
-$ai->getCliUsageLimits() // get cli usage limits for claude code, codex and antigravity
+$ai->getCliUsageLimits() // get cli usage limits for claude code, codex, opencode and antigravity
 // [
 //     ['type' => '5-hour', 'scope' => null, 'percent used' => 20, 'resets_at' => '2026-06-29T17:59:00+02:00'],
 //     ['type' => 'weekly', 'scope' => null, 'percent used' => 10, 'resets_at' => '2026-07-06T03:03:00+02:00'],
@@ -164,12 +164,14 @@ aihelper::callMcpTool(
 
 ### cli harnesses
 
-the providers `claudecode` and `codex` drive the locally installed cli agent instead of a chat completion endpoint. it owns its system prompt, tools and history, so only the newest user turn is handed over. install both and log them in once:
+the providers `claudecode`, `codex` and `opencode` drive the locally installed cli agent instead of a chat completion endpoint. they own their system prompt, tools and history, so only the newest user turn is handed over. install and log them in once:
 
 ```
 npm i -g @anthropic-ai/claude-code @openai/codex
+curl -fsSL https://opencode.ai/install | bash
 claude auth login
 codex login --device-auth
+opencode auth login
 ```
 
 every turn continues the newest thread of `workdir` and opens a new one only when that directory has none yet.
@@ -182,8 +184,8 @@ $ai = aihelper::create(
     workdir: '/var/www/project',
     ssh_host: 'host.docker.internal',
     ssh_user: 'root',
-    ssh_port: 22,                        // optional
-    ssh_key: '/root/.ssh/id_ed25519'     // optional
+    ssh_port: 22, // optional
+    ssh_key: '/root/.ssh/id_ed25519' // optional
 );
 ```
 

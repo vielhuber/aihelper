@@ -339,6 +339,30 @@ abstract class aihelper
                 ssh_key: $ssh_key
             );
         }
+        if ($provider === 'opencode') {
+            return new ai_opencode(
+                model: $model,
+                effort: $effort,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream,
+                url: $url,
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact,
+                workdir: $workdir,
+                ssh_host: $ssh_host,
+                ssh_user: $ssh_user,
+                ssh_port: $ssh_port,
+                ssh_key: $ssh_key
+            );
+        }
         if ($provider === 'test') {
             return new ai_test(
                 model: $model,
@@ -379,6 +403,7 @@ abstract class aihelper
                 ai_elevenlabs::class,
                 ai_claudecode::class,
                 ai_codex::class,
+                ai_opencode::class,
                 ai_test::class
             ]
             as $providerClass
@@ -1300,6 +1325,28 @@ abstract class aihelper
         return $finish($limits);
     }
 
+    protected static function getOpenCodeDatabasePath(): ?string
+    {
+        $dataHome = trim((string) getenv('XDG_DATA_HOME'));
+        $home = trim((string) getenv('HOME'));
+        $candidates = [];
+        if ($dataHome !== '') {
+            $candidates[] = rtrim($dataHome, '/') . '/opencode/opencode.db';
+        }
+        if ($home !== '') {
+            $candidates[] = rtrim($home, '/') . '/.local/share/opencode/opencode.db';
+        }
+        $candidates[] = '/root/.local/share/opencode/opencode.db';
+
+        foreach (array_unique($candidates) as $candidate) {
+            if (!is_file($candidate)) {
+                continue;
+            }
+            return realpath($candidate) ?: $candidate;
+        }
+        return null;
+    }
+
     protected function parseCliUsageLimits(string $tool, string $output): array
     {
         $output = preg_replace('/\x1B(?:[@-Z\\\\-_]|\[[0-?]*[ -\/]*[@-~])/', '', $output) ?? $output;
@@ -2016,6 +2063,76 @@ abstract class aihelper
                         $cwd
                     );
                 }
+            }
+        }
+
+        $opencode_database = self::getOpenCodeDatabasePath();
+        if ($opencode_database !== null) {
+            try {
+                $connection = new \PDO(
+                    'sqlite:' . $opencode_database,
+                    options: [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]
+                );
+                $where = [
+                    "json_extract(m.data, '$.role') = 'assistant'",
+                    "json_extract(m.data, '$.providerID') = 'opencode-go'"
+                ];
+                $parameters = [];
+                if ($date_from_time !== false) {
+                    $where[] = 'm.time_created >= :time_from';
+                    $parameters['time_from'] = (int) floor($date_from_time * 1000);
+                }
+                if ($date_until_time !== false) {
+                    $where[] = 'm.time_created <= :time_until';
+                    $parameters['time_until'] = (int) floor($date_until_time * 1000);
+                }
+                if ($date_from_time === false) {
+                    $where[] = 'm.time_created >= :recent_time';
+                    $parameters['recent_time'] = (int) floor($min_mtime * 1000);
+                }
+                $statement = $connection->prepare(
+                    "SELECT m.id, m.session_id, m.time_created, m.data, s.directory,
+                        (SELECT p.data FROM part p
+                         WHERE p.message_id = json_extract(m.data, '$.parentID')
+                           AND json_extract(p.data, '$.type') = 'text'
+                         ORDER BY p.time_created ASC LIMIT 1) AS user_part
+                     FROM message m
+                     INNER JOIN session s ON s.id = m.session_id
+                     WHERE " . implode(' AND ', $where) . '
+                     ORDER BY m.time_created ASC'
+                );
+                $statement->execute($parameters);
+                foreach ($statement->fetchAll(\PDO::FETCH_ASSOC) as $entry) {
+                    $data = json_decode((string) ($entry['data'] ?? ''), true);
+                    if (!is_array($data)) {
+                        continue;
+                    }
+                    $user_part = json_decode((string) ($entry['user_part'] ?? ''), true);
+                    $tokens = is_array($data['tokens'] ?? null) ? $data['tokens'] : [];
+                    $cache = is_array($tokens['cache'] ?? null) ? $tokens['cache'] : [];
+                    $request = $make_local(
+                        $opencode_database,
+                        date(\DateTimeInterface::ATOM, (int) floor((float) $entry['time_created'] / 1000)),
+                        $data['modelID'] ?? null,
+                        [
+                            'input_tokens' => (int) ($tokens['input'] ?? 0),
+                            'output_tokens' => (int) ($tokens['output'] ?? 0),
+                            'cache_read_input_tokens' => (int) ($cache['read'] ?? 0),
+                            'cache_creation_input_tokens' => (int) ($cache['write'] ?? 0),
+                            'costs' => (float) ($data['cost'] ?? 0)
+                        ],
+                        'opencode',
+                        is_array($user_part) ? ($user_part['text'] ?? null) : null,
+                        isset($entry['directory']) ? (string) $entry['directory'] : null
+                    );
+                    $request['file'] = null;
+                    $request['session_id'] = (string) ($entry['session_id'] ?? '');
+                    $started_at = (int) ($data['time']['created'] ?? 0);
+                    $completed_at = (int) ($data['time']['completed'] ?? 0);
+                    $request['duration_in_ms'] = $completed_at > $started_at ? $completed_at - $started_at : null;
+                    $requests[] = $request;
+                }
+            } catch (\PDOException) {
             }
         }
 
@@ -5867,7 +5984,7 @@ abstract class aihelper
         $this->stream_callback = null;
 
         // the cli harnesses hand over literal anthropic streaming events
-        if (in_array($this->name, ['anthropic', 'test', 'claudecode', 'codex'], true)) {
+        if (in_array($this->name, ['anthropic', 'test', 'claudecode', 'codex', 'opencode'], true)) {
             // mimic non stream result
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -9405,7 +9522,7 @@ class ai_cliproxyapi extends ai_openrouter
 }
 
 /**
- * Base for the local agentic CLI harnesses (Claude Code, Codex).
+ * Base for the local agentic CLI harnesses (Claude Code, Codex, OpenCode).
  *
  * Unlike every other provider these do not call a chat completion endpoint:
  * they drive a local CLI process that owns its own system prompt, tool
@@ -9471,7 +9588,7 @@ abstract class ai_harness extends ai_anthropic
      */
     protected function shellPrelude(): string
     {
-        return 'export PATH="$HOME/.local/bin:$PATH"; . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ';
+        return 'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"; . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ';
     }
 
     protected function remoteShell(string $command): string
@@ -10209,6 +10326,247 @@ class ai_codex extends ai_harness
             $result->result->error = (object) [
                 'message' => (string) ($event['error']['message'] ?? ($event['message'] ?? 'codex turn failed'))
             ];
+        }
+    }
+}
+
+class ai_opencode extends ai_harness
+{
+    public ?string $provider = 'OpenCode';
+
+    public ?string $title = 'OpenCode';
+
+    public ?string $name = 'opencode';
+
+    public ?string $icon = <<<'SVG'
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" fill="#131010"/><path d="M320 224v128H192V224h128Z" fill="#5A5858"/><path fill="white" fill-rule="evenodd" d="M384 416H128V96h256v320Zm-64-256H192v192h128V160Z" clip-rule="evenodd"/></svg>
+    SVG;
+
+    protected ?string $url = null;
+
+    protected bool $message_started = false;
+
+    protected int $content_block_index = 0;
+
+    public array $models = [
+        [
+            'name' => 'opencode-go/glm-5.2',
+            'context_length' => 202752,
+            'max_output_tokens' => 131072,
+            'costs' => ['input' => 0.0000014, 'input_cached' => 0.00000026, 'output' => 0.0000044],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
+            'supports_effort' => true,
+            'efforts' => ['minimal', 'low', 'medium', 'high', 'max'],
+            'default' => true
+        ]
+    ];
+
+    protected function binaryName(): string
+    {
+        return 'opencode';
+    }
+
+    public function fetchModels(): array
+    {
+        return $this->normalizeAndEnrichModels($this->models);
+    }
+
+    public function getCliUsageLimits(): ?array
+    {
+        $database = self::getOpenCodeDatabasePath();
+        if ($database === null) {
+            return null;
+        }
+
+        $now = time();
+        $limits = [
+            '5-hour' => ['from' => $now - 5 * 60 * 60, 'limit_usd' => 12.0],
+            'weekly' => ['from' => $now - 7 * 24 * 60 * 60, 'limit_usd' => 30.0],
+            'monthly' => ['from' => $now - 30 * 24 * 60 * 60, 'limit_usd' => 60.0]
+        ];
+        try {
+            $connection = new \PDO('sqlite:' . $database, options: [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+            $statement = $connection->prepare(
+                "SELECT time_created, data FROM message
+                 WHERE json_extract(data, '$.role') = 'assistant'
+                   AND json_extract(data, '$.providerID') = 'opencode-go'
+                   AND time_created >= :from
+                 ORDER BY time_created ASC"
+            );
+            $statement->execute(['from' => $limits['monthly']['from'] * 1000]);
+            $messages = $statement->fetchAll(\PDO::FETCH_ASSOC);
+        } catch (\PDOException) {
+            return null;
+        }
+
+        foreach ($limits as $type => $limit) {
+            $limits[$type] = [
+                'type' => $type,
+                'scope' => null,
+                'percent used' => 0.0,
+                'resets_at' => null,
+                'estimated' => true,
+                'used_usd' => 0.0,
+                'limit_usd' => $limit['limit_usd'],
+                'requests' => 0,
+                'tokens' => [
+                    'total' => 0,
+                    'input' => 0,
+                    'output' => 0,
+                    'reasoning' => 0,
+                    'cache_read' => 0,
+                    'cache_write' => 0
+                ],
+                'models' => [],
+                'from' => $limit['from']
+            ];
+        }
+
+        foreach ($messages as $message) {
+            $data = json_decode((string) ($message['data'] ?? ''), true);
+            if (!is_array($data)) {
+                continue;
+            }
+            $createdAt = (int) floor((float) ($message['time_created'] ?? 0) / 1000);
+            $tokens = is_array($data['tokens'] ?? null) ? $data['tokens'] : [];
+            $cache = is_array($tokens['cache'] ?? null) ? $tokens['cache'] : [];
+            foreach ($limits as &$limit) {
+                if ($createdAt < $limit['from']) {
+                    continue;
+                }
+                $limit['requests']++;
+                $limit['used_usd'] += (float) ($data['cost'] ?? 0);
+                foreach (['total', 'input', 'output', 'reasoning'] as $tokenType) {
+                    $limit['tokens'][$tokenType] += (int) ($tokens[$tokenType] ?? 0);
+                }
+                $limit['tokens']['cache_read'] += (int) ($cache['read'] ?? 0);
+                $limit['tokens']['cache_write'] += (int) ($cache['write'] ?? 0);
+                $model = trim((string) ($data['modelID'] ?? ''));
+                if ($model !== '' && !in_array($model, $limit['models'], true)) {
+                    $limit['models'][] = $model;
+                }
+            }
+            unset($limit);
+        }
+
+        foreach ($limits as &$limit) {
+            unset($limit['from']);
+            $limit['used_usd'] = round($limit['used_usd'], 8);
+            $limit['percent used'] = round(min(100, $limit['used_usd'] / $limit['limit_usd'] * 100), 2);
+            sort($limit['models']);
+        }
+        unset($limit);
+        return array_values($limits);
+    }
+
+    protected function harnessEnvironmentOverrides(): array
+    {
+        return [
+            'IS_SANDBOX' => '1',
+            'OPENCODE_DISABLE_CLAUDE_CODE' => 'true',
+            'OPENCODE_DISABLE_EXTERNAL_SKILLS' => 'true'
+        ];
+    }
+
+    protected function buildArgs(): array
+    {
+        $args = ['run', '--continue', '--format', 'json', '--auto'];
+        if ($this->model !== null) {
+            $args[] = '--model';
+            $args[] = $this->model;
+        }
+        if (in_array($this->effort, ['minimal', 'low', 'medium', 'high', 'max'], true)) {
+            $args[] = '--variant';
+            $args[] = $this->effort;
+        }
+        return $args;
+    }
+
+    protected function handleEvent(array $event, object $result, ?\Closure $emit): void
+    {
+        $type = $event['type'] ?? null;
+        if ($type === 'step_start') {
+            if (!empty($event['sessionID'])) {
+                $this->log((string) $event['sessionID'], 'harness session');
+            }
+            if ($this->message_started === false) {
+                $this->message_started = true;
+                $this->content_block_index = 0;
+                $this->emitAnthropicEvent($emit, [
+                    'type' => 'message_start',
+                    'message' => [
+                        'type' => 'message',
+                        'role' => 'assistant',
+                        'model' => (string) $this->model,
+                        'content' => [],
+                        'stop_reason' => null,
+                        'usage' => ['input_tokens' => 0, 'output_tokens' => 0]
+                    ]
+                ]);
+            }
+            return;
+        }
+
+        if (in_array($type, ['text', 'reasoning'], true)) {
+            $text = (string) ($event['part']['text'] ?? '');
+            if (trim($text) === '') {
+                return;
+            }
+            $thinking = $type === 'reasoning';
+            $index = $this->content_block_index++;
+            $this->emitAnthropicEvent($emit, [
+                'type' => 'content_block_start',
+                'index' => $index,
+                'content_block' => $thinking ? ['type' => 'thinking', 'thinking' => ''] : ['type' => 'text', 'text' => '']
+            ]);
+            $this->emitAnthropicEvent($emit, [
+                'type' => 'content_block_delta',
+                'index' => $index,
+                'delta' => $thinking
+                    ? ['type' => 'thinking_delta', 'thinking' => $text]
+                    : ['type' => 'text_delta', 'text' => $text]
+            ]);
+            $this->emitAnthropicEvent($emit, ['type' => 'content_block_stop', 'index' => $index]);
+            if (!$thinking) {
+                $result->result->content[] = (object) ['type' => 'text', 'text' => $text];
+            }
+            return;
+        }
+
+        if ($type === 'step_finish') {
+            $tokens = is_array($event['part']['tokens'] ?? null) ? $event['part']['tokens'] : [];
+            $cache = is_array($tokens['cache'] ?? null) ? $tokens['cache'] : [];
+            $result->result->usage->input_tokens += (int) ($tokens['input'] ?? 0);
+            $result->result->usage->cache_creation_input_tokens += (int) ($cache['write'] ?? 0);
+            $result->result->usage->cache_read_input_tokens += (int) ($cache['read'] ?? 0);
+            $result->result->usage->output_tokens += (int) ($tokens['output'] ?? 0);
+            $this->harness_costs = ($this->harness_costs ?? 0) + (float) ($event['part']['cost'] ?? 0);
+            if (($event['part']['reason'] ?? null) !== 'stop') {
+                return;
+            }
+            $result->result->stop_reason = 'end_turn';
+            $this->emitAnthropicEvent($emit, [
+                'type' => 'message_delta',
+                'delta' => ['stop_reason' => 'end_turn', 'stop_sequence' => null],
+                'usage' => (array) $result->result->usage
+            ]);
+            $this->emitAnthropicEvent($emit, ['type' => 'message_stop']);
+            $this->message_started = false;
+            return;
+        }
+
+        if ($type === 'error') {
+            $error = $event['error'] ?? null;
+            $message = is_array($error)
+                ? (string) ($error['data']['message'] ?? ($error['message'] ?? ($error['name'] ?? 'OpenCode turn failed')))
+                : (string) ($error ?? 'OpenCode turn failed');
+            $result->result->error = (object) ['message' => $message];
+            $this->message_started = false;
         }
     }
 }
