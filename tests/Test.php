@@ -1531,9 +1531,9 @@ TXT
                 $i_url = 1;
                 $i_prompt = 1;
                 $mcp_servers = [];
-                while (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
+                while (($_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
                     $mcp_servers[] = [
-                        'url' => $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
+                        'url' => $_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
                         'authorization_token' => $return->result->access_token
                     ];
                     $i_url++;
@@ -1550,18 +1550,18 @@ TXT
                     mcp_servers: $mcp_servers
                 );
                 while (
-                    ($_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != '' &&
-                    ($_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != ''
+                    ($_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != '' &&
+                    ($_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != ''
                 ) {
                     $return = $ai_mcp->ask(
-                        $_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)]
+                        $_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)]
                     );
                     $success_this =
                         $return['success'] &&
                         count($ai_mcp->getSessionContent()) === $i_prompt * 2 &&
                         stripos(
                             $return['response'],
-                            $_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)]
+                            $_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)]
                         ) !== false;
                     if ($success_this) {
                         $success_count++;
@@ -1686,16 +1686,16 @@ TXT
         );
         //$this->log('token: ' . $return->result->access_token);
         $i_url = 1;
-        while (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
+        while (($_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
             $status = aihelper::getMcpOnlineStatus(
-                $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
+                $_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
                 $return->result->access_token
             );
             $this->assertTrue(is_bool($status));
             $this->assertTrue($status);
 
             $meta = aihelper::getMcpMetaInfo(
-                $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
+                $_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
                 $return->result->access_token
             );
             $this->assertTrue(array_key_exists('name', $meta));
@@ -1711,11 +1711,11 @@ TXT
             $this->assertTrue($meta['instructions'] !== '');
             $this->assertTrue(!empty($meta['tools']) && count($meta['tools']) > 0);
 
-            if (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_TOOL'] ?? '') != '') {
+            if (($_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_TOOL'] ?? '') != '') {
                 $tool_response = aihelper::callMcpTool(
-                    $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_TOOL'],
+                    $_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_TOOL'],
                     null,
-                    $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
+                    $_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
                     $return->result->access_token
                 );
                 $this->assertTrue(is_array($tool_response));
@@ -1769,8 +1769,8 @@ TXT
         for ($run = 1; $run <= 2; $run++) {
             $mcp_servers_all = [];
             $i_cur = 1;
-            while (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_cur, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
-                $mcp_servers_all[] = $_SERVER['MCP_SERVER_TEST_' . str_pad($i_cur, 2, '0', STR_PAD_LEFT) . '_URL'];
+            while (($_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_cur, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
+                $mcp_servers_all[] = $_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_cur, 2, '0', STR_PAD_LEFT) . '_URL'];
                 $i_cur++;
             }
             // randomize mcp servers
@@ -1846,8 +1846,8 @@ TXT
 
         $mcp_servers = [];
         $i_cur = 1;
-        while (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_cur, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
-            $url = $_SERVER['MCP_SERVER_TEST_' . str_pad($i_cur, 2, '0', STR_PAD_LEFT) . '_URL'];
+        while (($_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_cur, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
+            $url = $_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_cur, 2, '0', STR_PAD_LEFT) . '_URL'];
             // replace chat id with random number
             $url = str_replace('[CHAT_ID]', '[' . rand(100000, 999999) . ']', $url);
             $mcp_servers[] = [
@@ -1901,9 +1901,9 @@ TXT
         //$this->log('token: ' . $return->result->access_token);
         $i_url = 1;
         $mcp_servers = [];
-        while (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
+        while (($_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
             $mcp_servers[] = [
-                'url' => $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
+                'url' => $_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'],
                 'authorization_token' => $return->result->access_token
             ];
             $i_url++;
@@ -2002,8 +2002,8 @@ TXT
         // collect all mcp servers
         $mcp_servers = [];
         $i_url = 1;
-        while (($_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
-            $url = $_SERVER['MCP_SERVER_TEST_' . str_pad($i_url, 2, '0', STR_PAD_LEFT) . '_URL'];
+        while (($_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'] ?? '') != '') {
+            $url = $_SERVER['MCP_SERVER_TEST_' . str_pad((string) $i_url, 2, '0', STR_PAD_LEFT) . '_URL'];
             $url = str_replace('[CHAT_ID]', '[' . rand(100000, 999999) . ']', $url);
             $mcp_servers[] = [
                 'url' => $url,
@@ -2015,10 +2015,10 @@ TXT
         // collect all prompts/answers
         $prompts = [];
         $i_prompt = 1;
-        while (($_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != '') {
+        while (($_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)] ?? '') != '') {
             $prompts[] = [
-                'prompt' => $_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)],
-                'answer' => $_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad($i_prompt, 2, '0', STR_PAD_LEFT)] ?? ''
+                'prompt' => $_SERVER['MCP_SERVER_TEST_PROMPT_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)],
+                'answer' => $_SERVER['MCP_SERVER_TEST_ANSWER_' . str_pad((string) $i_prompt, 2, '0', STR_PAD_LEFT)] ?? ''
             ];
             $i_prompt++;
         }
