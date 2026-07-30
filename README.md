@@ -110,32 +110,6 @@ $ai->getSessionId() // get current session id
 
 $ai->getSessionContent() // gets messages in chat history
 
-$ai->getCliUsageLimits() // get cli usage limits for claude code, codex, opencode and antigravity
-// [
-//     ['type' => '5-hour', 'scope' => null, 'percent used' => 20, 'resets_at' => '2026-06-29T17:59:00+02:00'],
-//     ['type' => 'weekly', 'scope' => null, 'percent used' => 10, 'resets_at' => '2026-07-06T03:03:00+02:00'],
-//     ['type' => 'weekly', 'scope' => 'Fable', 'percent used' => 93, 'resets_at' => '2026-07-06T03:03:00+02:00']
-// ]
-
-$ai->getCliUsageResetCredits() // get manually redeemable codex reset credits
-// ['available_count' => 1, 'credits' => [['title' => 'Full reset', 'expires_at' => '...']]]
-
-$ai->triggerCliUsageReset() // redeem the next available codex reset credit
-// ['success' => true, 'status' => 'reset', 'windows_reset' => 2]
-
-aihelper::getCliApiRequests( // get all requests from a local clis
-    limit: 100, // null: all
-    date_from: '2026-07-01 00:00:00', // null: all
-    date_until: '2026-07-31 23:59:59', // null: all
-    include_body: false,
-    group_by: false // true = collapse per project
-);
-
-aihelper::purgeCliApiRequestLogs( // delete request logs only
-    date_from: null, // null: all
-    date_until: null // null: all
-);
-
 // manually populate history
 $ai = aihelper::create(...);
 $ai->prependPromptToSession(prompt: '...', files: [...]);
@@ -186,6 +160,32 @@ $ai = aihelper::create(
     cli_ssh_user: 'root', // optional
     cli_ssh_port: 22, // optional
     cli_ssh_key: '/root/.ssh/id_ed25519' // optional
+);
+
+$ai->getCliUsageLimits() // get cli usage limits for claude code, codex, opencode and antigravity
+// [
+//     ['type' => '5-hour', 'scope' => null, 'percent used' => 20, 'resets_at' => '2026-06-29T17:59:00+02:00'],
+//     ['type' => 'weekly', 'scope' => null, 'percent used' => 10, 'resets_at' => '2026-07-06T03:03:00+02:00'],
+//     ['type' => 'weekly', 'scope' => 'Fable', 'percent used' => 93, 'resets_at' => '2026-07-06T03:03:00+02:00']
+// ]
+
+$ai->getCliUsageResetCredits() // get manually redeemable codex reset credits
+// ['available_count' => 1, 'credits' => [['title' => 'Full reset', 'expires_at' => '...']]]
+
+$ai->triggerCliUsageReset() // redeem the next available codex reset credit
+// ['success' => true, 'status' => 'reset', 'windows_reset' => 2]
+
+aihelper::getCliApiRequests( // get all requests from a local clis
+    limit: 100, // null: all
+    date_from: '2026-07-01 00:00:00', // null: all
+    date_until: '2026-07-31 23:59:59', // null: all
+    include_body: false,
+    group_by: false // true = collapse per project
+);
+
+aihelper::purgeCliApiRequestLogs( // delete request logs only
+    date_from: null, // null: all
+    date_until: null // null: all
 );
 ```
 

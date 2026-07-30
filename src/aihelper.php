@@ -9525,6 +9525,11 @@ class ai_cliproxyapi extends ai_openrouter
             $models[$model_key]['supports_tools'] = true;
             // anthropic models reject `temperature`
             $models[$model_key]['supports_temperature'] = !str_starts_with((string) $model['name'], 'claude');
+            // the gateway serves the image endpoint of the subscription account
+            if (str_starts_with((string) $model['name'], 'gpt-image')) {
+                $models[$model_key]['supports_text_to_image'] = true;
+                $models[$model_key]['supports_tools'] = false;
+            }
             if (!str_starts_with((string) $model['name'], 'gpt-5')) {
                 continue;
             }
@@ -10166,7 +10171,7 @@ class ai_claudecode extends ai_harness
             'supports_tools' => true,
             'supports_text_to_image' => false,
             'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
+            'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
             'default' => true
         ],
@@ -10179,7 +10184,7 @@ class ai_claudecode extends ai_harness
             'supports_tools' => true,
             'supports_text_to_image' => false,
             'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
+            'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
             'default' => false
         ],
@@ -10192,7 +10197,7 @@ class ai_claudecode extends ai_harness
             'supports_tools' => true,
             'supports_text_to_image' => false,
             'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
+            'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
             'default' => false
         ]
@@ -10368,7 +10373,7 @@ class ai_codex extends ai_harness
             'supports_tools' => true,
             'supports_text_to_image' => false,
             'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
+            'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
             'default' => true
         ],
@@ -10381,7 +10386,7 @@ class ai_codex extends ai_harness
             'supports_tools' => true,
             'supports_text_to_image' => false,
             'supports_text_to_audio' => false,
-            'supports_image_to_text' => false,
+            'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
             'default' => false
         ]
