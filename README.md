@@ -43,11 +43,11 @@ $ai = aihelper::create(
     mcp_servers_call_type: 'remote', // remote = provider calls mcp servers directly, local = client-side tool loop via aihelper
     session_id: null, // submit session to continue a conversation (get with $ai->getSessionId())
     history: null, // submit messages (get with $ai->getSessionContent()),
+    system_prompt: null, // cli harnesses pass it as their system prompt, every other provider prepends it to the session
     stream: false,
     url: null, // overwrite connection url (e.g. for llamacpp/lmstudio)
     enable_thinking: null, // true|false|null — force reasoning/thinking on/off; null = provider default (see below)
-    auto_compact: false, // true = transparently compact the session when it approaches the model's context window
-    workdir: null // working directory of the cli harness providers (claudecode/codex/opencode)
+    auto_compact: false // true = transparently compact the session when it approaches the model's context window
 );
 
 $ai->ask(prompt: 'Wer wurde 2018 Fußball-Weltmeister?');
@@ -174,18 +174,18 @@ codex login --device-auth
 opencode auth login
 ```
 
-every turn continues the newest thread of `workdir` and opens a new one only when that directory has none yet.
+every turn continues the newest thread of `cli_workdir` and opens a new one only when that directory has none yet.
 
-set `ssh_host` to run the agent on another machine instead of locally — the working directory, the login and the threads are then that machine's:
+set `cli_ssh_host` to run the agent on another machine instead of locally — the working directory, the login and the threads are then that machine's:
 
 ```php
 $ai = aihelper::create(
     provider: 'claudecode',
-    workdir: '/var/www/project',
-    ssh_host: 'host.docker.internal',
-    ssh_user: 'root',
-    ssh_port: 22, // optional
-    ssh_key: '/root/.ssh/id_ed25519' // optional
+    cli_workdir: '/var/www/project', // optional, defaults to a throwaway directory per session
+    cli_ssh_host: 'host.docker.internal', // optional, runs locally when omitted
+    cli_ssh_user: 'root', // optional
+    cli_ssh_port: 22, // optional
+    cli_ssh_key: '/root/.ssh/id_ed25519' // optional
 );
 ```
 

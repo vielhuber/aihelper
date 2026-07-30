@@ -14,8 +14,10 @@ abstract class aihelper
     public array $models = [];
     public ?bool $supports_mcp_remote = null;
     public ?bool $supports_stream = null;
+    public ?bool $is_harness = false;
 
     protected ?string $model = null;
+    protected ?string $system_prompt = null;
     protected ?string $effort = null;
     protected ?float $temperature = null;
     protected ?int $timeout = null;
@@ -76,11 +78,12 @@ abstract class aihelper
         ?string $url = null,
         ?bool $enable_thinking = null,
         ?bool $auto_compact = null,
-        ?string $workdir = null,
-        ?string $ssh_host = null,
-        ?string $ssh_user = null,
-        ?int $ssh_port = null,
-        ?string $ssh_key = null
+        ?string $cli_workdir = null,
+        ?string $cli_ssh_host = null,
+        ?string $cli_ssh_user = null,
+        ?int $cli_ssh_port = null,
+        ?string $cli_ssh_key = null,
+        ?string $system_prompt = null
     ): ?self {
         if ($provider === 'openai') {
             return new ai_openai(
@@ -98,7 +101,8 @@ abstract class aihelper
                 stream: $stream,
                 url: $url,
                 enable_thinking: $enable_thinking,
-                auto_compact: $auto_compact
+                auto_compact: $auto_compact,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'anthropic') {
@@ -117,7 +121,8 @@ abstract class aihelper
                 stream: $stream,
                 url: $url,
                 enable_thinking: $enable_thinking,
-                auto_compact: $auto_compact
+                auto_compact: $auto_compact,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'google') {
@@ -136,7 +141,8 @@ abstract class aihelper
                 stream: $stream,
                 url: $url,
                 enable_thinking: $enable_thinking,
-                auto_compact: $auto_compact
+                auto_compact: $auto_compact,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'xai') {
@@ -155,7 +161,8 @@ abstract class aihelper
                 stream: $stream,
                 url: $url,
                 enable_thinking: $enable_thinking,
-                auto_compact: $auto_compact
+                auto_compact: $auto_compact,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'deepseek') {
@@ -174,7 +181,8 @@ abstract class aihelper
                 stream: $stream,
                 url: $url,
                 enable_thinking: $enable_thinking,
-                auto_compact: $auto_compact
+                auto_compact: $auto_compact,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'openrouter') {
@@ -193,7 +201,8 @@ abstract class aihelper
                 stream: $stream,
                 url: $url,
                 enable_thinking: $enable_thinking,
-                auto_compact: $auto_compact
+                auto_compact: $auto_compact,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'llamacpp') {
@@ -212,7 +221,8 @@ abstract class aihelper
                 stream: $stream,
                 url: $url,
                 enable_thinking: $enable_thinking,
-                auto_compact: $auto_compact
+                auto_compact: $auto_compact,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'lmstudio') {
@@ -231,7 +241,8 @@ abstract class aihelper
                 stream: $stream,
                 url: $url,
                 enable_thinking: $enable_thinking,
-                auto_compact: $auto_compact
+                auto_compact: $auto_compact,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'nvidia') {
@@ -250,7 +261,8 @@ abstract class aihelper
                 stream: $stream,
                 url: $url,
                 enable_thinking: $enable_thinking,
-                auto_compact: $auto_compact
+                auto_compact: $auto_compact,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'cliproxyapi') {
@@ -269,7 +281,8 @@ abstract class aihelper
                 stream: $stream,
                 url: $url,
                 enable_thinking: $enable_thinking,
-                auto_compact: $auto_compact
+                auto_compact: $auto_compact,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'elevenlabs') {
@@ -288,7 +301,8 @@ abstract class aihelper
                 stream: $stream,
                 url: $url,
                 enable_thinking: $enable_thinking,
-                auto_compact: $auto_compact
+                auto_compact: $auto_compact,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'claudecode') {
@@ -308,11 +322,12 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                workdir: $workdir,
-                ssh_host: $ssh_host,
-                ssh_user: $ssh_user,
-                ssh_port: $ssh_port,
-                ssh_key: $ssh_key
+                cli_workdir: $cli_workdir,
+                cli_ssh_host: $cli_ssh_host,
+                cli_ssh_user: $cli_ssh_user,
+                cli_ssh_port: $cli_ssh_port,
+                cli_ssh_key: $cli_ssh_key,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'codex') {
@@ -332,11 +347,12 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                workdir: $workdir,
-                ssh_host: $ssh_host,
-                ssh_user: $ssh_user,
-                ssh_port: $ssh_port,
-                ssh_key: $ssh_key
+                cli_workdir: $cli_workdir,
+                cli_ssh_host: $cli_ssh_host,
+                cli_ssh_user: $cli_ssh_user,
+                cli_ssh_port: $cli_ssh_port,
+                cli_ssh_key: $cli_ssh_key,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'opencode') {
@@ -356,11 +372,12 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                workdir: $workdir,
-                ssh_host: $ssh_host,
-                ssh_user: $ssh_user,
-                ssh_port: $ssh_port,
-                ssh_key: $ssh_key
+                cli_workdir: $cli_workdir,
+                cli_ssh_host: $cli_ssh_host,
+                cli_ssh_user: $cli_ssh_user,
+                cli_ssh_port: $cli_ssh_port,
+                cli_ssh_key: $cli_ssh_key,
+                system_prompt: $system_prompt
             );
         }
         if ($provider === 'test') {
@@ -379,7 +396,8 @@ abstract class aihelper
                 stream: $stream,
                 url: $url,
                 enable_thinking: $enable_thinking,
-                auto_compact: $auto_compact
+                auto_compact: $auto_compact,
+                system_prompt: $system_prompt
             );
         }
         return null;
@@ -664,26 +682,27 @@ abstract class aihelper
         ?string $url = null,
         ?bool $enable_thinking = null,
         ?bool $auto_compact = null,
-        ?string $workdir = null,
-        ?string $ssh_host = null,
-        ?string $ssh_user = null,
-        ?int $ssh_port = null,
-        ?string $ssh_key = null
+        ?string $cli_workdir = null,
+        ?string $cli_ssh_host = null,
+        ?string $cli_ssh_user = null,
+        ?int $cli_ssh_port = null,
+        ?string $cli_ssh_key = null,
+        ?string $system_prompt = null
     ) {
-        if ($workdir !== null) {
-            $this->workdir = $workdir;
+        if ($cli_workdir !== null) {
+            $this->workdir = $cli_workdir;
         }
-        if ($ssh_host !== null) {
-            $this->ssh_host = $ssh_host;
+        if ($cli_ssh_host !== null) {
+            $this->ssh_host = $cli_ssh_host;
         }
-        if ($ssh_user !== null) {
-            $this->ssh_user = $ssh_user;
+        if ($cli_ssh_user !== null) {
+            $this->ssh_user = $cli_ssh_user;
         }
-        if ($ssh_port !== null) {
-            $this->ssh_port = $ssh_port;
+        if ($cli_ssh_port !== null) {
+            $this->ssh_port = $cli_ssh_port;
         }
-        if ($ssh_key !== null) {
-            $this->ssh_key = $ssh_key;
+        if ($cli_ssh_key !== null) {
+            $this->ssh_key = $cli_ssh_key;
         }
         if ($temperature === null) {
             $temperature = 1.0;
@@ -770,6 +789,11 @@ abstract class aihelper
             $this->auto_compact_cache =
                 $cacheDir . '/' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $this->session_id) . '.txt';
         }
+        // last: for a non-harness provider this writes into the session, which
+        // only exists once the history above has been restored
+        if ($system_prompt !== null) {
+            $this->setSystemPrompt($system_prompt);
+        }
     }
 
     protected function getCliUsageTool(): ?string
@@ -817,6 +841,12 @@ abstract class aihelper
         return $tool;
     }
 
+    // credentials belong to the machine the cli runs on, not to the caller
+    protected function readCliAuthFile(string $path): ?string
+    {
+        return is_file($path) ? (string) file_get_contents($path) : null;
+    }
+
     protected function getCodexAuthentication(): ?array
     {
         $auth_files =
@@ -824,10 +854,11 @@ abstract class aihelper
                 ? (glob('/host/data/server/cliproxyapi/auth/codex*.json') ?: [])
                 : ['/root/.codex/auth.json'];
         foreach ($auth_files as $auth_file) {
-            if (!is_file($auth_file)) {
+            $auth_content = $this->readCliAuthFile($auth_file);
+            if ($auth_content === null) {
                 continue;
             }
-            $auth = json_decode((string) file_get_contents($auth_file), true);
+            $auth = json_decode($auth_content, true);
             if (!is_array($auth) || $this->isCliAuthenticationExpired($auth)) {
                 continue;
             }
@@ -1218,10 +1249,11 @@ abstract class aihelper
                 : ['/root/.claude/.credentials.json'];
         $access_token = null;
         foreach ($auth_files as $auth_file) {
-            if (!is_file($auth_file)) {
+            $auth_content = $this->readCliAuthFile($auth_file);
+            if ($auth_content === null) {
                 continue;
             }
-            $auth = json_decode((string) file_get_contents($auth_file), true);
+            $auth = json_decode($auth_content, true);
             if (!is_array($auth) || $this->isCliAuthenticationExpired($auth)) {
                 continue;
             }
@@ -5764,6 +5796,21 @@ abstract class aihelper
         return $this->auto_compact_removed_messages;
     }
 
+    // harnesses render it as a real system prompt, everyone else gets it as
+    // the first message of the session
+    public function setSystemPrompt(string $prompt): static
+    {
+        $prompt = $this->trimPrompt($prompt);
+        if ($prompt === '') {
+            return $this;
+        }
+        $this->system_prompt = $prompt;
+        if ($this->is_harness !== true) {
+            $this->prependPromptToSession($prompt);
+        }
+        return $this;
+    }
+
     public function prependPromptToSession(string $prompt, mixed $files = null): void
     {
         $prompt = $this->trimPrompt($prompt);
@@ -9528,7 +9575,11 @@ abstract class ai_harness extends ai_anthropic
 
     public ?bool $supports_stream = true;
 
+    public ?bool $is_harness = true;
+
     public ?bool $isolate_harness_config = true;
+
+    protected array $harness_files = [];
 
     protected ?float $harness_costs = null;
 
@@ -9728,6 +9779,58 @@ abstract class ai_harness extends ai_anthropic
         return [];
     }
 
+    public function ask(?string $prompt = null, mixed $files = null): array
+    {
+        $this->harness_files = $files === null ? [] : (is_array($files) ? $files : [$files]);
+        return parent::ask($prompt, $files);
+    }
+
+    protected function readCliAuthFile(string $path): ?string
+    {
+        if (!$this->isRemote()) {
+            return parent::readCliAuthFile($path);
+        }
+        $command = array_merge($this->sshCommand(), ['cat ' . escapeshellarg($path)]);
+        exec(implode(' ', array_map('escapeshellarg', $command)) . ' 2>/dev/null', $output, $status);
+        return $status === 0 && $output !== [] ? implode(PHP_EOL, $output) : null;
+    }
+
+    protected function harnessFilePaths(?string $kind = null): array
+    {
+        $paths = [];
+        foreach ($this->harness_files as $file) {
+            if (!is_string($file) || $file === '' || preg_match('#^https?://#i', $file) === 1) {
+                continue;
+            }
+            // a remote path belongs to the other machine and cannot be checked here
+            if (!$this->isRemote() && !is_file($file)) {
+                continue;
+            }
+            $is_image = in_array(
+                strtolower(pathinfo($file, PATHINFO_EXTENSION)),
+                ['png', 'jpg', 'jpeg', 'gif', 'webp'],
+                true
+            );
+            if (($kind === 'image' && !$is_image) || ($kind === 'other' && $is_image)) {
+                continue;
+            }
+            $paths[] = $file;
+        }
+        return $paths;
+    }
+
+    // paths no argument of this cli can carry — named in the prompt instead
+    protected function harnessPromptFilePaths(): array
+    {
+        return $this->harnessFilePaths();
+    }
+
+    protected function appendFileNote(string $prompt): string
+    {
+        $paths = $this->harnessPromptFilePaths();
+        return $paths === [] ? $prompt : $prompt . PHP_EOL . PHP_EOL . 'Attached files: ' . implode(', ', $paths);
+    }
+
     protected function harnessMcpServers(): array
     {
         $servers = [];
@@ -9769,7 +9872,7 @@ abstract class ai_harness extends ai_anthropic
 
     protected function harnessInput(string $prompt): string
     {
-        return $prompt;
+        return $this->appendFileNote($prompt);
     }
 
     protected function emitAnthropicEvent(?\Closure $emit, array $event): void
@@ -10154,6 +10257,12 @@ class ai_claudecode extends ai_harness
             $args[] = '';
             $args[] = '--disable-slash-commands';
         }
+        if ($this->system_prompt !== null) {
+            // append, never replace: the default prompt carries the tool
+            // instructions the cli needs to work at all
+            $args[] = '--append-system-prompt';
+            $args[] = $this->system_prompt;
+        }
 
         $servers = [];
         foreach ($this->harnessMcpServers() as $name => $server) {
@@ -10174,6 +10283,9 @@ class ai_claudecode extends ai_harness
 
     protected function harnessInput(string $prompt): string
     {
+        // claude code has no attachment flag, but it can read any path itself —
+        // naming them is enough, and unlike base64 blocks it costs no context
+        $prompt = $this->appendFileNote($prompt);
         return
             json_encode(
                 [
@@ -10280,6 +10392,12 @@ class ai_codex extends ai_harness
         return 'codex';
     }
 
+    protected function harnessPromptFilePaths(): array
+    {
+        // "--image" only takes images; anything else is named in the prompt
+        return $this->harnessFilePaths('other');
+    }
+
     protected function buildArgs(): array
     {
         // "--last" is filtered by working directory and starts a fresh thread
@@ -10301,6 +10419,14 @@ class ai_codex extends ai_harness
             $options[] = '--ignore-user-config';
             $options[] = '-c';
             $options[] = 'project_doc_max_bytes=0';
+        }
+        if ($this->system_prompt !== null) {
+            $options[] = '-c';
+            $options[] = 'instructions=' . json_encode($this->system_prompt, JSON_UNESCAPED_SLASHES);
+        }
+        foreach ($this->harnessFilePaths('image') as $path) {
+            $options[] = '--image';
+            $options[] = $path;
         }
         foreach ($this->harnessMcpServers() as $name => $server) {
             $key = 'mcp_servers.' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $name);
@@ -10559,6 +10685,9 @@ class ai_opencode extends ai_harness
         if ($this->isolate_harness_config === true) {
             $config['instructions'] = [];
         }
+        if ($this->system_prompt !== null) {
+            $config['agent']['build']['prompt'] = $this->system_prompt;
+        }
         if ($config !== []) {
             $config['$schema'] = 'https://opencode.ai/config.json';
             $overrides['OPENCODE_CONFIG_CONTENT'] = json_encode(
@@ -10569,9 +10698,18 @@ class ai_opencode extends ai_harness
         return $overrides;
     }
 
+    protected function harnessPromptFilePaths(): array
+    {
+        return [];
+    }
+
     protected function buildArgs(): array
     {
         $args = ['run', '--continue', '--format', 'json', '--auto'];
+        foreach ($this->harnessFilePaths() as $path) {
+            $args[] = '--file';
+            $args[] = $path;
+        }
         if ($this->model !== null) {
             $args[] = '--model';
             $args[] = $this->model;
