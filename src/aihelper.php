@@ -2382,7 +2382,7 @@ abstract class aihelper
                     'price' =>
                         isset($cost->input) || isset($cost->output)
                             ? ((float) ($cost->input ?? 0)) + ((float) ($cost->output ?? 0))
-                            : PHP_FLOAT_MAX
+                            : \PHP_FLOAT_MAX
                 ];
             }
         }
@@ -2392,7 +2392,7 @@ abstract class aihelper
         }
 
         if (empty($default_candidates)) {
-            $default_candidates[] = ['key' => 0, 'date' => '', 'price' => PHP_FLOAT_MAX];
+            $default_candidates[] = ['key' => 0, 'date' => '', 'price' => \PHP_FLOAT_MAX];
         }
         usort($default_candidates, function ($a, $b) {
             return strcmp($b['date'], $a['date']);
@@ -2400,7 +2400,7 @@ abstract class aihelper
         $default_candidates = array_slice($default_candidates, 0, 10);
         $priced_default_candidates = array_values(
             array_filter($default_candidates, function ($candidate) {
-                return $candidate['price'] > 0 && $candidate['price'] < PHP_FLOAT_MAX;
+                return $candidate['price'] > 0 && $candidate['price'] < \PHP_FLOAT_MAX;
             })
         );
         if (!empty($priced_default_candidates)) {
@@ -2756,7 +2756,7 @@ abstract class aihelper
                         '16:9' => 16 / 9,
                         '21:9' => 21 / 9
                     ];
-                    $aspect_ratio__best_delta = PHP_FLOAT_MAX;
+                    $aspect_ratio__best_delta = \PHP_FLOAT_MAX;
                     foreach ($aspect_ratio__candidates as $label => $val) {
                         $d = abs(log($aspect_ratio__target / $val));
                         if ($d < $aspect_ratio__best_delta) {
@@ -2850,7 +2850,7 @@ abstract class aihelper
                         '4:3' => 4 / 3,
                         '3:4' => 3 / 4
                     ];
-                    $aspect_ratio__best_delta = PHP_FLOAT_MAX;
+                    $aspect_ratio__best_delta = \PHP_FLOAT_MAX;
                     foreach ($aspect_ratio__candidates as $label => $val) {
                         $d = abs(log($aspect_ratio__target / $val));
                         if ($d < $aspect_ratio__best_delta) {
@@ -2929,7 +2929,7 @@ abstract class aihelper
                     $aspect_ratio__fallback = '1024x1024';
                 }
                 $aspect_ratio__best = $aspect_ratio__fallback;
-                $aspect_ratio__best_delta = PHP_FLOAT_MAX;
+                $aspect_ratio__best_delta = \PHP_FLOAT_MAX;
                 foreach ($aspect_ratio__candidates as $label => $val) {
                     $d = abs(log($aspect_ratio__target / $val));
                     if ($d < $aspect_ratio__best_delta) {
@@ -9528,6 +9528,8 @@ abstract class ai_harness extends ai_anthropic
 
     public ?bool $supports_stream = true;
 
+    public ?bool $isolate_harness_config = true;
+
     protected ?float $harness_costs = null;
 
     protected ?string $harness_run_id = null;
@@ -9726,6 +9728,39 @@ abstract class ai_harness extends ai_anthropic
         return [];
     }
 
+    protected function harnessMcpServers(): array
+    {
+        $servers = [];
+        foreach ($this->mcp_servers ?? [] as $servers__key => $servers__value) {
+            if (empty($servers__value['url'])) {
+                continue;
+            }
+            $name = $servers__value['id'] ?? ($servers__value['name'] ?? 'mcp-server-' . ($servers__key + 1));
+            $servers[$name] = [
+                'url' => rtrim($servers__value['url'], '/') . '/',
+                'token' => $servers__value['authorization_token'] ?? null
+            ];
+        }
+        return $servers;
+    }
+
+    protected function harnessMcpTokenVariable(string $name): string
+    {
+        return 'AIHELPER_MCP_TOKEN_' . strtoupper(preg_replace('/[^a-zA-Z0-9]/', '_', $name) ?? '');
+    }
+
+    protected function harnessMcpTokenEnvironment(): array
+    {
+        $environment = [];
+        foreach ($this->harnessMcpServers() as $name => $server) {
+            if (($server['token'] ?? null) === null || trim((string) $server['token']) === '') {
+                continue;
+            }
+            $environment[$this->harnessMcpTokenVariable($name)] = $server['token'];
+        }
+        return $environment;
+    }
+
     protected function harnessEnvironment(): ?array
     {
         $overrides = $this->harnessEnvironmentOverrides();
@@ -9841,7 +9876,19 @@ abstract class ai_harness extends ai_anthropic
                 $loggable[$loggable__key + 1] = '(redacted)';
             }
         }
-        $this->log(implode(' ', $loggable), 'harness command');
+        $loggable = implode(' ', $loggable);
+        // a remote run carries the environment inside one shell line, so the
+        // secrets in it have to be replaced by value rather than by position
+        foreach ($this->harnessEnvironmentOverrides() as $secrets__key => $secrets__value) {
+            if (!is_string($secrets__value) || $secrets__value === '') {
+                continue;
+            }
+            if (preg_match('/TOKEN|KEY|SECRET|PASSWORD/i', (string) $secrets__key) !== 1) {
+                continue;
+            }
+            $loggable = str_replace($secrets__value, '(redacted)', $loggable);
+        }
+        $this->log($loggable, 'harness command');
 
         $process = proc_open(
             $command,
@@ -10100,16 +10147,19 @@ class ai_claudecode extends ai_harness
             $args[] = $this->effort;
         }
         $args[] = '--dangerously-skip-permissions';
+        if ($this->isolate_harness_config === true) {
+            // an empty source list drops CLAUDE.md and project skills, the
+            // second flag also drops the user and built-in ones
+            $args[] = '--setting-sources';
+            $args[] = '';
+            $args[] = '--disable-slash-commands';
+        }
 
         $servers = [];
-        foreach ($this->mcp_servers ?? [] as $servers__key => $servers__value) {
-            if (empty($servers__value['url'])) {
-                continue;
-            }
-            $name = $servers__value['id'] ?? ($servers__value['name'] ?? 'mcp-server-' . ($servers__key + 1));
-            $entry = ['type' => 'http', 'url' => rtrim($servers__value['url'], '/') . '/'];
-            if (!empty($servers__value['authorization_token'])) {
-                $entry['headers'] = ['Authorization' => 'Bearer ' . $servers__value['authorization_token']];
+        foreach ($this->harnessMcpServers() as $name => $server) {
+            $entry = ['type' => 'http', 'url' => $server['url']];
+            if ($server['token'] !== null && trim((string) $server['token']) !== '') {
+                $entry['headers'] = ['Authorization' => 'Bearer ' . $server['token']];
             }
             $servers[$name] = $entry;
         }
@@ -10245,7 +10295,31 @@ class ai_codex extends ai_harness
             $options[] = '-c';
             $options[] = 'model_reasoning_effort="' . $this->effort . '"';
         }
+        if ($this->isolate_harness_config === true) {
+            // drops config.toml and the AGENTS.md files found from the working
+            // directory upwards; the one in CODEX_HOME is out of reach here
+            $options[] = '--ignore-user-config';
+            $options[] = '-c';
+            $options[] = 'project_doc_max_bytes=0';
+        }
+        foreach ($this->harnessMcpServers() as $name => $server) {
+            $key = 'mcp_servers.' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $name);
+            $options[] = '-c';
+            // toml has no "\/" escape, so the slashes must survive unescaped
+            $options[] = $key . '.url=' . json_encode($server['url'], JSON_UNESCAPED_SLASHES);
+            if ($server['token'] === null || trim((string) $server['token']) === '') {
+                continue;
+            }
+            $options[] = '-c';
+            $options[] =
+                $key . '.bearer_token_env_var=' . json_encode($this->harnessMcpTokenVariable($name), JSON_UNESCAPED_SLASHES);
+        }
         return array_merge(['exec', 'resume', '--last'], $options);
+    }
+
+    protected function harnessEnvironmentOverrides(): array
+    {
+        return $this->harnessMcpTokenEnvironment();
     }
 
     protected function handleEvent(array $event, object $result, ?\Closure $emit): void
@@ -10457,11 +10531,42 @@ class ai_opencode extends ai_harness
 
     protected function harnessEnvironmentOverrides(): array
     {
-        return [
-            'IS_SANDBOX' => '1',
-            'OPENCODE_DISABLE_CLAUDE_CODE' => 'true',
-            'OPENCODE_DISABLE_EXTERNAL_SKILLS' => 'true'
-        ];
+        $overrides = array_merge(
+            [
+                'IS_SANDBOX' => '1',
+                'OPENCODE_DISABLE_CLAUDE_CODE' => 'true',
+                'OPENCODE_DISABLE_EXTERNAL_SKILLS' => 'true'
+            ],
+            $this->harnessMcpTokenEnvironment()
+        );
+        if ($this->isolate_harness_config === true) {
+            $overrides['OPENCODE_DISABLE_CLAUDE_CODE_SKILLS'] = 'true';
+            $overrides['OPENCODE_DISABLE_PROJECT_CONFIG'] = 'true';
+            $overrides['OPENCODE_DISABLE_DEFAULT_PLUGINS'] = 'true';
+            $overrides['OPENCODE_PURE'] = '1';
+        }
+
+        $config = [];
+        foreach ($this->harnessMcpServers() as $name => $server) {
+            $entry = ['type' => 'remote', 'url' => $server['url'], 'enabled' => true];
+            if ($server['token'] !== null && trim((string) $server['token']) !== '') {
+                // opencode interpolates "{env:VAR}" itself, so the token stays
+                // out of the config string that is passed on the command line
+                $entry['headers'] = ['Authorization' => 'Bearer {env:' . $this->harnessMcpTokenVariable($name) . '}'];
+            }
+            $config['mcp'][$name] = $entry;
+        }
+        if ($this->isolate_harness_config === true) {
+            $config['instructions'] = [];
+        }
+        if ($config !== []) {
+            $config['$schema'] = 'https://opencode.ai/config.json';
+            $overrides['OPENCODE_CONFIG_CONTENT'] = json_encode(
+                $config,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            );
+        }
+        return $overrides;
     }
 
     protected function buildArgs(): array
