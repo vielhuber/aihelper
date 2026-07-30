@@ -2489,6 +2489,7 @@ abstract class aihelper
                     str_contains($retryResponse, 'no response from provider') ||
                     str_contains($retryResponse, 'too many concurrent requests') ||
                     str_contains($retryResponse, 'temporarily unavailable') ||
+                    str_contains($retryResponse, 'overloaded') ||
                     str_contains($retryResponse, 'upstream connect error') ||
                     str_contains($retryResponse, 'connection termination') ||
                     str_contains($retryResponse, '(http 0)');
@@ -2579,7 +2580,8 @@ abstract class aihelper
             [
                 'auth_unavailable',
                 'no auth available',
-                'temporarily unavailable'
+                'temporarily unavailable',
+                'overloaded'
             ]
             as $needle
         ) {
@@ -4394,6 +4396,7 @@ abstract class aihelper
                         str_contains($retryResponse, 'no response from provider') ||
                         str_contains($retryResponse, 'too many concurrent requests') ||
                         str_contains($retryResponse, 'temporarily unavailable') ||
+                        str_contains($retryResponse, 'overloaded') ||
                         str_contains($retryResponse, 'upstream connect error') ||
                         str_contains($retryResponse, 'connection termination') ||
                         str_contains($retryResponse, '(http 0)');
@@ -7717,18 +7720,6 @@ class ai_anthropic extends aihelper
 
         if (__::nx($output_text ?? null)) {
             $this->log($response, 'failed');
-            if (
-                __::x($response ?? null) &&
-                __::x($response?->result ?? null) &&
-                __::x($response?->result?->type ?? null) &&
-                ($response?->result?->type ?? null) === 'error' &&
-                __::x($response?->result?->error ?? null) &&
-                __::x($response?->result?->error?->type ?? null) &&
-                ($response?->result?->error?->type ?? null) === 'overloaded_error'
-            ) {
-                $this->log('overload detected. pausing...');
-                sleep(5);
-            }
             $error_msg = $this->extractErrorMessage($response);
             $return['response'] = $error_msg ?? 'No response from provider.';
             return $return;

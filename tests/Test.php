@@ -4,197 +4,204 @@ declare(strict_types=1);
 use vielhuber\aihelper\aihelper;
 use vielhuber\stringhelper\__;
 
-final class RetryTestAihelper extends aihelper
-{
-    public int $attempts = 0;
-    public array $promptAdditions = [];
-
-    public function __construct(private array $outcomes)
-    {
-        $this->model = 'test';
-        $this->session_id = 'retry-test';
-        $this->max_tries = 1;
-    }
-
-    protected function askThis(
-        ?string $prompt = null,
-        mixed $files = null,
-        bool $add_prompt_to_session = true,
-        ?string $prev_output_text = null,
-        float $prev_costs = 0.0,
-        int $length_continuation_count = 0
-    ): array {
-        $this->attempts++;
-        $this->promptAdditions[] = $add_prompt_to_session;
-        $outcome = array_shift($this->outcomes);
-        if ($outcome === 'stream_after_text') {
-            $this->stream_text_emitted_since_tool = true;
-            throw new \RuntimeException('stream disconnected before completion');
-        }
-        if (is_string($outcome)) {
-            throw new \RuntimeException($outcome);
-        }
-        if (is_array($outcome)) {
-            return $outcome;
-        }
-        return ['response' => 'ok', 'success' => true, 'costs' => $prev_costs];
-    }
-
-    protected function makeApiCall(?array $args = null): mixed
-    {
-        return null;
-    }
-
-    protected function bringPromptInFormat(string $prompt, mixed $files = null): array
-    {
-        return [];
-    }
-
-    protected function addResponseToSession(mixed $response): void {}
-
-    protected function retryBackoffSeconds(int $attempt, bool $transient, bool $authUnavailable = false): int
-    {
-        return 0;
-    }
-
-    public function authenticationIsExpired(array $auth): bool
-    {
-        return $this->isCliAuthenticationExpired($auth);
-    }
-
-    public function cliUsageCacheKey(string $provider, string $tool): string
-    {
-        $this->name = $provider;
-        return $this->getCliUsageCacheKey($tool);
-    }
-
-    public function localTools(string $url): array
-    {
-        $this->mcp_servers = [['url' => $url]];
-        return $this->buildLocalToolsArgs();
-    }
-}
-
-final class ToolImageTestAihelper extends aihelper
-{
-    public static array $mcpResponse = [];
-
-    public function __construct(string $provider)
-    {
-        $this->name = $provider;
-        $this->model = 'test';
-        $this->session_id = 'tool-image-test-' . $provider;
-        $this->max_tries = 1;
-        $this->mcp_servers_tools_map = [
-            'render_image' => [
-                'url' => 'https://example.test/mcp',
-                'authorization_token' => null
-            ]
-        ];
-        if ($provider === 'google') {
-            self::$sessions[$this->session_id] = [
-                [
-                    'role' => 'model',
-                    'parts' => [['functionCall' => ['name' => 'render_image', 'args' => []]]]
-                ]
-            ];
-            return;
-        }
-        if (in_array($provider, ['anthropic', 'xai', 'deepseek'], true)) {
-            self::$sessions[$this->session_id] = [
-                [
-                    'role' => 'assistant',
-                    'content' => [['type' => 'tool_use', 'id' => 'call_1', 'name' => 'render_image', 'input' => []]]
-                ]
-            ];
-            return;
-        }
-        if (in_array($provider, ['openrouter', 'llamacpp', 'nvidia', 'cliproxyapi'], true)) {
-            self::$sessions[$this->session_id] = [
-                [
-                    'role' => 'assistant',
-                    'tool_calls' => [
-                        [
-                            'id' => 'call_1',
-                            'function' => ['name' => 'render_image', 'arguments' => '{}']
-                        ]
-                    ]
-                ]
-            ];
-            return;
-        }
-        self::$sessions[$this->session_id] = [
-            ['type' => 'function_call', 'call_id' => 'call_1', 'name' => 'render_image', 'arguments' => '{}']
-        ];
-    }
-
-    public static function callMcpTool(
-        ?string $name = null,
-        ?array $args = [],
-        ?string $url = null,
-        ?string $authorization_token = null
-    ): ?array {
-        return self::$mcpResponse;
-    }
-
-    public function runToolLoop(): array
-    {
-        return $this->runLocalToolLoop(['response' => '', 'success' => true, 'costs' => 0.0]);
-    }
-
-    public function session(): array
-    {
-        return self::$sessions[$this->session_id];
-    }
-
-    protected function askThis(
-        ?string $prompt = null,
-        mixed $files = null,
-        bool $add_prompt_to_session = true,
-        ?string $prev_output_text = null,
-        float $prev_costs = 0.0,
-        int $length_continuation_count = 0
-    ): array {
-        if ($this->name === 'google') {
-            self::$sessions[$this->session_id][] = ['role' => 'model', 'parts' => [['text' => 'done']]];
-        }
-        if (in_array($this->name, ['anthropic', 'xai', 'deepseek'], true)) {
-            self::$sessions[$this->session_id][] = [
-                'role' => 'assistant',
-                'content' => [['type' => 'text', 'text' => 'done']]
-            ];
-        }
-        if (in_array($this->name, ['openrouter', 'llamacpp', 'nvidia', 'cliproxyapi'], true)) {
-            self::$sessions[$this->session_id][] = ['role' => 'assistant', 'content' => 'done'];
-        }
-        if (
-            !in_array(
-                $this->name,
-                ['google', 'anthropic', 'xai', 'deepseek', 'openrouter', 'llamacpp', 'nvidia', 'cliproxyapi'],
-                true
-            )
-        ) {
-            self::$sessions[$this->session_id][] = ['type' => 'message', 'role' => 'assistant', 'content' => []];
-        }
-        return ['response' => 'done', 'success' => true, 'costs' => $prev_costs];
-    }
-
-    protected function makeApiCall(?array $args = null): mixed
-    {
-        return null;
-    }
-
-    protected function bringPromptInFormat(string $prompt, mixed $files = null): array
-    {
-        return [];
-    }
-
-    protected function addResponseToSession(mixed $response): void {}
-}
-
 class Test extends \PHPUnit\Framework\TestCase
 {
     protected $run_count = 3;
+
+    private function retryAihelper(array $outcomes): object
+    {
+        return new class ($outcomes) extends aihelper {
+            public int $attempts = 0;
+            public array $promptAdditions = [];
+
+            public function __construct(private array $outcomes)
+            {
+                $this->model = 'test';
+                $this->session_id = 'retry-test';
+                $this->max_tries = 1;
+            }
+
+            protected function askThis(
+                ?string $prompt = null,
+                mixed $files = null,
+                bool $add_prompt_to_session = true,
+                ?string $prev_output_text = null,
+                float $prev_costs = 0.0,
+                int $length_continuation_count = 0
+            ): array {
+                $this->attempts++;
+                $this->promptAdditions[] = $add_prompt_to_session;
+                $outcome = array_shift($this->outcomes);
+                if ($outcome === 'stream_after_text') {
+                    $this->stream_text_emitted_since_tool = true;
+                    throw new \RuntimeException('stream disconnected before completion');
+                }
+                if (is_string($outcome)) {
+                    throw new \RuntimeException($outcome);
+                }
+                if (is_array($outcome)) {
+                    return $outcome;
+                }
+                return ['response' => 'ok', 'success' => true, 'costs' => $prev_costs];
+            }
+
+            protected function makeApiCall(?array $args = null): mixed
+            {
+                return null;
+            }
+
+            protected function bringPromptInFormat(string $prompt, mixed $files = null): array
+            {
+                return [];
+            }
+
+            protected function addResponseToSession(mixed $response): void {}
+
+            protected function retryBackoffSeconds(int $attempt, bool $transient, bool $authUnavailable = false): int
+            {
+                return 0;
+            }
+
+            public function authenticationIsExpired(array $auth): bool
+            {
+                return $this->isCliAuthenticationExpired($auth);
+            }
+
+            public function cliUsageCacheKey(string $provider, string $tool): string
+            {
+                $this->name = $provider;
+                return $this->getCliUsageCacheKey($tool);
+            }
+
+            public function localTools(string $url): array
+            {
+                $this->mcp_servers = [['url' => $url]];
+                return $this->buildLocalToolsArgs();
+            }
+        };
+    }
+
+    private function toolImageAihelper(string $provider, array $mcpResponse): object
+    {
+        return new class ($provider, $mcpResponse) extends aihelper {
+            public static array $mcpResponse = [];
+
+            public function __construct(string $provider, array $mcpResponse)
+            {
+                self::$mcpResponse = $mcpResponse;
+                $this->name = $provider;
+                $this->model = 'test';
+                $this->session_id = 'tool-image-test-' . $provider;
+                $this->max_tries = 1;
+                $this->mcp_servers_tools_map = [
+                    'render_image' => [
+                        'url' => 'https://example.test/mcp',
+                        'authorization_token' => null
+                    ]
+                ];
+                if ($provider === 'google') {
+                    self::$sessions[$this->session_id] = [
+                        [
+                            'role' => 'model',
+                            'parts' => [['functionCall' => ['name' => 'render_image', 'args' => []]]]
+                        ]
+                    ];
+                    return;
+                }
+                if (in_array($provider, ['anthropic', 'xai', 'deepseek'], true)) {
+                    self::$sessions[$this->session_id] = [
+                        [
+                            'role' => 'assistant',
+                            'content' => [
+                                ['type' => 'tool_use', 'id' => 'call_1', 'name' => 'render_image', 'input' => []]
+                            ]
+                        ]
+                    ];
+                    return;
+                }
+                if (in_array($provider, ['openrouter', 'llamacpp', 'nvidia', 'cliproxyapi'], true)) {
+                    self::$sessions[$this->session_id] = [
+                        [
+                            'role' => 'assistant',
+                            'tool_calls' => [
+                                [
+                                    'id' => 'call_1',
+                                    'function' => ['name' => 'render_image', 'arguments' => '{}']
+                                ]
+                            ]
+                        ]
+                    ];
+                    return;
+                }
+                self::$sessions[$this->session_id] = [
+                    ['type' => 'function_call', 'call_id' => 'call_1', 'name' => 'render_image', 'arguments' => '{}']
+                ];
+            }
+
+            public static function callMcpTool(
+                ?string $name = null,
+                ?array $args = [],
+                ?string $url = null,
+                ?string $authorization_token = null
+            ): ?array {
+                return self::$mcpResponse;
+            }
+
+            public function runToolLoop(): array
+            {
+                return $this->runLocalToolLoop(['response' => '', 'success' => true, 'costs' => 0.0]);
+            }
+
+            public function session(): array
+            {
+                return self::$sessions[$this->session_id];
+            }
+
+            protected function askThis(
+                ?string $prompt = null,
+                mixed $files = null,
+                bool $add_prompt_to_session = true,
+                ?string $prev_output_text = null,
+                float $prev_costs = 0.0,
+                int $length_continuation_count = 0
+            ): array {
+                if ($this->name === 'google') {
+                    self::$sessions[$this->session_id][] = ['role' => 'model', 'parts' => [['text' => 'done']]];
+                }
+                if (in_array($this->name, ['anthropic', 'xai', 'deepseek'], true)) {
+                    self::$sessions[$this->session_id][] = [
+                        'role' => 'assistant',
+                        'content' => [['type' => 'text', 'text' => 'done']]
+                    ];
+                }
+                if (in_array($this->name, ['openrouter', 'llamacpp', 'nvidia', 'cliproxyapi'], true)) {
+                    self::$sessions[$this->session_id][] = ['role' => 'assistant', 'content' => 'done'];
+                }
+                if (
+                    !in_array(
+                        $this->name,
+                        ['google', 'anthropic', 'xai', 'deepseek', 'openrouter', 'llamacpp', 'nvidia', 'cliproxyapi'],
+                        true
+                    )
+                ) {
+                    self::$sessions[$this->session_id][] = ['type' => 'message', 'role' => 'assistant', 'content' => []];
+                }
+                return ['response' => 'done', 'success' => true, 'costs' => $prev_costs];
+            }
+
+            protected function makeApiCall(?array $args = null): mixed
+            {
+                return null;
+            }
+
+            protected function bringPromptInFormat(string $prompt, mixed $files = null): array
+            {
+                return [];
+            }
+
+            protected function addResponseToSession(mixed $response): void {}
+        };
+    }
 
     public static function setUpBeforeClass(): void
     {
@@ -234,9 +241,24 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__transient_request_errors_are_retried(): void
     {
-        $ai = new RetryTestAihelper([
+        $ai = $this->retryAihelper([
             'AI Request fehlgeschlagen: auth_unavailable: no auth available',
             ['response' => ['error' => ['code' => 'auth_unavailable']], 'success' => false, 'costs' => 0.0]
+        ]);
+
+        $result = $ai->ask('test');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('ok', $result['response']);
+        $this->assertSame(3, $ai->attempts);
+        $this->assertSame([true, false, false], $ai->promptAdditions);
+    }
+
+    function test__provider_overload_is_retried(): void
+    {
+        $ai = $this->retryAihelper([
+            'AI Request fehlgeschlagen: Overloaded',
+            'claude executor: upstream returned error event: Overloaded'
         ]);
 
         $result = $ai->ask('test');
@@ -329,7 +351,7 @@ class Test extends \PHPUnit\Framework\TestCase
             }
             $this->assertTrue($ready);
 
-            $tools = (new RetryTestAihelper([]))->localTools('http://127.0.0.1:' . $port);
+            $tools = $this->retryAihelper([])->localTools('http://127.0.0.1:' . $port);
 
             $this->assertCount(1, $tools);
             $this->assertSame('test_tool', $tools[0]['name']);
@@ -344,7 +366,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__auth_unavailable_stops_after_three_attempts(): void
     {
-        $ai = new RetryTestAihelper(array_fill(0, 8, 'AI Request fehlgeschlagen: auth_unavailable: no auth available'));
+        $ai = $this->retryAihelper(array_fill(0, 8, 'AI Request fehlgeschlagen: auth_unavailable: no auth available'));
 
         $result = $ai->ask('test');
 
@@ -357,7 +379,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__availability_backoff_covers_five_minutes(): void
     {
         $method = new \ReflectionMethod(aihelper::class, 'retryBackoffSeconds');
-        $ai = new RetryTestAihelper([]);
+        $ai = $this->retryAihelper([]);
         $backoffs = [];
         for ($attempt = 1; $attempt <= 8; $attempt++) {
             $backoffs[] = $method->invoke($ai, $attempt, true, true);
@@ -369,7 +391,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__transient_stream_transport_errors_are_retried(): void
     {
-        $ai = new RetryTestAihelper([
+        $ai = $this->retryAihelper([
             'AI Request fehlgeschlagen: Post "https://chatgpt.com/backend-api/codex/responses": EOF',
             'AI Request fehlgeschlagen: stream error: stream ID 1; PROTOCOL_ERROR; received from peer'
         ]);
@@ -395,7 +417,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $this->assertGreaterThan(256000, strlen($output));
         $this->assertLessThan(288000, strlen($output));
-        $this->assertSame($output, $method->invoke(new RetryTestAihelper([]), $output, 288000));
+        $this->assertSame($output, $method->invoke($this->retryAihelper([]), $output, 288000));
     }
 
     function test__local_tool_output_compacts_json_without_losing_records(): void
@@ -403,7 +425,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $records = [['id' => 'one', 'body' => 'First message'], ['id' => 'two', 'body' => 'Second message']];
         $output = json_encode($records, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
         $method = new \ReflectionMethod(aihelper::class, 'truncateLocalToolOutput');
-        $compacted = $method->invoke(new RetryTestAihelper([]), $output, 10000);
+        $compacted = $method->invoke($this->retryAihelper([]), $output, 10000);
 
         $this->assertLessThan(strlen($output), strlen($compacted));
         $this->assertSame($records, json_decode($compacted, true, 512, JSON_THROW_ON_ERROR));
@@ -419,7 +441,7 @@ class Test extends \PHPUnit\Framework\TestCase
         ]);
         $output = json_encode($records, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         $method = new \ReflectionMethod(aihelper::class, 'truncateLocalToolOutput');
-        $truncated = $method->invoke(new RetryTestAihelper([]), $output, 100000);
+        $truncated = $method->invoke($this->retryAihelper([]), $output, 100000);
 
         $this->assertLessThanOrEqual(100000, strlen($truncated));
         $this->assertStringContainsString('1795 more items, 1800 total', $truncated);
@@ -433,7 +455,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $records,
             json_decode((string) file_get_contents($matches[1]), true, 512, JSON_THROW_ON_ERROR)
         );
-        $retruncated = $method->invoke(new RetryTestAihelper([]), $truncated, 50000);
+        $retruncated = $method->invoke($this->retryAihelper([]), $truncated, 50000);
         $this->assertLessThanOrEqual(50000, strlen($retruncated));
         $this->assertStringContainsString('complete structured result persisted at ' . $matches[1], $retruncated);
         unlink($matches[1]);
@@ -442,7 +464,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__local_tool_output_includes_marker_within_small_budget(): void
     {
         $method = new \ReflectionMethod(aihelper::class, 'truncateLocalToolOutput');
-        $truncated = $method->invoke(new RetryTestAihelper([]), str_repeat('a', 1000), 100);
+        $truncated = $method->invoke($this->retryAihelper([]), str_repeat('a', 1000), 100);
 
         $this->assertSame(100, strlen($truncated));
         $this->assertStringContainsString('truncated from 1000 chars', $truncated);
@@ -451,7 +473,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__mcp_images_are_forwarded_as_multimodal_tool_results(): void
     {
         $imageData = base64_encode('test-image');
-        ToolImageTestAihelper::$mcpResponse = [
+        $mcpResponse = [
             'result' => [
                 'content' => [
                     ['type' => 'text', 'text' => 'Rendered page 1.'],
@@ -460,27 +482,27 @@ class Test extends \PHPUnit\Framework\TestCase
             ]
         ];
 
-        $chatCompletions = new ToolImageTestAihelper('cliproxyapi');
+        $chatCompletions = $this->toolImageAihelper('cliproxyapi', $mcpResponse);
         $this->assertTrue($chatCompletions->runToolLoop()['success']);
         $chatSession = $chatCompletions->session();
         $this->assertSame('Rendered page 1.', $chatSession[1]['content']);
         $this->assertSame('image_url', $chatSession[2]['content'][1]['type']);
         $this->assertSame('data:image/png;base64,' . $imageData, $chatSession[2]['content'][1]['image_url']['url']);
 
-        $anthropic = new ToolImageTestAihelper('anthropic');
+        $anthropic = $this->toolImageAihelper('anthropic', $mcpResponse);
         $this->assertTrue($anthropic->runToolLoop()['success']);
         $anthropicSession = $anthropic->session();
         $this->assertSame('Rendered page 1.', $anthropicSession[1]['content'][0]['content'][0]['text']);
         $this->assertSame('image', $anthropicSession[1]['content'][0]['content'][1]['type']);
         $this->assertSame($imageData, $anthropicSession[1]['content'][0]['content'][1]['source']['data']);
 
-        $google = new ToolImageTestAihelper('google');
+        $google = $this->toolImageAihelper('google', $mcpResponse);
         $this->assertTrue($google->runToolLoop()['success']);
         $googleSession = $google->session();
         $this->assertSame('Rendered page 1.', $googleSession[1]['parts'][0]['functionResponse']['response']['result']);
         $this->assertSame($imageData, $googleSession[1]['parts'][1]['inlineData']['data']);
 
-        $responses = new ToolImageTestAihelper('openai');
+        $responses = $this->toolImageAihelper('openai', $mcpResponse);
         $this->assertTrue($responses->runToolLoop()['success']);
         $responsesSession = $responses->session();
         $this->assertSame('Rendered page 1.', $responsesSession[1]['output'][0]['text']);
@@ -627,7 +649,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__empty_stream_before_first_payload_is_retried(): void
     {
-        $ai = new RetryTestAihelper([
+        $ai = $this->retryAihelper([
             'AI Request fehlgeschlagen: empty_stream: upstream stream closed before first payload'
         ]);
 
@@ -641,7 +663,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__empty_success_response_is_retried(): void
     {
-        $ai = new RetryTestAihelper([['response' => '', 'success' => true, 'costs' => 0.0]]);
+        $ai = $this->retryAihelper([['response' => '', 'success' => true, 'costs' => 0.0]]);
 
         $result = $ai->ask('test');
 
@@ -653,7 +675,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__cli_authentication_expiry_formats_are_recognized(): void
     {
-        $ai = new RetryTestAihelper([]);
+        $ai = $this->retryAihelper([]);
 
         $this->assertTrue($ai->authenticationIsExpired(['expired' => date(DATE_ATOM, time() - 60)]));
         $this->assertFalse($ai->authenticationIsExpired(['expired' => date(DATE_ATOM, time() + 60)]));
@@ -664,7 +686,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__cli_usage_caches_are_isolated_by_authentication_source(): void
     {
-        $ai = new RetryTestAihelper([]);
+        $ai = $this->retryAihelper([]);
 
         $this->assertSame('claude-cliproxyapi', $ai->cliUsageCacheKey('cliproxyapi', 'claude'));
         $this->assertSame('claude-native', $ai->cliUsageCacheKey('claudecode', 'claude'));
@@ -674,7 +696,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__transient_dns_errors_are_retried(): void
     {
-        $ai = new RetryTestAihelper([
+        $ai = $this->retryAihelper([
             'AI Request fehlgeschlagen: dial tcp: lookup chatgpt.com on 127.0.0.11:53: read udp 127.0.0.1:37313->127.0.0.11:53: i/o timeout',
             'AI Request fehlgeschlagen: dial tcp: lookup chatgpt.com on 127.0.0.11:53: server misbehaving'
         ]);
@@ -689,7 +711,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__transient_connection_errors_are_retried(): void
     {
-        $ai = new RetryTestAihelper([
+        $ai = $this->retryAihelper([
             'AI Request fehlgeschlagen: dial tcp [2606:4700:4408::ac40:9bd1]:443: connect: network is unreachable',
             'AI Request fehlgeschlagen: upstream connect error or disconnect/reset before headers. retried and the latest reset reason: connection timeout'
         ]);
@@ -704,7 +726,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__transient_http2_stream_errors_are_retried(): void
     {
-        $ai = new RetryTestAihelper([
+        $ai = $this->retryAihelper([
             'AI Request fehlgeschlagen: stream error: stream ID 1; INTERNAL_ERROR; received from peer'
         ]);
 
@@ -718,7 +740,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__permanent_request_errors_are_not_retried(): void
     {
-        $ai = new RetryTestAihelper(['invalid request']);
+        $ai = $this->retryAihelper(['invalid request']);
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('invalid request');
@@ -727,7 +749,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__interrupted_stream_is_not_retried_after_text_was_emitted(): void
     {
-        $ai = new RetryTestAihelper(['stream_after_text']);
+        $ai = $this->retryAihelper(['stream_after_text']);
 
         try {
             $ai->ask('test');
