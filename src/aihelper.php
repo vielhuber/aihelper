@@ -1066,7 +1066,7 @@ abstract class aihelper
         if ($tool === 'codex') {
             $auth = $this->getCodexAuthentication();
             if ($auth === null) {
-                return null;
+                return $finish([]);
             }
             $response = __::curl(
                 url: 'https://chatgpt.com/backend-api/wham/usage',
@@ -1163,7 +1163,7 @@ abstract class aihelper
                 }
             }
             if (($access_token ?? '') === '') {
-                return null;
+                return $finish([]);
             }
             $headers = [
                 'Authorization' => 'Bearer ' . $access_token,
@@ -1262,8 +1262,10 @@ abstract class aihelper
                 break;
             }
         }
+        // an expired token is just another failed attempt — the cli refreshes it on its next run,
+        // so keep serving the last good result instead of dropping the panel to "no data"
         if (($access_token ?? '') === '') {
-            return null;
+            return $finish([]);
         }
         $format_reset = function ($value): ?string {
             if (($value ?? null) === null) {
