@@ -680,6 +680,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__codex_records_tool_calls_in_the_session(): void
     {
         $this->skipOnCi();
+        class_exists(aihelper::class);
         $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_codex::class))->newInstanceWithoutConstructor();
         $result = (object) ['result' => (object) ['content' => []]];
         $handler = new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'handleEvent');
@@ -730,8 +731,9 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__large_payloads_are_passed_as_files_not_arguments(): void
     {
         $this->skipOnCi();
+        class_exists(aihelper::class);
         // linux refuses an exec whose single argument exceeds MAX_ARG_STRLEN
-        $prompt = str_repeat("Skill-Zeile.\n", 15000);
+        $prompt = str_repeat("Skill-Zeile mit Umlaut und Emoji: berücksichtigt 🤖\n", 5000);
         $this->assertGreaterThan(128 * 1024, strlen($prompt));
 
         $claude = (new \ReflectionClass(\vielhuber\aihelper\ai_claudecode::class))->newInstanceWithoutConstructor();
@@ -757,6 +759,8 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $this->assertArrayHasKey('CODEX_HOME', $environment);
         $config = (string) file_get_contents($environment['CODEX_HOME'] . '/config.toml');
+        $this->assertStringContainsString('🤖', $config);
+        $this->assertStringNotContainsString('\\ud83e', $config);
         $this->assertSame(
             $prompt,
             json_decode(trim(substr(strtok($config, "\n"), strlen('instructions = '))), false, 512, JSON_THROW_ON_ERROR)

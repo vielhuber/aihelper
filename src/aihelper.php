@@ -10592,7 +10592,7 @@ class ai_codex extends ai_harness
         // at MAX_ARG_STRLEN — the only way left when the user's config must stay in play
         if ($this->system_prompt !== null && $this->isolate_harness_config !== true) {
             $options[] = '-c';
-            $options[] = 'instructions=' . json_encode($this->system_prompt, JSON_UNESCAPED_SLASHES);
+            $options[] = 'instructions=' . $this->tomlString($this->system_prompt);
         }
         foreach ($this->harnessFilePaths('image') as $path) {
             $options[] = '--image';
@@ -10613,6 +10613,11 @@ class ai_codex extends ai_harness
         return array_merge(['exec', 'resume', '--last'], $options);
     }
 
+    private function tomlString(string $value): string
+    {
+        return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    }
+
     protected function harnessEnvironmentOverrides(): array
     {
         $overrides = $this->harnessMcpTokenEnvironment();
@@ -10627,7 +10632,7 @@ class ai_codex extends ai_harness
         $config = 'project_doc_max_bytes = 0' . PHP_EOL;
         if ($this->system_prompt !== null) {
             $config =
-                'instructions = ' . json_encode($this->system_prompt, JSON_UNESCAPED_SLASHES) . PHP_EOL . $config;
+                'instructions = ' . $this->tomlString($this->system_prompt) . PHP_EOL . $config;
         }
         $home = dirname($this->payloadFile('codex/config.toml', $config));
         $this->placeSkills('codex/skills');
