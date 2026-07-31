@@ -603,6 +603,80 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame(0.25, (new \ReflectionProperty($harness, 'harness_costs'))->getValue($harness));
     }
 
+    function test__opencode_records_tool_calls_in_the_session(): void
+    {
+        $this->skipOnCi();
+        $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_opencode::class))->newInstanceWithoutConstructor();
+        $result = (object) ['result' => (object) ['content' => []]];
+        $handler = new \ReflectionMethod(\vielhuber\aihelper\ai_opencode::class, 'handleEvent');
+        $part = [
+            'callID' => 'call_9b12',
+            'tool' => 'charly_charly_create_sub_chat',
+            'state' => ['status' => 'running', 'input' => ['prompt' => 'test']]
+        ];
+        $handler->invoke($harness, ['type' => 'tool', 'part' => $part], $result, null);
+        $this->assertCount(0, $result->result->content);
+
+        $part['state'] = ['status' => 'pending', 'input' => ['prompt' => 'test']];
+        $handler->invoke($harness, ['type' => 'tool', 'part' => $part], $result, null);
+        $this->assertCount(0, $result->result->content);
+
+        $part['state'] = ['status' => 'completed', 'input' => ['prompt' => 'test'], 'output' => '{"count":1}'];
+        $handler->invoke($harness, ['type' => 'tool', 'part' => $part], $result, null);
+
+        $this->assertCount(2, $result->result->content);
+        $this->assertSame('tool_use', $result->result->content[0]->type);
+        $this->assertSame('call_9b12', $result->result->content[0]->id);
+        $this->assertSame('charly_charly_create_sub_chat', $result->result->content[0]->name);
+        $this->assertSame(['prompt' => 'test'], $result->result->content[0]->input);
+        $this->assertSame('tool_result', $result->result->content[1]->type);
+        $this->assertSame('call_9b12', $result->result->content[1]->tool_use_id);
+        $this->assertSame('{"count":1}', $result->result->content[1]->content);
+        $this->assertFalse($result->result->content[1]->is_error);
+    }
+
+    function test__claude_code_records_tool_calls_in_the_session(): void
+    {
+        $this->skipOnCi();
+        $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_claudecode::class))->newInstanceWithoutConstructor();
+        $result = (object) ['result' => (object) ['content' => []]];
+        $handler = new \ReflectionMethod(\vielhuber\aihelper\ai_claudecode::class, 'handleEvent');
+        $handler->invoke(
+            $harness,
+            [
+                'type' => 'assistant',
+                'message' => [
+                    'content' => [
+                        ['type' => 'text', 'text' => 'Ich lege den Sub-Chat an.'],
+                        ['type' => 'tool_use', 'id' => 'toolu_1', 'name' => 'charly_create_sub_chat', 'input' => ['prompt' => 'test']]
+                    ]
+                ]
+            ],
+            $result,
+            null
+        );
+        $handler->invoke(
+            $harness,
+            [
+                'type' => 'user',
+                'message' => [
+                    'content' => [
+                        ['type' => 'text', 'text' => 'wird nicht uebernommen'],
+                        ['type' => 'tool_result', 'tool_use_id' => 'toolu_1', 'content' => 'ok']
+                    ]
+                ]
+            ],
+            $result,
+            null
+        );
+
+        $this->assertCount(3, $result->result->content);
+        $this->assertSame('Ich lege den Sub-Chat an.', $result->result->content[0]->text);
+        $this->assertSame('charly_create_sub_chat', $result->result->content[1]->name);
+        $this->assertSame('tool_result', $result->result->content[2]->type);
+        $this->assertSame('toolu_1', $result->result->content[2]->tool_use_id);
+    }
+
     function test__opencode_exposes_only_its_harness_models(): void
     {
         $this->skipOnCi();

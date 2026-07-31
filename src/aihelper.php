@@ -10322,12 +10322,17 @@ class ai_claudecode extends ai_harness
             return;
         }
 
-        if ($type === 'assistant' && is_array($event['message']['content'] ?? null)) {
+        // the cli runs its tools itself, so the calls only become visible to the
+        // caller when they are written into the session like a native provider does
+        if (in_array($type, ['assistant', 'user'], true) && is_array($event['message']['content'] ?? null)) {
             foreach ($event['message']['content'] as $content__value) {
-                if (($content__value['type'] ?? null) !== 'text' || !isset($content__value['text'])) {
-                    continue;
+                $content_type = $content__value['type'] ?? null;
+                if ($type === 'assistant' && $content_type === 'text' && isset($content__value['text'])) {
+                    $result->result->content[] = (object) ['type' => 'text', 'text' => $content__value['text']];
                 }
-                $result->result->content[] = (object) ['type' => 'text', 'text' => $content__value['text']];
+                if ($content_type === ($type === 'assistant' ? 'tool_use' : 'tool_result')) {
+                    $result->result->content[] = (object) $content__value;
+                }
             }
             return;
         }
@@ -10809,7 +10814,8 @@ class ai_opencode extends ai_harness
         $now = time();
         $limits = [
             '5-hour' => ['from' => $now - 5 * 60 * 60, 'limit_usd' => 12.0],
-            'weekly' => ['from' => $now - 7 * 24 * 60 * 60, 'limit_usd' => 30.0],
+            // calibrated against a real exhaustion: the gateway refused at $23.31 local spend
+            'weekly' => ['from' => $now - 7 * 24 * 60 * 60, 'limit_usd' => 20.0],
             'monthly' => ['from' => $now - 30 * 24 * 60 * 60, 'limit_usd' => 60.0]
         ];
         try {
@@ -11001,6 +11007,31 @@ class ai_opencode extends ai_harness
             if (!$thinking) {
                 $result->result->content[] = (object) ['type' => 'text', 'text' => $text];
             }
+            return;
+        }
+
+        // the cli runs its tools itself, so the calls only become visible to the
+        // caller when they are written into the session like a native provider does
+        if ($type === 'tool') {
+            $call_id = (string) ($event['part']['callID'] ?? '');
+            $state = is_array($event['part']['state'] ?? null) ? $event['part']['state'] : [];
+            $status = (string) ($state['status'] ?? '');
+            // opencode reports the part on every state change, so only the terminal one is recorded
+            if ($call_id === '' || !in_array($status, ['completed', 'error'], true)) {
+                return;
+            }
+            $result->result->content[] = (object) [
+                'type' => 'tool_use',
+                'id' => $call_id,
+                'name' => (string) ($event['part']['tool'] ?? ''),
+                'input' => $state['input'] ?? []
+            ];
+            $result->result->content[] = (object) [
+                'type' => 'tool_result',
+                'tool_use_id' => $call_id,
+                'is_error' => $status === 'error',
+                'content' => (string) ($state['output'] ?? ($state['error'] ?? ''))
+            ];
             return;
         }
 
