@@ -10598,6 +10598,33 @@ class ai_codex extends ai_harness
         // item becomes one closed content block
         if ($type === 'item.completed') {
             $item_type = $event['item']['type'] ?? null;
+            // the cli runs its tools itself, so the calls only become visible to the
+            // caller when they are written into the session like a native provider does
+            if (in_array($item_type, ['mcp_tool_call', 'command_execution'], true)) {
+                $item = $event['item'];
+                $is_mcp = $item_type === 'mcp_tool_call';
+                $output = [];
+                foreach ($item['result']['content'] ?? [] as $block) {
+                    if (isset($block['text'])) {
+                        $output[] = (string) $block['text'];
+                    }
+                }
+                $result->result->content[] = (object) [
+                    'type' => 'tool_use',
+                    'id' => (string) ($item['id'] ?? ''),
+                    'name' => $is_mcp ? ($item['server'] ?? '') . '__' . ($item['tool'] ?? '') : 'shell',
+                    'input' => $is_mcp ? $item['arguments'] ?? [] : ['command' => $item['command'] ?? '']
+                ];
+                $result->result->content[] = (object) [
+                    'type' => 'tool_result',
+                    'tool_use_id' => (string) ($item['id'] ?? ''),
+                    'is_error' => ($item['status'] ?? '') !== 'completed',
+                    'content' => $is_mcp
+                        ? ($output !== [] ? implode(PHP_EOL, $output) : (string) ($item['error'] ?? ''))
+                        : (string) ($item['aggregated_output'] ?? '')
+                ];
+                return;
+            }
             $text = (string) ($event['item']['text'] ?? '');
             if ($text === '' || !in_array($item_type, ['agent_message', 'reasoning'], true)) {
                 return;

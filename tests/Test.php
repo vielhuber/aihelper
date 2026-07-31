@@ -677,6 +677,56 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame('toolu_1', $result->result->content[2]->tool_use_id);
     }
 
+    function test__codex_records_tool_calls_in_the_session(): void
+    {
+        $this->skipOnCi();
+        $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_codex::class))->newInstanceWithoutConstructor();
+        $result = (object) ['result' => (object) ['content' => []]];
+        $handler = new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'handleEvent');
+        $handler->invoke(
+            $harness,
+            [
+                'type' => 'item.completed',
+                'item' => [
+                    'id' => 'item_1',
+                    'type' => 'mcp_tool_call',
+                    'server' => 'charly',
+                    'tool' => 'charly_create_sub_chat',
+                    'arguments' => ['message' => 'test'],
+                    'result' => ['content' => [['type' => 'text', 'text' => 'PONG-4711']], 'structured_content' => null],
+                    'error' => null,
+                    'status' => 'completed'
+                ]
+            ],
+            $result,
+            null
+        );
+        $handler->invoke(
+            $harness,
+            [
+                'type' => 'item.completed',
+                'item' => [
+                    'id' => 'item_2',
+                    'type' => 'command_execution',
+                    'command' => "/bin/bash -lc 'echo HALLO123'",
+                    'aggregated_output' => "HALLO123\n",
+                    'exit_code' => 0,
+                    'status' => 'completed'
+                ]
+            ],
+            $result,
+            null
+        );
+
+        $this->assertCount(4, $result->result->content);
+        $this->assertSame('charly__charly_create_sub_chat', $result->result->content[0]->name);
+        $this->assertSame(['message' => 'test'], $result->result->content[0]->input);
+        $this->assertSame('PONG-4711', $result->result->content[1]->content);
+        $this->assertFalse($result->result->content[1]->is_error);
+        $this->assertSame('shell', $result->result->content[2]->name);
+        $this->assertSame("HALLO123\n", $result->result->content[3]->content);
+    }
+
     function test__large_payloads_are_passed_as_files_not_arguments(): void
     {
         $this->skipOnCi();
