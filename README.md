@@ -43,7 +43,7 @@ $ai = aihelper::create(
     mcp_servers_call_type: 'remote', // remote = provider calls mcp servers directly, local = client-side tool loop via aihelper
     session_id: null, // submit session to continue a conversation (get with $ai->getSessionId())
     history: null, // submit messages (get with $ai->getSessionContent()),
-    system_prompt: null, // cli harnesses pass it as their system prompt, every other provider prepends it to the session
+    system_prompt: null, // works with every provider — cli harnesses receive it as a real system prompt, everyone else gets it prepended to the session (same as writing it into `history` yourself or calling $ai->setSystemPrompt() later)
     stream: false,
     url: null, // overwrite connection url (e.g. for llamacpp/lmstudio)
     enable_thinking: null, // true|false|null — force reasoning/thinking on/off; null = provider default (see below)
@@ -155,11 +155,18 @@ set `cli_ssh_host` to run the agent on another machine instead of locally — th
 ```php
 $ai = aihelper::create(
     provider: 'claudecode',
+    system_prompt: 'Du bist ein Assistent für Tabellen und Tickets.',
     cli_workdir: '/var/www/project', // optional, defaults to a throwaway directory per session
     cli_ssh_host: 'host.docker.internal', // optional, runs locally when omitted
     cli_ssh_user: 'root', // optional
     cli_ssh_port: 22, // optional
-    cli_ssh_key: '/root/.ssh/id_ed25519' // optional
+    cli_ssh_key: '/root/.ssh/id_ed25519', // optional
+    cli_skills: [
+        'excel' =>
+            "---\nname: excel\ndescription: create and read xlsx files. use for tables and grades.\n---\n\nuse the excel_create_file tool ...",
+        'jira' =>
+            "---\nname: jira\ndescription: read jira issues via jql. use for tickets, sprints, backlogs.\n---\n\n..."
+    ]
 );
 
 $ai->getCliUsageLimits() // get cli usage limits for claude code, codex, opencode and antigravity

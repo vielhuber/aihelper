@@ -18,6 +18,7 @@ abstract class aihelper
 
     protected ?string $model = null;
     protected ?string $system_prompt = null;
+    protected array $cli_skills = [];
     protected ?string $effort = null;
     protected ?float $temperature = null;
     protected ?int $timeout = null;
@@ -83,7 +84,8 @@ abstract class aihelper
         ?string $cli_ssh_user = null,
         ?int $cli_ssh_port = null,
         ?string $cli_ssh_key = null,
-        ?string $system_prompt = null
+        ?string $system_prompt = null,
+        ?array $cli_skills = null
     ): ?self {
         if ($provider === 'openai') {
             return new ai_openai(
@@ -102,7 +104,8 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'anthropic') {
@@ -122,7 +125,8 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'google') {
@@ -142,7 +146,8 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'xai') {
@@ -162,7 +167,8 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'deepseek') {
@@ -182,7 +188,8 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'openrouter') {
@@ -202,7 +209,8 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'llamacpp') {
@@ -222,7 +230,8 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'lmstudio') {
@@ -242,7 +251,8 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'nvidia') {
@@ -262,7 +272,8 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'cliproxyapi') {
@@ -282,7 +293,8 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'elevenlabs') {
@@ -302,7 +314,8 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'claudecode') {
@@ -327,7 +340,8 @@ abstract class aihelper
                 cli_ssh_user: $cli_ssh_user,
                 cli_ssh_port: $cli_ssh_port,
                 cli_ssh_key: $cli_ssh_key,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'codex') {
@@ -352,7 +366,8 @@ abstract class aihelper
                 cli_ssh_user: $cli_ssh_user,
                 cli_ssh_port: $cli_ssh_port,
                 cli_ssh_key: $cli_ssh_key,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'opencode') {
@@ -377,7 +392,8 @@ abstract class aihelper
                 cli_ssh_user: $cli_ssh_user,
                 cli_ssh_port: $cli_ssh_port,
                 cli_ssh_key: $cli_ssh_key,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         if ($provider === 'test') {
@@ -397,7 +413,8 @@ abstract class aihelper
                 url: $url,
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
-                system_prompt: $system_prompt
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills
             );
         }
         return null;
@@ -687,7 +704,8 @@ abstract class aihelper
         ?string $cli_ssh_user = null,
         ?int $cli_ssh_port = null,
         ?string $cli_ssh_key = null,
-        ?string $system_prompt = null
+        ?string $system_prompt = null,
+        ?array $cli_skills = null
     ) {
         if ($cli_workdir !== null) {
             $this->workdir = $cli_workdir;
@@ -703,6 +721,9 @@ abstract class aihelper
         }
         if ($cli_ssh_key !== null) {
             $this->ssh_key = $cli_ssh_key;
+        }
+        if ($cli_skills !== null) {
+            $this->cli_skills = $cli_skills;
         }
         if ($temperature === null) {
             $temperature = 1.0;
@@ -5798,6 +5819,14 @@ abstract class aihelper
         return $this->auto_compact_removed_messages;
     }
 
+    // only a harness can use them: they are placed on disk for the cli to discover.
+    // every other provider carries the same knowledge inside its system prompt
+    public function setCliSkills(array $skills): static
+    {
+        $this->cli_skills = $skills;
+        return $this;
+    }
+
     // harnesses render it as a real system prompt, everyone else gets it as
     // the first message of the session
     public function setSystemPrompt(string $prompt): static
@@ -9762,6 +9791,22 @@ abstract class ai_harness extends ai_anthropic
         return $path;
     }
 
+    // every cli discovers skills from its own directory layout, so the caller only hands
+    // over name => SKILL.md pairs and each harness places them where its binary looks.
+    // returns the directory holding the skill folders, or null when there are none
+    protected function placeSkills(string $prefix): ?string
+    {
+        $dir = null;
+        foreach ($this->cli_skills as $skills__key => $skills__value) {
+            $name = preg_replace('/[^a-z0-9_-]/', '', strtolower((string) $skills__key));
+            if ($name === '' || trim((string) $skills__value) === '') {
+                continue;
+            }
+            $dir = dirname(dirname($this->payloadFile($prefix . '/' . $name . '/SKILL.md', (string) $skills__value)));
+        }
+        return $dir;
+    }
+
     protected function remoteCommand(string $command, string $stdin, string $description): void
     {
         $process = proc_open(
@@ -10344,12 +10389,30 @@ class ai_claudecode extends ai_harness
             $args[] = $this->effort;
         }
         $args[] = '--dangerously-skip-permissions';
+        // a plugin is the only way to hand claude code skills for a single run;
+        // the manifest is what makes the directory loadable at all
+        $skills = $this->placeSkills('plugin/skills');
+        if ($skills !== null) {
+            $plugin = dirname($skills);
+            $this->payloadFile(
+                'plugin/.claude-plugin/plugin.json',
+                json_encode(
+                    ['name' => 'skills', 'version' => '1.0.0', 'description' => 'Harness skills'],
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                )
+            );
+            $args[] = '--plugin-dir';
+            $args[] = $plugin;
+        }
         if ($this->isolate_harness_config === true) {
-            // an empty source list drops CLAUDE.md and project skills, the
-            // second flag also drops the user and built-in ones
+            // an empty source list drops CLAUDE.md and project skills
             $args[] = '--setting-sources';
             $args[] = '';
-            $args[] = '--disable-slash-commands';
+            // this one drops the user and built-in ones too, but "all skills" is
+            // literal — it would take the plugin skills above down with them
+            if ($skills === null) {
+                $args[] = '--disable-slash-commands';
+            }
         }
         if ($this->system_prompt !== null) {
             // append, never replace: the default prompt carries the tool
@@ -10518,7 +10581,7 @@ class ai_codex extends ai_harness
         // with a system prompt the run gets its own CODEX_HOME (see the environment
         // overrides), which already isolates the config and carries these keys — reading
         // it must not be suppressed here
-        if ($this->isolate_harness_config === true && $this->system_prompt === null) {
+        if ($this->isolate_harness_config === true && $this->system_prompt === null && $this->cli_skills === []) {
             // drops config.toml and the AGENTS.md files found from the working
             // directory upwards; the one in CODEX_HOME is out of reach here
             $options[] = '--ignore-user-config';
@@ -10557,19 +10620,17 @@ class ai_codex extends ai_harness
         // an argument — so an isolated run gets its own CODEX_HOME whose config.toml carries
         // it. the auth file stays a link into the real home, so refreshed tokens are shared.
         // without isolation the user's own CODEX_HOME has to keep being read
-        if ($this->system_prompt === null || $this->isolate_harness_config !== true) {
+        // skills are discovered from "$CODEX_HOME/skills", so they need the own home too
+        if (($this->system_prompt === null && $this->cli_skills === []) || $this->isolate_harness_config !== true) {
             return $overrides;
         }
-        $home = dirname(
-            $this->payloadFile(
-                'codex/config.toml',
-                'instructions = ' .
-                    json_encode($this->system_prompt, JSON_UNESCAPED_SLASHES) .
-                    PHP_EOL .
-                    'project_doc_max_bytes = 0' .
-                    PHP_EOL
-            )
-        );
+        $config = 'project_doc_max_bytes = 0' . PHP_EOL;
+        if ($this->system_prompt !== null) {
+            $config =
+                'instructions = ' . json_encode($this->system_prompt, JSON_UNESCAPED_SLASHES) . PHP_EOL . $config;
+        }
+        $home = dirname($this->payloadFile('codex/config.toml', $config));
+        $this->placeSkills('codex/skills');
         $link = $home . '/auth.json';
         // the overrides are rebuilt several times per run, the link is placed once
         if (!isset($this->payload_files[$link])) {
@@ -11042,14 +11103,97 @@ class ai_opencode extends ai_harness
             unset($limit);
         }
 
+        $exhausted = $this->fetchExhaustedLimit();
         foreach ($limits as &$limit) {
             unset($limit['from']);
             $limit['used_usd'] = round($limit['used_usd'], 8);
             $limit['percent used'] = round(min(100, $limit['used_usd'] / $limit['limit_usd'] * 100), 2);
+            // the gateway is the only authority here, and it only speaks up once a window is
+            // spent — until then the local estimate above is all there is
+            if ($exhausted !== null && $exhausted['type'] === $limit['type']) {
+                $limit['percent used'] = 100.0;
+                $limit['resets_at'] = $exhausted['resets_at'];
+                $limit['estimated'] = false;
+            }
             sort($limit['models']);
         }
         unset($limit);
         return array_values($limits);
+    }
+
+    /**
+     * Ask the gateway whether a usage window is spent.
+     *
+     * There is no usage endpoint — the reset time exists only in the "Retry-After" header of the
+     * 429 the completions endpoint answers with. The limit is checked before the payload is
+     * validated, so an empty message list is enough to trigger it and nothing is ever generated.
+     *
+     * @return array|null
+     */
+    private function fetchExhaustedLimit(): ?array
+    {
+        $cache_file =
+            rtrim(sys_get_temp_dir(), '/') .
+            '/aihelper-opencode-limit-' .
+            (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) .
+            '.json';
+        $cached = is_file($cache_file) ? json_decode((string) file_get_contents($cache_file), true) : null;
+        if (is_array($cached) && ($cached['checked_at'] ?? 0) > time() - 60) {
+            return $cached['limit'] ?? null;
+        }
+
+        $key = null;
+        foreach ([getenv('XDG_DATA_HOME') ?: null, (getenv('HOME') ?: '/root') . '/.local/share'] as $base) {
+            $auth = $base === null ? null : rtrim($base, '/') . '/opencode/auth.json';
+            if ($auth !== null && is_file($auth)) {
+                $key = json_decode((string) file_get_contents($auth), true)['opencode-go']['key'] ?? null;
+                break;
+            }
+        }
+        if (!is_string($key) || trim($key) === '') {
+            return null;
+        }
+
+        $curl = curl_init('https://opencode.ai/zen/go/v1/chat/completions');
+        curl_setopt_array($curl, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => true,
+            CURLOPT_POST => true,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 20,
+            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $key, 'Content-Type: application/json'],
+            // the models carry an "opencode-go/" prefix internally, the gateway rejects it
+            CURLOPT_POSTFIELDS => json_encode([
+                'model' => basename($this->model ?? '') ?: 'glm-5.2',
+                'messages' => []
+            ])
+        ]);
+        $raw = curl_exec($curl);
+        $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $header_size = (int) curl_getinfo($curl, CURLINFO_HEADER_SIZE);
+
+        $limit = null;
+        if ($status === 429 && is_string($raw)) {
+            $body = json_decode(substr($raw, $header_size), true);
+            $type = trim((string) ($body['metadata']['limitName'] ?? ''));
+            preg_match('/^retry-after:\s*(\d+)/mi', substr($raw, 0, $header_size), $match);
+            if ($type !== '' && isset($match[1])) {
+                $limit = [
+                    'type' => $type,
+                    'resets_at' => date('c', time() + (int) $match[1])
+                ];
+            }
+        }
+        // a failed probe must not be cached as "not exhausted" — only a conclusive answer counts
+        if ($status !== 0) {
+            @file_put_contents(
+                $cache_file,
+                json_encode(['checked_at' => time(), 'limit' => $limit]),
+                LOCK_EX
+            );
+            @chmod($cache_file, 0600);
+        }
+        return $limit;
     }
 
     protected function harnessEnvironmentOverrides(): array
@@ -11084,6 +11228,10 @@ class ai_opencode extends ai_harness
         }
         if ($this->system_prompt !== null) {
             $config['agent']['build']['prompt'] = $this->system_prompt;
+        }
+        $skills = $this->placeSkills('skills');
+        if ($skills !== null) {
+            $config['skills']['paths'] = [$skills];
         }
         if ($config !== []) {
             $config['$schema'] = 'https://opencode.ai/config.json';
