@@ -10186,6 +10186,24 @@ abstract class ai_harness extends ai_anthropic
             if (($result->result->error ?? null) !== null && empty($this->stream_response->result->content)) {
                 $this->stream_response->result->error = $result->result->error;
             }
+            // the streamed response is what the caller keeps, and it carries no tool results at
+            // all — a native stream only ever describes the assistant side. the recorded calls
+            // are merged in so the session documents what the cli actually did
+            $streamed = [];
+            foreach ($this->stream_response->result->content ?? [] as $block) {
+                if (($block->type ?? null) === 'tool_use') {
+                    $streamed[(string) ($block->id ?? '')] = true;
+                }
+            }
+            foreach ($result->result->content as $block) {
+                if (!in_array($block->type ?? null, ['tool_use', 'tool_result'], true)) {
+                    continue;
+                }
+                if ($block->type === 'tool_use' && isset($streamed[(string) ($block->id ?? '')])) {
+                    continue;
+                }
+                $this->stream_response->result->content[] = $block;
+            }
         }
 
         return $result;
