@@ -9623,6 +9623,8 @@ abstract class ai_harness extends ai_anthropic
 
     protected array $payload_files = [];
 
+    protected array $hidden_harness_tool_ids = [];
+
     abstract protected function binaryName(): string;
 
     /**
@@ -9981,6 +9983,19 @@ abstract class ai_harness extends ai_anthropic
             $environment[$this->harnessMcpTokenVariable($name)] = $server['token'];
         }
         return $environment;
+    }
+
+    protected function isHarnessSkillTool(string $name, mixed $input): bool
+    {
+        if (strtolower($name) === 'skill') {
+            return true;
+        }
+        $serialized = json_encode($input, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        return
+            is_string($serialized) &&
+            str_contains($serialized, '/aihelper-payload/') &&
+            str_contains($serialized, '/skills/') &&
+            str_contains($serialized, '/SKILL.md');
     }
 
     protected function harnessEnvironment(): ?array
@@ -10483,6 +10498,26 @@ class ai_claudecode extends ai_harness
                 if ($type === 'assistant' && $content_type === 'text' && isset($content__value['text'])) {
                     $result->result->content[] = (object) ['type' => 'text', 'text' => $content__value['text']];
                 }
+                if ($type === 'assistant' && $content_type === 'tool_use') {
+                    $tool_id = (string) ($content__value['id'] ?? '');
+                    if (
+                        $this->isHarnessSkillTool(
+                            (string) ($content__value['name'] ?? ''),
+                            $content__value['input'] ?? []
+                        )
+                    ) {
+                        $this->hidden_harness_tool_ids[$tool_id] = true;
+                        continue;
+                    }
+                }
+                if (
+                    $type === 'user' &&
+                    $content_type === 'tool_result' &&
+                    isset($this->hidden_harness_tool_ids[(string) ($content__value['tool_use_id'] ?? '')])
+                ) {
+                    unset($this->hidden_harness_tool_ids[(string) $content__value['tool_use_id']]);
+                    continue;
+                }
                 if ($content_type === ($type === 'assistant' ? 'tool_use' : 'tool_result')) {
                     $result->result->content[] = (object) $content__value;
                 }
@@ -10603,6 +10638,8 @@ class ai_codex extends ai_harness
             $options[] = '-c';
             // toml has no "\/" escape, so the slashes must survive unescaped
             $options[] = $key . '.url=' . json_encode($server['url'], JSON_UNESCAPED_SLASHES);
+            $options[] = '-c';
+            $options[] = $key . '.startup_timeout_sec=60';
             if ($server['token'] === null || trim((string) $server['token']) === '') {
                 continue;
             }
@@ -10687,6 +10724,11 @@ class ai_codex extends ai_harness
             if (in_array($item_type, ['mcp_tool_call', 'command_execution'], true)) {
                 $item = $event['item'];
                 $is_mcp = $item_type === 'mcp_tool_call';
+                $tool_name = $is_mcp ? ($item['server'] ?? '') . '__' . ($item['tool'] ?? '') : 'shell';
+                $tool_input = $is_mcp ? $item['arguments'] ?? [] : ['command' => $item['command'] ?? ''];
+                if ($this->isHarnessSkillTool((string) $tool_name, $tool_input)) {
+                    return;
+                }
                 $output = [];
                 foreach ($item['result']['content'] ?? [] as $block) {
                     if (isset($block['text'])) {
@@ -10696,8 +10738,8 @@ class ai_codex extends ai_harness
                 $result->result->content[] = (object) [
                     'type' => 'tool_use',
                     'id' => (string) ($item['id'] ?? ''),
-                    'name' => $is_mcp ? ($item['server'] ?? '') . '__' . ($item['tool'] ?? '') : 'shell',
-                    'input' => $is_mcp ? $item['arguments'] ?? [] : ['command' => $item['command'] ?? '']
+                    'name' => $tool_name,
+                    'input' => $tool_input
                 ];
                 $result->result->content[] = (object) [
                     'type' => 'tool_result',
@@ -11332,6 +11374,14 @@ class ai_opencode extends ai_harness
             $status = (string) ($state['status'] ?? '');
             // opencode reports the part on every state change, so only the terminal one is recorded
             if ($call_id === '' || !in_array($status, ['completed', 'error'], true)) {
+                return;
+            }
+            if (
+                $this->isHarnessSkillTool(
+                    (string) ($event['part']['tool'] ?? ''),
+                    $state['input'] ?? []
+                )
+            ) {
                 return;
             }
             $result->result->content[] = (object) [

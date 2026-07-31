@@ -689,6 +689,23 @@ class Test extends \PHPUnit\Framework\TestCase
             [
                 'type' => 'item.completed',
                 'item' => [
+                    'id' => 'skill_1',
+                    'type' => 'command_execution',
+                    'command' =>
+                        "/bin/bash -lc 'cat /tmp/aihelper-payload/test/codex/skills/filesystem/SKILL.md'",
+                    'aggregated_output' => "---\nname: filesystem\n---\n",
+                    'exit_code' => 0,
+                    'status' => 'completed'
+                ]
+            ],
+            $result,
+            null
+        );
+        $handler->invoke(
+            $harness,
+            [
+                'type' => 'item.completed',
+                'item' => [
                     'id' => 'item_1',
                     'type' => 'mcp_tool_call',
                     'server' => 'charly',
@@ -771,6 +788,21 @@ class Test extends \PHPUnit\Framework\TestCase
         }
 
         unlink($path);
+    }
+
+    function test__codex_allows_remote_mcp_startup_to_complete(): void
+    {
+        $codex = aihelper::create(provider: 'codex');
+        (new \ReflectionProperty(aihelper::class, 'mcp_servers'))->setValue($codex, [
+            [
+                'id' => 'github',
+                'url' => 'https://example.test/api/github/mcp/',
+                'authorization_token' => 'secret'
+            ]
+        ]);
+        $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'buildArgs'))->invoke($codex);
+
+        $this->assertContains('mcp_servers.github.startup_timeout_sec=60', $args);
     }
 
     function test__opencode_exposes_only_its_harness_models(): void
