@@ -677,6 +677,48 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame('toolu_1', $result->result->content[2]->tool_use_id);
     }
 
+    function test__large_payloads_are_passed_as_files_not_arguments(): void
+    {
+        $this->skipOnCi();
+        // linux refuses an exec whose single argument exceeds MAX_ARG_STRLEN
+        $prompt = str_repeat("Skill-Zeile.\n", 15000);
+        $this->assertGreaterThan(128 * 1024, strlen($prompt));
+
+        $claude = (new \ReflectionClass(\vielhuber\aihelper\ai_claudecode::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty(aihelper::class, 'session_id'))->setValue($claude, 'payload-args-test');
+        (new \ReflectionProperty(aihelper::class, 'system_prompt'))->setValue($claude, $prompt);
+        $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_claudecode::class, 'buildArgs'))->invoke($claude);
+
+        $this->assertContains('--append-system-prompt-file', $args);
+        $this->assertNotContains($prompt, $args);
+        $path = $args[array_search('--append-system-prompt-file', $args, true) + 1];
+        $this->assertSame($prompt, file_get_contents($path));
+        foreach ($args as $argument) {
+            $this->assertLessThan(128 * 1024, strlen((string) $argument));
+        }
+
+        $codex = (new \ReflectionClass(\vielhuber\aihelper\ai_codex::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty(aihelper::class, 'session_id'))->setValue($codex, 'payload-args-test');
+        (new \ReflectionProperty(aihelper::class, 'system_prompt'))->setValue($codex, $prompt);
+        $environment = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'harnessEnvironmentOverrides'))->invoke(
+            $codex
+        );
+        $codexArgs = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'buildArgs'))->invoke($codex);
+
+        $this->assertArrayHasKey('CODEX_HOME', $environment);
+        $config = (string) file_get_contents($environment['CODEX_HOME'] . '/config.toml');
+        $this->assertSame(
+            $prompt,
+            json_decode(trim(substr(strtok($config, "\n"), strlen('instructions = '))), false, 512, JSON_THROW_ON_ERROR)
+        );
+        $this->assertNotContains('--ignore-user-config', $codexArgs);
+        foreach ($codexArgs as $argument) {
+            $this->assertLessThan(128 * 1024, strlen((string) $argument));
+        }
+
+        unlink($path);
+    }
+
     function test__opencode_exposes_only_its_harness_models(): void
     {
         $this->skipOnCi();

@@ -9592,6 +9592,8 @@ abstract class ai_harness extends ai_anthropic
 
     protected ?string $harness_run_id = null;
 
+    protected array $payload_files = [];
+
     abstract protected function binaryName(): string;
 
     /**
@@ -9639,7 +9641,12 @@ abstract class ai_harness extends ai_anthropic
      */
     protected function shellPrelude(): string
     {
-        return 'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"; . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ';
+        // sourcing nvm only sets a PATH when a default alias exists, so npm-global clis
+        // (codex) stay invisible over ssh — the newest installed version is added directly
+        return 'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"; ' .
+            '. "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ' .
+            'nvm_bin=$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1); ' .
+            '[ -n "$nvm_bin" ] && export PATH="$PATH:$nvm_bin"; ';
     }
 
     protected function remoteShell(string $command): string
@@ -9715,6 +9722,66 @@ abstract class ai_harness extends ai_anthropic
             throw new \RuntimeException('harness: failed to create workspace ' . $dir);
         }
         return $dir;
+    }
+
+    // a single exec argument cannot exceed MAX_ARG_STRLEN (128 KiB on linux) and a remote
+    // run squeezes the whole invocation into one of them, so system prompts and mcp configs
+    // travel as files. never the workdir: that one belongs to the user's project
+    protected function payloadFile(string $name, string $content): string
+    {
+        $path =
+            rtrim(sys_get_temp_dir(), '/') .
+            '/aihelper-payload/' .
+            preg_replace('/[^a-zA-Z0-9_\-]/', '_', (string) $this->session_id) .
+            '/' .
+            $name;
+        // a name may carry a subdirectory, so the parent is what has to exist
+        $dir = dirname($path);
+        $cache_key = $path . ':' . md5($content);
+        if (isset($this->payload_files[$cache_key])) {
+            return $path;
+        }
+        // an mcp config carries bearer tokens, so nothing here may be world readable
+        if (!$this->isRemote()) {
+            if (!is_dir($dir) && !mkdir($dir, 0700, true) && !is_dir($dir)) {
+                throw new \RuntimeException('harness: failed to create payload directory ' . $dir);
+            }
+            if (file_put_contents($path, $content) === false) {
+                throw new \RuntimeException('harness: failed to write ' . $path);
+            }
+            chmod($path, 0600);
+            $this->payload_files[$cache_key] = true;
+            return $path;
+        }
+        $this->remoteCommand(
+            'umask 077 && mkdir -p ' . escapeshellarg($dir) . ' && cat > ' . escapeshellarg($path),
+            $content,
+            'transfer ' . $name
+        );
+        $this->payload_files[$cache_key] = true;
+        return $path;
+    }
+
+    protected function remoteCommand(string $command, string $stdin, string $description): void
+    {
+        $process = proc_open(
+            array_merge($this->sshCommand(), [$command]),
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes
+        );
+        if (!is_resource($process)) {
+            throw new \RuntimeException('harness: failed to ' . $description);
+        }
+        fwrite($pipes[0], $stdin);
+        fclose($pipes[0]);
+        fclose($pipes[1]);
+        $error = stream_get_contents($pipes[2]);
+        fclose($pipes[2]);
+        if (proc_close($process) !== 0) {
+            throw new \RuntimeException(
+                'harness: failed to ' . $description . ': ' . (trim((string) $error) ?: 'unknown SSH error')
+            );
+        }
     }
 
     protected function isRemote(): bool
@@ -10219,8 +10286,10 @@ class ai_claudecode extends ai_harness
      */
     protected function harnessEnvironmentOverrides(): array
     {
-        // without this claude code refuses to skip permissions as root
-        $overrides = ['IS_SANDBOX' => '1'];
+        // without this claude code refuses to skip permissions as root. tool search keeps
+        // large mcp sets out of the context: it looks schemas up on demand once they grow
+        // past 5% of the context window
+        $overrides = ['IS_SANDBOX' => '1', 'ENABLE_TOOL_SEARCH' => 'auto:5'];
         if ($this->url !== null && trim($this->url) !== '') {
             // claude code appends "/v1" itself, while gateway urls are usually
             // configured with it — keeping both would request "/v1/v1/messages"
@@ -10267,8 +10336,8 @@ class ai_claudecode extends ai_harness
         if ($this->system_prompt !== null) {
             // append, never replace: the default prompt carries the tool
             // instructions the cli needs to work at all
-            $args[] = '--append-system-prompt';
-            $args[] = $this->system_prompt;
+            $args[] = '--append-system-prompt-file';
+            $args[] = $this->payloadFile('system-prompt.md', $this->system_prompt);
         }
 
         $servers = [];
@@ -10281,7 +10350,10 @@ class ai_claudecode extends ai_harness
         }
         if ($servers !== []) {
             $args[] = '--mcp-config';
-            $args[] = json_encode(['mcpServers' => $servers], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $args[] = $this->payloadFile(
+                'mcp-config.json',
+                json_encode(['mcpServers' => $servers], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            );
             $args[] = '--strict-mcp-config';
         }
 
@@ -10425,14 +10497,19 @@ class ai_codex extends ai_harness
             $options[] = '-c';
             $options[] = 'model_reasoning_effort="' . $this->effort . '"';
         }
-        if ($this->isolate_harness_config === true) {
+        // with a system prompt the run gets its own CODEX_HOME (see the environment
+        // overrides), which already isolates the config and carries these keys — reading
+        // it must not be suppressed here
+        if ($this->isolate_harness_config === true && $this->system_prompt === null) {
             // drops config.toml and the AGENTS.md files found from the working
             // directory upwards; the one in CODEX_HOME is out of reach here
             $options[] = '--ignore-user-config';
             $options[] = '-c';
             $options[] = 'project_doc_max_bytes=0';
         }
-        if ($this->system_prompt !== null) {
+        // without an own CODEX_HOME the prompt travels as an argument again, which caps it
+        // at MAX_ARG_STRLEN — the only way left when the user's config must stay in play
+        if ($this->system_prompt !== null && $this->isolate_harness_config !== true) {
             $options[] = '-c';
             $options[] = 'instructions=' . json_encode($this->system_prompt, JSON_UNESCAPED_SLASHES);
         }
@@ -10457,7 +10534,44 @@ class ai_codex extends ai_harness
 
     protected function harnessEnvironmentOverrides(): array
     {
-        return $this->harnessMcpTokenEnvironment();
+        $overrides = $this->harnessMcpTokenEnvironment();
+        // codex knows no file variant for "instructions", and the prompt is far too large for
+        // an argument — so an isolated run gets its own CODEX_HOME whose config.toml carries
+        // it. the auth file stays a link into the real home, so refreshed tokens are shared.
+        // without isolation the user's own CODEX_HOME has to keep being read
+        if ($this->system_prompt === null || $this->isolate_harness_config !== true) {
+            return $overrides;
+        }
+        $home = dirname(
+            $this->payloadFile(
+                'codex/config.toml',
+                'instructions = ' .
+                    json_encode($this->system_prompt, JSON_UNESCAPED_SLASHES) .
+                    PHP_EOL .
+                    'project_doc_max_bytes = 0' .
+                    PHP_EOL
+            )
+        );
+        $link = $home . '/auth.json';
+        // the overrides are rebuilt several times per run, the link is placed once
+        if (!isset($this->payload_files[$link])) {
+            if ($this->isRemote()) {
+                $this->remoteCommand(
+                    'ln -sfn "$HOME/.codex/auth.json" ' . escapeshellarg($link),
+                    '',
+                    'link codex authentication'
+                );
+            } else {
+                $auth = (getenv('HOME') ?: '/root') . '/.codex/auth.json';
+                if (is_file($auth)) {
+                    @unlink($link);
+                    symlink($auth, $link);
+                }
+            }
+            $this->payload_files[$link] = true;
+        }
+        $overrides['CODEX_HOME'] = $home;
+        return $overrides;
     }
 
     protected function handleEvent(array $event, object $result, ?\Closure $emit): void
@@ -10928,9 +11042,11 @@ class ai_opencode extends ai_harness
         }
         if ($config !== []) {
             $config['$schema'] = 'https://opencode.ai/config.json';
-            $overrides['OPENCODE_CONFIG_CONTENT'] = json_encode(
-                $config,
-                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            // the config carries the whole system prompt, which is far too large for an
+            // environment value — it counts against the same limit as the arguments
+            $overrides['OPENCODE_CONFIG'] = $this->payloadFile(
+                'opencode.json',
+                json_encode($config, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
             );
         }
         return $overrides;
