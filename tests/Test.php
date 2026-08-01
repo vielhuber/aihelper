@@ -802,7 +802,56 @@ class Test extends \PHPUnit\Framework\TestCase
         ]);
         $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'buildArgs'))->invoke($codex);
 
-        $this->assertContains('mcp_servers.github.startup_timeout_sec=60', $args);
+        $this->assertContains('mcp_servers.github.startup_timeout_sec=180', $args);
+    }
+
+    function test__harness_logs_redact_mcp_tokens(): void
+    {
+        $log = tempnam(sys_get_temp_dir(), 'aihelper-log-');
+        $this->assertIsString($log);
+        $codex = aihelper::create(provider: 'codex', log: $log);
+        (new \ReflectionProperty(aihelper::class, 'mcp_servers'))->setValue($codex, [
+            [
+                'id' => 'github',
+                'url' => 'https://example.test/api/github/mcp/',
+                'authorization_token' => 'mcp-secret-value'
+            ]
+        ]);
+
+        $codex->log("AIHELPER_MCP_TOKEN_GITHUB='mcp-secret-value'", 'test');
+        $contents = (string) file_get_contents($log);
+
+        $this->assertStringNotContainsString('mcp-secret-value', $contents);
+        $this->assertStringContainsString('AIHELPER_MCP_TOKEN_GITHUB=***', $contents);
+        unlink($log);
+    }
+
+    function test__harnesses_allow_slow_remote_mcp_initialization(): void
+    {
+        foreach (['claudecode', 'opencode'] as $provider) {
+            $harness = aihelper::create(provider: $provider);
+            (new \ReflectionProperty(aihelper::class, 'mcp_servers'))->setValue($harness, [
+                [
+                    'id' => 'spotify',
+                    'url' => 'https://example.test/api/spotify/mcp/',
+                    'authorization_token' => 'secret'
+                ]
+            ]);
+            $environment = (new \ReflectionMethod($harness, 'harnessEnvironmentOverrides'))->invoke($harness);
+            if ($provider === 'claudecode') {
+                $this->assertSame('300000', $environment['MCP_TIMEOUT']);
+            }
+            $args = (new \ReflectionMethod($harness, 'buildArgs'))->invoke($harness);
+            $configPath = $provider === 'claudecode'
+                ? $args[array_search('--mcp-config', $args, true) + 1]
+                : $environment['OPENCODE_CONFIG'];
+            $config = json_decode((string) file_get_contents($configPath), true, 512, JSON_THROW_ON_ERROR);
+            $server = $provider === 'claudecode'
+                ? $config['mcpServers']['spotify']
+                : $config['mcp']['spotify'];
+
+            $this->assertSame(300000, $server['timeout']);
+        }
     }
 
     function test__opencode_exposes_only_its_harness_models(): void

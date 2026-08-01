@@ -2751,9 +2751,10 @@ abstract class aihelper
     ): array {
         if (
             $n > 1 &&
-            $this->name === 'google' &&
-            str_starts_with((string) $this->model, 'gemini-') &&
-            str_contains((string) $this->model, '-image')
+            (($this->name === 'google' &&
+                str_starts_with((string) $this->model, 'gemini-') &&
+                str_contains((string) $this->model, '-image')) ||
+                ($this->name === 'cliproxyapi' && str_starts_with((string) $this->model, 'gpt-image')))
         ) {
             $responses = [];
             $costs = 0.0;
@@ -5857,6 +5858,46 @@ abstract class aihelper
     public function log(mixed $msg, ?string $prefix = null): void
     {
         if ($this->log !== null) {
+            $sensitiveValues = [];
+            foreach ($this->mcp_servers ?? [] as $mcpServer) {
+                $authorizationToken = $mcpServer['authorization_token'] ?? null;
+                if (is_string($authorizationToken) && $authorizationToken !== '') {
+                    $sensitiveValues[] = $authorizationToken;
+                }
+            }
+            $redact = function (mixed $value) use (&$redact, $sensitiveValues): mixed {
+                if (is_object($value)) {
+                    $value = (array) $value;
+                }
+                if (is_array($value)) {
+                    foreach ($value as $key => $item) {
+                        if (
+                            is_string($key) &&
+                            preg_match(
+                                '/^(?:authorization|authorization_token|access_token|refresh_token|id_token|client_secret|token|secret|password|passwd|passphrase|api[_-]?key|private[_-]?key|access[_-]?key|cookie)$/i',
+                                $key
+                            ) === 1
+                        ) {
+                            $value[$key] = '***';
+                            continue;
+                        }
+                        $value[$key] = $redact($item);
+                    }
+                    return $value;
+                }
+                if (!is_string($value)) {
+                    return $value;
+                }
+                if ($sensitiveValues !== []) {
+                    $value = str_replace($sensitiveValues, '***', $value);
+                }
+                return preg_replace(
+                    '/(?i)(\bAIHELPER_MCP_TOKEN_[A-Z0-9_]+\s*=\s*)(?:"(?:\\.|[^"])*"|\'(?:\\.|[^\'])*\'|[^\s,;]+)/',
+                    '$1***',
+                    $value
+                ) ?? $value;
+            };
+            $msg = $redact($msg);
             if (!is_string($msg)) {
                 $msg = json_encode($msg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             }
@@ -10164,6 +10205,36 @@ abstract class ai_harness extends ai_anthropic
         $errors = '';
         $exit_code = null;
         $drain_until = null;
+        $sensitiveValues = array_values($this->harnessMcpTokenEnvironment());
+        $redact = function (mixed $value) use (&$redact, $sensitiveValues): mixed {
+            if (is_array($value)) {
+                foreach ($value as $key => $item) {
+                    if (
+                        is_string($key) &&
+                        preg_match(
+                            '/^(?:authorization|authorization_token|access_token|refresh_token|id_token|client_secret|token|secret|password|passwd|passphrase|api[_-]?key|private[_-]?key|access[_-]?key|cookie)$/i',
+                            $key
+                        ) === 1
+                    ) {
+                        $value[$key] = '***';
+                        continue;
+                    }
+                    $value[$key] = $redact($item);
+                }
+                return $value;
+            }
+            if (!is_string($value)) {
+                return $value;
+            }
+            if ($sensitiveValues !== []) {
+                $value = str_replace($sensitiveValues, '***', $value);
+            }
+            return preg_replace(
+                '/(?i)(\bAIHELPER_MCP_TOKEN_[A-Z0-9_]+\s*=\s*)(?:"(?:\\.|[^"])*"|\'(?:\\.|[^\'])*\'|[^\s,;]+)/',
+                '$1***',
+                $value
+            ) ?? $value;
+        };
         while (true) {
             $read = [];
             if (!feof($pipes[1])) {
@@ -10200,6 +10271,7 @@ abstract class ai_harness extends ai_anthropic
                     if (!is_array($event)) {
                         continue;
                     }
+                    $event = $redact($event);
                     $this->handleEvent($event, $result, $emit);
                 }
             }
@@ -10367,7 +10439,7 @@ class ai_claudecode extends ai_harness
         // without this claude code refuses to skip permissions as root. tool search keeps
         // large mcp sets out of the context: it looks schemas up on demand once they grow
         // past 5% of the context window
-        $overrides = ['IS_SANDBOX' => '1', 'ENABLE_TOOL_SEARCH' => 'auto:5'];
+        $overrides = ['IS_SANDBOX' => '1', 'ENABLE_TOOL_SEARCH' => 'auto:5', 'MCP_TIMEOUT' => '300000'];
         if ($this->url !== null && trim($this->url) !== '') {
             // claude code appends "/v1" itself, while gateway urls are usually
             // configured with it — keeping both would request "/v1/v1/messages"
@@ -10438,7 +10510,7 @@ class ai_claudecode extends ai_harness
 
         $servers = [];
         foreach ($this->harnessMcpServers() as $name => $server) {
-            $entry = ['type' => 'http', 'url' => $server['url']];
+            $entry = ['type' => 'http', 'url' => $server['url'], 'timeout' => 300000];
             if ($server['token'] !== null && trim((string) $server['token']) !== '') {
                 $entry['headers'] = ['Authorization' => 'Bearer ' . $server['token']];
             }
@@ -10639,7 +10711,7 @@ class ai_codex extends ai_harness
             // toml has no "\/" escape, so the slashes must survive unescaped
             $options[] = $key . '.url=' . json_encode($server['url'], JSON_UNESCAPED_SLASHES);
             $options[] = '-c';
-            $options[] = $key . '.startup_timeout_sec=60';
+            $options[] = $key . '.startup_timeout_sec=180';
             if ($server['token'] === null || trim((string) $server['token']) === '') {
                 continue;
             }
@@ -11262,7 +11334,7 @@ class ai_opencode extends ai_harness
 
         $config = [];
         foreach ($this->harnessMcpServers() as $name => $server) {
-            $entry = ['type' => 'remote', 'url' => $server['url'], 'enabled' => true];
+            $entry = ['type' => 'remote', 'url' => $server['url'], 'enabled' => true, 'timeout' => 300000];
             if ($server['token'] !== null && trim((string) $server['token']) !== '') {
                 // opencode interpolates "{env:VAR}" itself, so the token stays
                 // out of the config string that is passed on the command line
