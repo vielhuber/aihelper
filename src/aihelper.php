@@ -10705,6 +10705,10 @@ class ai_codex extends ai_harness
             $options[] = '--image';
             $options[] = $path;
         }
+        if (array_key_exists('imagegen', $this->harnessMcpServers())) {
+            $options[] = '-c';
+            $options[] = 'features.image_generation=false';
+        }
         foreach ($this->harnessMcpServers() as $name => $server) {
             $key = 'mcp_servers.' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $name);
             $options[] = '-c';
