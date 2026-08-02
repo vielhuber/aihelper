@@ -2547,6 +2547,7 @@ abstract class aihelper
                     str_contains($retryResponse, 'overloaded') ||
                     str_contains($retryResponse, 'upstream connect error') ||
                     str_contains($retryResponse, 'connection termination') ||
+                    str_contains($retryResponse, 'http/request failed: error sending request') ||
                     str_contains($retryResponse, '(http 0)');
             }
             if ($availability_retry) {
@@ -2611,6 +2612,7 @@ abstract class aihelper
                 'request timed out',
                 'i/o timeout',
                 'connection timeout',
+                'http/request failed: error sending request',
                 'network is unreachable',
                 'connection refused',
                 'no response from provider',
@@ -2756,9 +2758,9 @@ abstract class aihelper
                 str_contains((string) $this->model, '-image')) ||
                 ($this->name === 'cliproxyapi' && str_starts_with((string) $this->model, 'gpt-image')))
         ) {
-            $responses = [];
-            $costs = 0.0;
+            $results = [];
             $outputInfo = $output_file !== null ? pathinfo($output_file) : null;
+            $processes = [];
             for ($imageIndex = 1; $imageIndex <= $n; $imageIndex++) {
                 $currentOutputFile = null;
                 if ($outputInfo !== null) {
@@ -2768,18 +2770,75 @@ abstract class aihelper
                     $currentOutputFile =
                         $outputDirectory . '/' . $outputBase . '-' . $imageIndex . $outputExtension;
                 }
-                $result = $this->imageThis(
-                    prompt: $prompt,
+                $currentPrompt =
+                    $prompt .
+                    "\n\nGenerate variant " .
+                    $imageIndex .
+                    ' of ' .
+                    $n .
+                    '. Use a materially different composition while preserving the requested subject and style.';
+                if (function_exists('pcntl_fork') && function_exists('pcntl_waitpid')) {
+                    $resultFile = tempnam(sys_get_temp_dir(), 'aihelper-image-');
+                    if ($resultFile === false) {
+                        return ['response' => 'Could not create image result file.', 'success' => false, 'costs' => 0.0];
+                    }
+                    $processId = pcntl_fork();
+                    if ($processId === -1) {
+                        unlink($resultFile);
+                        foreach ($processes as $process) {
+                            pcntl_waitpid($process['process_id'], $status);
+                            unlink($process['result_file']);
+                        }
+                        return ['response' => 'Could not start parallel image generation.', 'success' => false, 'costs' => 0.0];
+                    }
+                    if ($processId === 0) {
+                        try {
+                            $result = $this->imageThis(
+                                prompt: $currentPrompt,
+                                n: 1,
+                                aspect_ratio: $aspect_ratio,
+                                input_file: $input_file,
+                                output_file: $currentOutputFile
+                            );
+                        } catch (\Throwable $exception) {
+                            $result = ['response' => $exception->getMessage(), 'success' => false, 'costs' => 0.0];
+                        }
+                        file_put_contents($resultFile, serialize($result), LOCK_EX);
+                        exit(0);
+                    }
+                    $processes[$imageIndex] = [
+                        'process_id' => $processId,
+                        'result_file' => $resultFile
+                    ];
+                    continue;
+                }
+                $results[$imageIndex] = $this->imageThis(
+                    prompt: $currentPrompt,
                     n: 1,
                     aspect_ratio: $aspect_ratio,
                     input_file: $input_file,
                     output_file: $currentOutputFile
                 );
+            }
+            $status = 0;
+            foreach ($processes as $imageIndex => $process) {
+                pcntl_waitpid($process['process_id'], $status);
+                $serializedResult = file_get_contents($process['result_file']);
+                unlink($process['result_file']);
+                $result = is_string($serializedResult) ? unserialize($serializedResult, ['allowed_classes' => false]) : false;
+                $results[$imageIndex] = is_array($result)
+                    ? $result
+                    : ['response' => 'Parallel image generation returned no result.', 'success' => false, 'costs' => 0.0];
+            }
+            ksort($results);
+            $responses = [];
+            $costs = 0.0;
+            foreach ($results as $result) {
+                $costs += (float) ($result['costs'] ?? 0.0);
                 if (($result['success'] ?? false) !== true) {
-                    return $result;
+                    return ['response' => $result['response'] ?? null, 'success' => false, 'costs' => $costs];
                 }
                 $responses[] = $result['response'];
-                $costs += (float) ($result['costs'] ?? 0.0);
             }
             return ['response' => $responses, 'success' => true, 'costs' => $costs];
         }
@@ -10003,7 +10062,8 @@ abstract class ai_harness extends ai_anthropic
             $name = $servers__value['id'] ?? ($servers__value['name'] ?? 'mcp-server-' . ($servers__key + 1));
             $servers[$name] = [
                 'url' => rtrim($servers__value['url'], '/') . '/',
-                'token' => $servers__value['authorization_token'] ?? null
+                'token' => $servers__value['authorization_token'] ?? null,
+                'required' => ($servers__value['required'] ?? false) === true
             ];
         }
         return $servers;
@@ -10200,7 +10260,7 @@ abstract class ai_harness extends ai_anthropic
             ]
         ];
 
-        $deadline = time() + (int) $this->timeout;
+        $last_activity_at = time();
         $buffer = '';
         $errors = '';
         $exit_code = null;
@@ -10256,6 +10316,7 @@ abstract class ai_harness extends ai_anthropic
                 if ($chunk === false || $chunk === '') {
                     continue;
                 }
+                $last_activity_at = time();
                 if ($stream === $pipes[2]) {
                     $errors .= $chunk;
                     continue;
@@ -10286,9 +10347,9 @@ abstract class ai_harness extends ai_anthropic
             } elseif (microtime(true) >= $drain_until) {
                 break;
             }
-            if (time() >= $deadline) {
+            if (time() - $last_activity_at >= (int) $this->timeout) {
                 $this->terminateProcess($process, $pid);
-                throw new \RuntimeException('harness: timeout after ' . $this->timeout . ' seconds.');
+                throw new \RuntimeException('harness: inactivity timeout after ' . $this->timeout . ' seconds.');
             }
         }
 
@@ -10716,6 +10777,10 @@ class ai_codex extends ai_harness
             $options[] = $key . '.url=' . json_encode($server['url'], JSON_UNESCAPED_SLASHES);
             $options[] = '-c';
             $options[] = $key . '.startup_timeout_sec=180';
+            if ($server['required'] === true) {
+                $options[] = '-c';
+                $options[] = $key . '.required=true';
+            }
             if ($server['token'] === null || trim((string) $server['token']) === '') {
                 continue;
             }
