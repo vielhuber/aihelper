@@ -1371,7 +1371,7 @@ class Test extends \PHPUnit\Framework\TestCase
         // earlier result that already has an assistant response.
         $tail_marker_user = 'TAIL_USER_MARKER_' . mt_rand(1000, 9999);
         $tail_marker_asst = 'TAIL_ASSISTANT_MARKER_' . mt_rand(1000, 9999);
-        $processed_tool_payload = str_repeat('processed payload ', 5000);
+        $processed_tool_payload = 'PROCESSED_START|' . str_repeat('processed payload ', 5000) . '|PROCESSED_END';
         $pending_tool_payload = str_repeat('pending payload ', 5000);
         $history[] = ['role' => 'user', 'content' => $tail_marker_user . ' frage 1'];
         $history[] = [
@@ -1421,7 +1421,9 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertStringContainsString($tail_marker_user, $tail_after[0]['content']);
         $this->assertSame('processed', $tail_after[1]['tool_calls'][0]['id']);
         $this->assertStringContainsString('während Kontext-Kompression entfernt', $tail_after[2]['content']);
-        $this->assertStringNotContainsString('processed payload', $tail_after[2]['content']);
+        $this->assertStringContainsString('PROCESSED_START', $tail_after[2]['content']);
+        $this->assertStringContainsString('PROCESSED_END', $tail_after[2]['content']);
+        $this->assertLessThan(12000, mb_strlen($tail_after[2]['content']));
         $this->assertStringContainsString($tail_marker_asst, $tail_after[3]['content']);
         $this->assertSame('pending', $tail_after[4]['tool_calls'][0]['id']);
         $this->assertSame($pending_tool_payload, $tail_after[5]['content']);
@@ -1455,7 +1457,65 @@ class Test extends \PHPUnit\Framework\TestCase
         $ai3->autoCompactSession();
         $this->assertSame($message_count_before, count($ai3->getSessionContent()));
 
+        $parallel_session_id = 'auto-compact-parallel-test-' . mt_rand(100000, 999999);
+        $parallel_cache_file =
+            sys_get_temp_dir() .
+            '/aihelper-cache/' .
+            preg_replace('/[^a-zA-Z0-9_\-]/', '_', $parallel_session_id) .
+            '.txt';
+        if (is_file($parallel_cache_file)) {
+            unlink($parallel_cache_file);
+        }
+        $parallel_history = [];
+        for ($i = 0; $i < 9; $i++) {
+            $parallel_history[] = ['role' => 'user', 'content' => '# SKILL ' . $i . "\n\n" . $bloat];
+        }
+        $parallel_history[] = [
+            'role' => 'assistant',
+            'content' => null,
+            'tool_calls' => [
+                ['id' => 'parallel-1', 'function' => ['name' => 'read', 'arguments' => '{}']],
+                ['id' => 'parallel-2', 'function' => ['name' => 'read', 'arguments' => '{}']],
+                ['id' => 'parallel-3', 'function' => ['name' => 'read', 'arguments' => '{}']],
+                ['id' => 'parallel-4', 'function' => ['name' => 'read', 'arguments' => '{}']]
+            ]
+        ];
+        for ($i = 1; $i <= 4; $i++) {
+            $parallel_history[] = [
+                'role' => 'tool',
+                'tool_call_id' => 'parallel-' . $i,
+                'content' => str_repeat('parallel payload ', 5000)
+            ];
+        }
+        for ($i = 0; $i < 6; $i++) {
+            $parallel_history[] = ['role' => 'assistant', 'content' => 'Tail ' . $i . ': ' . $bloat];
+        }
+        $parallel_ai = aihelper::create(
+            provider: 'test',
+            log: 'tests/aihelper.log',
+            session_id: $parallel_session_id,
+            history: $parallel_history,
+            auto_compact: true
+        );
+        $this->assertNotNull($parallel_ai);
+        $parallel_ai->autoCompactSession();
+        $parallel_session_after = $parallel_ai->getSessionContent();
+        $parallel_assistant_index = null;
+        foreach ($parallel_session_after as $message_index => $message) {
+            if (($message['tool_calls'][0]['id'] ?? null) === 'parallel-1') {
+                $parallel_assistant_index = $message_index;
+                break;
+            }
+        }
+        $this->assertNotNull($parallel_assistant_index);
+        for ($i = 1; $i <= 4; $i++) {
+            $parallel_tool_message = $parallel_session_after[$parallel_assistant_index + $i] ?? [];
+            $this->assertSame('tool', $parallel_tool_message['role'] ?? null);
+            $this->assertSame('parallel-' . $i, $parallel_tool_message['tool_call_id'] ?? null);
+        }
+
         @unlink($cache_file);
+        @unlink($parallel_cache_file);
     }
 
     function test__artificial_analysis_model_enrichment(): void

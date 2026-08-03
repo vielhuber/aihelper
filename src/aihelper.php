@@ -3462,7 +3462,7 @@ abstract class aihelper
                 mb_strlen($node['content']) > 60000
             ) {
                 $count++;
-                $node['content'] = $stub_text . ' (' . mb_strlen($node['content']) . ' Zeichen)';
+                $node['content'] = self::compactOversizedContextText($node['content'], $stub_text);
             }
             if (
                 ($node['type'] ?? null) === 'tool_result' &&
@@ -3471,7 +3471,7 @@ abstract class aihelper
                 mb_strlen($node['content']) > 60000
             ) {
                 $count++;
-                $node['content'] = $stub_text . ' (' . mb_strlen($node['content']) . ' Zeichen)';
+                $node['content'] = self::compactOversizedContextText($node['content'], $stub_text);
             }
             if (
                 ($node['type'] ?? null) === 'function_call_output' &&
@@ -3480,7 +3480,7 @@ abstract class aihelper
                 mb_strlen($node['output']) > 60000
             ) {
                 $count++;
-                $node['output'] = $stub_text . ' (' . mb_strlen($node['output']) . ' Zeichen)';
+                $node['output'] = self::compactOversizedContextText($node['output'], $stub_text);
             }
             if (
                 isset($node['functionResponse']['response']['result']) &&
@@ -3488,8 +3488,10 @@ abstract class aihelper
                 mb_strlen($node['functionResponse']['response']['result']) > 60000
             ) {
                 $count++;
-                $node['functionResponse']['response']['result'] =
-                    $stub_text . ' (' . mb_strlen($node['functionResponse']['response']['result']) . ' Zeichen)';
+                $node['functionResponse']['response']['result'] = self::compactOversizedContextText(
+                    $node['functionResponse']['response']['result'],
+                    $stub_text
+                );
             }
             $out = [];
             foreach ($node as $k => $v) {
@@ -3523,6 +3525,20 @@ abstract class aihelper
             return $stub_text;
         }
         return $node;
+    }
+
+    /**
+     * Keep bounded evidence from a processed result while removing most of its payload.
+     */
+    private static function compactOversizedContextText(string $value, string $stubText): string
+    {
+        return $stubText .
+            ' (' .
+            mb_strlen($value) .
+            " Zeichen)\n\n[Anfang des entfernten Inhalts]\n" .
+            mb_substr($value, 0, 6000) .
+            "\n\n[Ende des entfernten Inhalts]\n" .
+            mb_substr($value, -2000);
     }
 
     public function autoCompactSession(): void
@@ -3732,6 +3748,37 @@ abstract class aihelper
             // ok — assistant text after a tool result is a legal end-of-turn.
             // we only correct the tool-as-first case above.
             break;
+        }
+
+        for ($message_index = 0; $message_index < count($session); $message_index++) {
+            $message = is_array($session[$message_index] ?? null)
+                ? $session[$message_index]
+                : (array) ($session[$message_index] ?? []);
+            if (($message['role'] ?? null) !== 'assistant' || empty($message['tool_calls'])) {
+                continue;
+            }
+            $batch_end = $message_index + 1;
+            while ($batch_end < count($session)) {
+                $batch_message = is_array($session[$batch_end] ?? null)
+                    ? $session[$batch_end]
+                    : (array) ($session[$batch_end] ?? []);
+                if (($batch_message['role'] ?? null) !== 'tool') {
+                    break;
+                }
+                $batch_end++;
+            }
+            $head_splits_batch = $message_index < $head_end && $head_end < $batch_end;
+            $tail_splits_batch = $message_index < $tail_start && $tail_start < $batch_end;
+            if (!$head_splits_batch && !$tail_splits_batch) {
+                continue;
+            }
+            $head_end = min($head_end, $message_index);
+            $tail_start = min($tail_start, $message_index);
+        }
+
+        if ($tail_start <= $head_end) {
+            $this->log('⚠️ auto_compact: no safe boundary outside an active tool batch');
+            return;
         }
 
         $head = array_slice($session, 0, $head_end);
