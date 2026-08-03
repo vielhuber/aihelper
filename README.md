@@ -168,21 +168,25 @@ $ai = aihelper::create(
             "---\nname: jira\ndescription: read jira issues via jql. use for tickets, sprints, backlogs.\n---\n\n..."
     ]
 );
-
-$ai->getCliUsageLimits() // get cli usage limits for claude code, codex, opencode and antigravity
+// get cli usage limits for claude code, codex, opencode and antigravity
+// to get exact opencode go usage limits, sign in at `https://opencode.ai`, set value of cookie "auth" in .env for
+$ai->getCliUsageLimits()
 // [
 //     ['type' => '5-hour', 'scope' => null, 'percent used' => 20, 'resets_at' => '2026-06-29T17:59:00+02:00'],
 //     ['type' => 'weekly', 'scope' => null, 'percent used' => 10, 'resets_at' => '2026-07-06T03:03:00+02:00'],
 //     ['type' => 'weekly', 'scope' => 'Fable', 'percent used' => 93, 'resets_at' => '2026-07-06T03:03:00+02:00']
 // ]
 
-$ai->getCliUsageResetCredits() // get manually redeemable codex reset credits
+// get manually redeemable codex reset credits
+$ai->getCliUsageResetCredits()
 // ['available_count' => 1, 'credits' => [['title' => 'Full reset', 'expires_at' => '...']]]
 
-$ai->triggerCliUsageReset() // redeem the next available codex reset credit
+// redeem the next available codex reset credit
+$ai->triggerCliUsageReset()
 // ['success' => true, 'status' => 'reset', 'windows_reset' => 2]
 
-aihelper::getCliApiRequests( // get all requests from a local clis
+// get all requests from a local clis
+aihelper::getCliApiRequests(
     limit: 100, // null: all
     date_from: '2026-07-01 00:00:00', // null: all
     date_until: '2026-07-31 23:59:59', // null: all
@@ -190,7 +194,8 @@ aihelper::getCliApiRequests( // get all requests from a local clis
     group_by: false // true = collapse per project
 );
 
-aihelper::purgeCliApiRequestLogs( // delete request logs only
+// delete request logs only
+aihelper::purgeCliApiRequestLogs(
     date_from: null, // null: all
     date_until: null // null: all
 );

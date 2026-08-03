@@ -11338,16 +11338,14 @@ class ai_opencode extends ai_harness
             unset($limit);
         }
 
-        $exhausted = $this->fetchExhaustedLimit();
+        $serverLimits = $this->fetchOpenCodeServerLimits();
         foreach ($limits as &$limit) {
             unset($limit['from']);
             $limit['used_usd'] = round($limit['used_usd'], 8);
             $limit['percent used'] = round(min(100, $limit['used_usd'] / $limit['limit_usd'] * 100), 2);
-            // the gateway is the only authority here, and it only speaks up once a window is
-            // spent — until then the local estimate above is all there is
-            if ($exhausted !== null && $exhausted['type'] === $limit['type']) {
-                $limit['percent used'] = 100.0;
-                $limit['resets_at'] = $exhausted['resets_at'];
+            if (isset($serverLimits[$limit['type']])) {
+                $limit['percent used'] = $serverLimits[$limit['type']]['percent used'];
+                $limit['resets_at'] = $serverLimits[$limit['type']]['resets_at'];
                 $limit['estimated'] = false;
             }
             sort($limit['models']);
@@ -11357,24 +11355,89 @@ class ai_opencode extends ai_harness
     }
 
     /**
-     * Ask the gateway whether a usage window is spent.
+     * Read exact dashboard limits when configured, otherwise ask the gateway whether a window is spent.
      *
      * There is no usage endpoint — the reset time exists only in the "Retry-After" header of the
      * 429 the completions endpoint answers with. The limit is checked before the payload is
      * validated, so an intentionally invalid zero-token request is enough to trigger it and nothing is ever generated.
      *
-     * @return array|null
+     * @return array<string,array{percent used:float,resets_at:string}>
      */
-    private function fetchExhaustedLimit(): ?array
+    private function fetchOpenCodeServerLimits(): array
     {
+        $authCookie = trim((string) getenv('OPENCODE_GO_AUTH_COOKIE'));
+        $cacheIdentity = $authCookie !== ''
+            ? substr(hash('sha256', $authCookie), 0, 16)
+            : 'local';
         $cache_file =
             rtrim(sys_get_temp_dir(), '/') .
             '/aihelper-opencode-limit-' .
             (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) .
+            '-' .
+            $cacheIdentity .
             '.json';
         $cached = is_file($cache_file) ? json_decode((string) file_get_contents($cache_file), true) : null;
         if (is_array($cached) && ($cached['checked_at'] ?? 0) > time() - 60) {
-            return $cached['limit'] ?? null;
+            if (is_array($cached['limits'] ?? null)) {
+                return $cached['limits'];
+            }
+            $legacyLimit = is_array($cached['limit'] ?? null) ? $cached['limit'] : null;
+            return $legacyLimit === null
+                ? []
+                : [
+                    $legacyLimit['type'] => [
+                        'percent used' => 100.0,
+                        'resets_at' => $legacyLimit['resets_at']
+                    ]
+                ];
+        }
+
+        if ($authCookie !== '') {
+            $curl = curl_init('https://opencode.ai/go');
+            curl_setopt_array($curl, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_TIMEOUT => 20,
+                CURLOPT_HTTPHEADER => [
+                    'Accept: text/html',
+                    'Cookie: auth=' . $authCookie,
+                    'User-Agent: Mozilla/5.0'
+                ]
+            ]);
+            $workspaceHtml = curl_exec($curl);
+            $workspaceStatus = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
+            preg_match_all('/\bwrk_[A-Z0-9]+\b/i', is_string($workspaceHtml) ? $workspaceHtml : '', $workspaceMatches);
+            $workspaceIds = array_values(array_unique($workspaceMatches[0] ?? []));
+            $workspaceId = $workspaceStatus === 200 && count($workspaceIds) === 1 ? $workspaceIds[0] : null;
+        }
+        if (isset($workspaceId)) {
+            $curl = curl_init(
+                'https://opencode.ai/workspace/' . rawurlencode($workspaceId) . '/go'
+            );
+            curl_setopt_array($curl, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_TIMEOUT => 20,
+                CURLOPT_HTTPHEADER => [
+                    'Accept: text/html',
+                    'Cookie: auth=' . $authCookie,
+                    'User-Agent: Mozilla/5.0'
+                ]
+            ]);
+            $html = curl_exec($curl);
+            $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
+            if ($status === 200 && is_string($html)) {
+                $dashboardLimits = self::parseOpenCodeDashboardLimits($html);
+                if ($dashboardLimits !== []) {
+                    file_put_contents(
+                        $cache_file,
+                        json_encode(['checked_at' => time(), 'limits' => $dashboardLimits]),
+                        LOCK_EX
+                    );
+                    chmod($cache_file, 0600);
+                    return $dashboardLimits;
+                }
+            }
         }
 
         $key = null;
@@ -11386,7 +11449,7 @@ class ai_opencode extends ai_harness
             }
         }
         if (!is_string($key) || trim($key) === '') {
-            return null;
+            return [];
         }
 
         $curl = curl_init('https://opencode.ai/zen/go/v1/chat/completions');
@@ -11408,14 +11471,14 @@ class ai_opencode extends ai_harness
         $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
         $header_size = (int) curl_getinfo($curl, CURLINFO_HEADER_SIZE);
 
-        $limit = null;
+        $limits = [];
         if ($status === 429 && is_string($raw)) {
             $body = json_decode(substr($raw, $header_size), true);
             $type = trim((string) ($body['metadata']['limitName'] ?? ''));
             preg_match('/^retry-after:\s*(\d+)/mi', substr($raw, 0, $header_size), $match);
             if ($type !== '' && isset($match[1])) {
-                $limit = [
-                    'type' => $type,
+                $limits[$type] = [
+                    'percent used' => 100.0,
                     'resets_at' => date('c', time() + (int) $match[1])
                 ];
             }
@@ -11424,12 +11487,36 @@ class ai_opencode extends ai_harness
         if ($status !== 0) {
             @file_put_contents(
                 $cache_file,
-                json_encode(['checked_at' => time(), 'limit' => $limit]),
+                json_encode(['checked_at' => time(), 'limits' => $limits]),
                 LOCK_EX
             );
             @chmod($cache_file, 0600);
         }
-        return $limit;
+        return $limits;
+    }
+
+    /**
+     * @return array<string,array{percent used:float,resets_at:string}>
+     */
+    private static function parseOpenCodeDashboardLimits(string $html): array
+    {
+        $limits = [];
+        foreach (['rolling' => '5-hour', 'weekly' => 'weekly', 'monthly' => 'monthly'] as $source => $type) {
+            if (preg_match('/' . $source . 'Usage:\$R\[\d+\]=\{([^}]+)\}/', $html, $usageMatch) !== 1) {
+                continue;
+            }
+            if (
+                preg_match('/usagePercent:(-?\d+(?:\.\d+)?)/', $usageMatch[1], $percentMatch) !== 1 ||
+                preg_match('/resetInSec:(-?\d+(?:\.\d+)?)/', $usageMatch[1], $resetMatch) !== 1
+            ) {
+                continue;
+            }
+            $limits[$type] = [
+                'percent used' => max(0.0, min(100.0, (float) $percentMatch[1])),
+                'resets_at' => date('c', time() + max(0, (int) round((float) $resetMatch[1])))
+            ];
+        }
+        return $limits;
     }
 
     protected function harnessEnvironmentOverrides(): array

@@ -1143,6 +1143,24 @@ class Test extends \PHPUnit\Framework\TestCase
         rmdir($dataHome);
     }
 
+    function test__opencode_usage_parses_dashboard_limits(): void
+    {
+        $method = new \ReflectionMethod(aihelper::create(provider: 'opencode'), 'parseOpenCodeDashboardLimits');
+        $limits = $method->invoke(
+            null,
+            'rollingUsage:$R[1]={resetInSec:17940,usagePercent:0}' .
+                ' weeklyUsage:$R[2]={usagePercent:5,resetInSec:583200}' .
+                ' monthlyUsage:$R[3]={usagePercent:52,resetInSec:2250000}'
+        );
+
+        $this->assertSame(0.0, $limits['5-hour']['percent used']);
+        $this->assertSame(5.0, $limits['weekly']['percent used']);
+        $this->assertSame(52.0, $limits['monthly']['percent used']);
+        $this->assertMatchesRegularExpression('/T/', $limits['5-hour']['resets_at']);
+        $this->assertMatchesRegularExpression('/T/', $limits['weekly']['resets_at']);
+        $this->assertMatchesRegularExpression('/T/', $limits['monthly']['resets_at']);
+    }
+
     function test__ai_all(): void
     {
         $stats = [];
