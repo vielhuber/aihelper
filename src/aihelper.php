@@ -11361,7 +11361,7 @@ class ai_opencode extends ai_harness
      *
      * There is no usage endpoint — the reset time exists only in the "Retry-After" header of the
      * 429 the completions endpoint answers with. The limit is checked before the payload is
-     * validated, so an empty message list is enough to trigger it and nothing is ever generated.
+     * validated, so an intentionally invalid zero-token request is enough to trigger it and nothing is ever generated.
      *
      * @return array|null
      */
@@ -11400,7 +11400,8 @@ class ai_opencode extends ai_harness
             // the models carry an "opencode-go/" prefix internally, the gateway rejects it
             CURLOPT_POSTFIELDS => json_encode([
                 'model' => basename($this->model ?? '') ?: 'glm-5.2',
-                'messages' => []
+                'messages' => [['role' => 'user', 'content' => '']],
+                'max_tokens' => 0
             ])
         ]);
         $raw = curl_exec($curl);
