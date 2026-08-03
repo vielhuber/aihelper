@@ -169,7 +169,8 @@ $ai = aihelper::create(
     ]
 );
 // get cli usage limits for claude code, codex, opencode and antigravity
-// to get exact opencode go usage limits, sign in at `https://opencode.ai`, set value of cookie "auth" in .env for
+// to get exact opencode go usage limits, sign in at `https://opencode.ai`,
+// set OPENCODE_GO_AUTH_COOKIE in .env to the value of cookie "auth"
 $ai->getCliUsageLimits()
 // [
 //     ['type' => '5-hour', 'scope' => null, 'percent used' => 20, 'resets_at' => '2026-06-29T17:59:00+02:00'],
