@@ -11265,11 +11265,6 @@ class ai_opencode extends ai_harness
 
     public function getCliUsageLimits(): ?array
     {
-        $database = self::getOpenCodeDatabasePath();
-        if ($database === null) {
-            return null;
-        }
-
         $now = time();
         $limits = [
             '5-hour' => ['from' => $now - 5 * 60 * 60, 'limit_usd' => 12.0],
@@ -11277,18 +11272,8 @@ class ai_opencode extends ai_harness
             'weekly' => ['from' => $now - 7 * 24 * 60 * 60, 'limit_usd' => 20.0],
             'monthly' => ['from' => $now - 30 * 24 * 60 * 60, 'limit_usd' => 60.0]
         ];
-        try {
-            $connection = new \PDO('sqlite:' . $database, options: [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
-            $statement = $connection->prepare(
-                "SELECT time_created, data FROM message
-                 WHERE json_extract(data, '$.role') = 'assistant'
-                   AND json_extract(data, '$.providerID') = 'opencode-go'
-                   AND time_created >= :from
-                 ORDER BY time_created ASC"
-            );
-            $statement->execute(['from' => $limits['monthly']['from'] * 1000]);
-            $messages = $statement->fetchAll(\PDO::FETCH_ASSOC);
-        } catch (\PDOException) {
+        $messages = $this->readOpenCodeUsageMessages($limits['monthly']['from'] * 1000);
+        if ($messages === null) {
             return null;
         }
 
@@ -11346,7 +11331,10 @@ class ai_opencode extends ai_harness
         foreach ($limits as &$limit) {
             unset($limit['from']);
             $limit['used_usd'] = round($limit['used_usd'], 8);
-            $limit['percent used'] = round(min(100, $limit['used_usd'] / $limit['limit_usd'] * 100), 2);
+            // the local spend is only a guess at where the window stands, so it must never
+            // claim the window is spent — a wrong 100 would take the model out of a caller's
+            // rotation for nothing. only the gateway below is allowed to say that
+            $limit['percent used'] = round(min(99, $limit['used_usd'] / $limit['limit_usd'] * 100), 2);
             if (isset($serverLimits[$limit['type']])) {
                 $limit['percent used'] = $serverLimits[$limit['type']]['percent used'];
                 $limit['resets_at'] = $serverLimits[$limit['type']]['resets_at'];
@@ -11356,6 +11344,50 @@ class ai_opencode extends ai_harness
         }
         unset($limit);
         return array_values($limits);
+    }
+
+    /**
+     * Read the assistant messages the local spend estimate is built from.
+     *
+     * The database sits next to the cli, so a remote harness cannot open the file at all and
+     * has to let the other machine run the query. Returns null when no database was reachable
+     * (which is not the same as an empty window: that one legitimately means "nothing spent").
+     *
+     * @return array|null
+     */
+    private function readOpenCodeUsageMessages(int $from): ?array
+    {
+        $query =
+            "SELECT time_created, data FROM message
+             WHERE json_extract(data, '$.role') = 'assistant'
+               AND json_extract(data, '$.providerID') = 'opencode-go'
+               AND time_created >= {$from}
+             ORDER BY time_created ASC";
+        if ($this->isRemote()) {
+            $command = array_merge($this->sshCommand(), [
+                'for candidate in "$XDG_DATA_HOME/opencode/opencode.db" "$HOME/.local/share/opencode/opencode.db" ' .
+                '/root/.local/share/opencode/opencode.db; do if [ -f "$candidate" ]; then ' .
+                'exec sqlite3 -readonly -json "$candidate" ' .
+                escapeshellarg($query) .
+                '; fi; done; exit 1'
+            ]);
+            exec(implode(' ', array_map('escapeshellarg', $command)) . ' 2>/dev/null', $output, $status);
+            if ($status !== 0) {
+                return null;
+            }
+            $rows = json_decode(implode(PHP_EOL, $output), true);
+            return is_array($rows) ? $rows : [];
+        }
+        $database = self::getOpenCodeDatabasePath();
+        if ($database === null) {
+            return null;
+        }
+        try {
+            $connection = new \PDO('sqlite:' . $database, options: [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+            return $connection->query($query)->fetchAll(\PDO::FETCH_ASSOC);
+        } catch (\PDOException) {
+            return null;
+        }
     }
 
     /**
@@ -11445,10 +11477,17 @@ class ai_opencode extends ai_harness
         }
 
         $key = null;
-        foreach ([getenv('XDG_DATA_HOME') ?: null, (getenv('HOME') ?: '/root') . '/.local/share'] as $base) {
-            $auth = $base === null ? null : rtrim($base, '/') . '/opencode/auth.json';
-            if ($auth !== null && is_file($auth)) {
-                $key = json_decode((string) file_get_contents($auth), true)['opencode-go']['key'] ?? null;
+        foreach (
+            [getenv('XDG_DATA_HOME') ?: null, (getenv('HOME') ?: '/root') . '/.local/share', '/root/.local/share']
+            as $base
+        ) {
+            // a remote harness keeps its credentials on the other machine
+            $auth = $base === null ? null : $this->readCliAuthFile(rtrim($base, '/') . '/opencode/auth.json');
+            if ($auth === null) {
+                continue;
+            }
+            $key = json_decode($auth, true)['opencode-go']['key'] ?? null;
+            if (is_string($key) && trim($key) !== '') {
                 break;
             }
         }
