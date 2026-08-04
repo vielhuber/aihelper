@@ -987,15 +987,16 @@ class Test extends \PHPUnit\Framework\TestCase
         $ai = $this->retryAihelper([
             'AI Request fehlgeschlagen: dial tcp [2606:4700:4408::ac40:9bd1]:443: connect: network is unreachable',
             'AI Request fehlgeschlagen: upstream connect error or disconnect/reset before headers. retried and the latest reset reason: connection timeout',
-            'AI Request fehlgeschlagen: required MCP servers failed to initialize: filesystem: Client error: HTTP request failed: http/request failed: error sending request for url (https://example.test/mcp/)'
+            'AI Request fehlgeschlagen: required MCP servers failed to initialize: filesystem: Client error: HTTP request failed: http/request failed: error sending request for url (https://example.test/mcp/)',
+            'AI Request fehlgeschlagen: required MCP servers failed to initialize: email: unexpected server response: HTTP 520: error code: 520'
         ]);
 
         $result = $ai->ask('test');
 
         $this->assertTrue($result['success']);
         $this->assertSame('ok', $result['response']);
-        $this->assertSame(4, $ai->attempts);
-        $this->assertSame([true, false, false, false], $ai->promptAdditions);
+        $this->assertSame(5, $ai->attempts);
+        $this->assertSame([true, false, false, false, false], $ai->promptAdditions);
     }
 
     function test__transient_http2_stream_errors_are_retried(): void

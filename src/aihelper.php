@@ -2548,6 +2548,8 @@ abstract class aihelper
                     str_contains($retryResponse, 'upstream connect error') ||
                     str_contains($retryResponse, 'connection termination') ||
                     str_contains($retryResponse, 'http/request failed: error sending request') ||
+                    str_contains($retryResponse, 'http 520') ||
+                    str_contains($retryResponse, 'error code: 520') ||
                     str_contains($retryResponse, '(http 0)');
             }
             if ($availability_retry) {
@@ -2593,7 +2595,7 @@ abstract class aihelper
             $message = json_encode($message, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: serialize($message);
         }
         $message = strtolower($message);
-        if (preg_match('/\b(?:http\s*)?(?:408|500|502|503|504)\b/', $message) === 1) {
+        if (preg_match('/\b(?:http\s*)?(?:408|500|502|503|504|520)\b/', $message) === 1) {
             return true;
         }
         foreach (
@@ -4561,6 +4563,8 @@ abstract class aihelper
                         str_contains($retryResponse, 'overloaded') ||
                         str_contains($retryResponse, 'upstream connect error') ||
                         str_contains($retryResponse, 'connection termination') ||
+                        str_contains($retryResponse, 'http 520') ||
+                        str_contains($retryResponse, 'error code: 520') ||
                         str_contains($retryResponse, '(http 0)');
                 }
                 if ($availability_retry) {
