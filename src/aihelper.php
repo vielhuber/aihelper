@@ -10565,6 +10565,7 @@ class ai_claudecode extends ai_harness
 
     protected function buildArgs(): array
     {
+        $this->dropFailedTurns();
         // "--continue" picks the newest conversation of the working directory
         // and falls back to a fresh one when the directory has none yet
         $args = [
@@ -10638,6 +10639,33 @@ class ai_claudecode extends ai_harness
         }
 
         return $args;
+    }
+
+    /**
+     * Cut the conversation back to the last turn that got a real answer.
+     *
+     * A failed request is persisted as a synthetic "API Error" assistant message, and every
+     * "--continue" from then on replays it — the conversation keeps failing long after the
+     * outage that caused it, on every model and with every prompt. Nothing after that first
+     * failure is worth keeping: it is only the failed retries.
+     */
+    private function dropFailedTurns(): void
+    {
+        // claude code stores a conversation under its working directory with every
+        // character outside [a-z0-9-] folded into a dash
+        $project = preg_replace('/[^A-Za-z0-9]/', '-', $this->workspace());
+        $command =
+            'd="${HOME:-/root}/.claude/projects/' .
+            $project .
+            '"; f=$(ls -t "$d"/*.jsonl 2>/dev/null | head -1); [ -n "$f" ] || exit 0; ' .
+            'awk \'index($0, "<synthetic>") && index($0, "API Error") { exit } { print }\' "$f" > "$f.heal" || exit 0; ' .
+            'if [ -s "$f.heal" ] && [ "$(wc -c < "$f.heal")" -lt "$(wc -c < "$f")" ]; ' .
+            'then mv "$f.heal" "$f"; else rm -f "$f.heal"; fi';
+        if ($this->isRemote()) {
+            $this->remoteCommand($command, '', 'drop failed turns');
+            return;
+        }
+        exec('sh -c ' . escapeshellarg($command) . ' 2>/dev/null');
     }
 
     protected function harnessInput(string $prompt): string
