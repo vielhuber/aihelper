@@ -1534,8 +1534,18 @@ abstract class aihelper
         foreach (['/root/.cli-proxy-api/logs', '/host/data/server/cliproxyapi/logs'] as $dir) {
             $log_files = array_merge($log_files, glob($dir . '/*.log') ?: []);
         }
-        $log_files = array_values(array_unique($log_files));
-        usort($log_files, fn($a, $b) => (filemtime($b) ?: 0) <=> (filemtime($a) ?: 0));
+        // the proxy rotates logs away while they are being scanned, so a globbed file can already be
+        // gone when it is stat'ed or read — stat each one once here and drop whatever vanished, which
+        // also spares the loop below a second stat per file
+        $log_times = [];
+        foreach (array_unique($log_files) as $log_file) {
+            $log_time = @filemtime($log_file);
+            if ($log_time !== false) {
+                $log_times[$log_file] = $log_time;
+            }
+        }
+        $log_files = array_keys($log_times);
+        usort($log_files, fn($a, $b) => $log_times[$b] <=> $log_times[$a]);
         $date_from_time = $date_from !== null ? strtotime($date_from) : false;
         $date_until_time = $date_until !== null ? strtotime($date_until) : false;
 
@@ -1731,7 +1741,7 @@ abstract class aihelper
             if ($limit !== null && count($requests) >= $limit) {
                 break;
             }
-            $file_time = filemtime($log_file) ?: 0;
+            $file_time = $log_times[$log_file];
             if ($date_until_time !== false && $file_time > $date_until_time) {
                 continue;
             }
@@ -1739,9 +1749,14 @@ abstract class aihelper
                 break;
             }
 
+            $log_raw = @file_get_contents($log_file);
+            if ($log_raw === false) {
+                continue;
+            }
+
             $sections = [];
             $current = null;
-            foreach (explode("\n", str_replace("\r\n", "\n", (string) file_get_contents($log_file))) as $line) {
+            foreach (explode("\n", str_replace("\r\n", "\n", $log_raw)) as $line) {
                 if (preg_match('/^=== (.+?) ===$/', trim($line), $matches)) {
                     $current = $matches[1];
                     $sections[$current] = [];
@@ -11425,7 +11440,7 @@ class ai_opencode extends ai_harness
      * 429 the completions endpoint answers with. The limit is checked before the payload is
      * validated, so an intentionally invalid zero-token request is enough to trigger it and nothing is ever generated.
      *
-     * @return array<string,array{percent used:float,resets_at:string}>
+     * @return array<string,array{'percent used': float, resets_at: string}>
      */
     private function fetchOpenCodeServerLimits(): array
     {
@@ -11567,7 +11582,7 @@ class ai_opencode extends ai_harness
     }
 
     /**
-     * @return array<string,array{percent used:float,resets_at:string}>
+     * @return array<string,array{'percent used': float, resets_at: string}>
      */
     private static function parseOpenCodeDashboardLimits(string $html): array
     {
