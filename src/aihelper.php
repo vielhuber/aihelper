@@ -6469,6 +6469,11 @@ abstract class aihelper
                                 // parse partial_json input to real json object for tool_use/mcp_tool_use blocks
                                 if (isset($this->stream_response->result->content[$index])) {
                                     $block = &$this->stream_response->result->content[$index];
+                                    // a tool without arguments never sends a partial_json, so its
+                                    // input is still the empty array json_decode made of "{}"
+                                    if (is_array($block->input ?? null) && $block->input === []) {
+                                        $block->input = new \stdClass();
+                                    }
                                     if (isset($block->input) && is_string($block->input)) {
                                         // convert empty string to empty object (anthropic API requires tool_use.input to be a dict, not an array — json_encode(new stdClass()) → "{}", json_encode([]) → "[]")
                                         if ($block->input === '') {
@@ -10604,8 +10609,15 @@ class ai_claudecode extends ai_harness
     {
         // without this claude code refuses to skip permissions as root. tool search keeps
         // large mcp sets out of the context: it looks schemas up on demand once they grow
-        // past 5% of the context window
-        $overrides = ['IS_SANDBOX' => '1', 'ENABLE_TOOL_SEARCH' => 'auto:5', 'MCP_TIMEOUT' => '300000'];
+        // past 5% of the context window. the bundled skills (code-review, security-review,
+        // dataviz, ...) belong to the cli, not to the caller — they only add noise here and
+        // could fire on an unrelated task. plugin skills are not affected by the flag
+        $overrides = [
+            'IS_SANDBOX' => '1',
+            'ENABLE_TOOL_SEARCH' => 'auto:5',
+            'MCP_TIMEOUT' => '300000',
+            'CLAUDE_CODE_DISABLE_BUNDLED_SKILLS' => '1'
+        ];
         if ($this->url !== null && trim($this->url) !== '') {
             // claude code appends "/v1" itself, while gateway urls are usually
             // configured with it — keeping both would request "/v1/v1/messages"
