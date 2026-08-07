@@ -41,6 +41,7 @@ abstract class aihelper
     protected ?string $stream_buffer_in = null;
     protected ?string $stream_buffer_data = null;
     protected ?string $stream_current_block_type = null;
+    protected int $stream_block_offset = 0;
     protected bool $stream_first_text_sent = false;
     protected bool $stream_text_emitted_since_tool = false;
     protected bool $stream_running = false;
@@ -6243,6 +6244,7 @@ abstract class aihelper
         $this->stream_buffer_in = '';
         $this->stream_buffer_data = '';
         $this->stream_current_block_type = null;
+        $this->stream_block_offset = 0;
         $this->stream_first_text_sent = false;
         $this->stream_running = false;
         $this->stream_in_think = false;
@@ -6317,6 +6319,11 @@ abstract class aihelper
                                 $this->stream_response->result->stop_reason = $parsed['delta']['stop_reason'];
                             }
 
+                            // anchor the block indices of the message that starts here
+                            if (isset($parsed['type']) && $parsed['type'] === 'message_start') {
+                                $this->stream_block_offset = count($this->stream_response->result->content ?? []);
+                            }
+
                             // add new content block
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_start') {
                                 $initial_block_type = $parsed['content_block']['type'] ?? null;
@@ -6369,7 +6376,7 @@ abstract class aihelper
 
                             // stream delta content
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_delta') {
-                                $index = $parsed['index'] ?? 0;
+                                $index = $this->stream_block_offset + ($parsed['index'] ?? 0);
                                 if (isset($this->stream_response->result->content[$index])) {
                                     $block = &$this->stream_response->result->content[$index];
 
@@ -6455,7 +6462,9 @@ abstract class aihelper
 
                             // content_block_stop: finalize content blocks and parse partial_json to real json
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_stop') {
-                                $index = $parsed['index'] ?? count($this->stream_response->result->content) - 1;
+                                $index = isset($parsed['index'])
+                                    ? $this->stream_block_offset + $parsed['index']
+                                    : count($this->stream_response->result->content) - 1;
 
                                 // parse partial_json input to real json object for tool_use/mcp_tool_use blocks
                                 if (isset($this->stream_response->result->content[$index])) {
@@ -9810,6 +9819,8 @@ abstract class ai_harness extends ai_anthropic
 
     protected array $hidden_harness_tool_ids = [];
 
+    protected array $hidden_harness_stream_tool_ids = [];
+
     abstract protected function binaryName(): string;
 
     /**
@@ -10467,6 +10478,15 @@ abstract class ai_harness extends ai_anthropic
             // the streamed response is what the caller keeps, and it carries no tool results at
             // all — a native stream only ever describes the assistant side. the recorded calls
             // are merged in so the session documents what the cli actually did
+            if ($this->hidden_harness_stream_tool_ids !== []) {
+                $this->stream_response->result->content = array_values(
+                    array_filter(
+                        $this->stream_response->result->content ?? [],
+                        fn($block) => ($block->type ?? null) !== 'tool_use' ||
+                            !isset($this->hidden_harness_stream_tool_ids[(string) ($block->id ?? '')])
+                    )
+                );
+            }
             $streamed = [];
             foreach ($this->stream_response->result->content ?? [] as $block) {
                 if (($block->type ?? null) === 'tool_use') {
@@ -10753,6 +10773,7 @@ class ai_claudecode extends ai_harness
                         )
                     ) {
                         $this->hidden_harness_tool_ids[$tool_id] = true;
+                        $this->hidden_harness_stream_tool_ids[$tool_id] = true;
                         continue;
                     }
                 }
