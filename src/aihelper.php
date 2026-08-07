@@ -1070,17 +1070,36 @@ abstract class aihelper
         $raw = is_file($cache_file) ? json_decode((string) file_get_contents($cache_file), true) : null;
         $raw = is_array($raw) ? $raw : null;
         $last_good = $raw !== null && !empty($raw['limits']) ? $raw['limits'] : null;
-        // a good result stays fresh for 1 min; while none exists yet, still back off 90s between
-        // attempts so a rate-limited (429) endpoint isn't re-hit on every call
-        $ttl = $last_good !== null ? 60 : 90;
-        if ($raw !== null && time() - (int) ($raw['time'] ?? 0) < $ttl) {
-            self::$cli_usage_limits_cache[$cacheKey] = ['time' => time(), 'limits' => $last_good];
-            return $last_good;
+        // a good result stays fresh for 2 min; a failed attempt only backs off 20 s so the panel
+        // can recover quickly when the endpoint is reachable again. once the cache is older than
+        // the stale cap, ignore the backoff and refetch on every call — this bounds how long a
+        // stuck (429) window can keep stale data on screen.
+        $ttl = $last_good !== null ? 120 : 90;
+        $last_success = (int) ($raw['last_success'] ?? 0);
+        $last_attempt = (int) ($raw['last_attempt'] ?? 0);
+        $backoff = 20;
+        $stale_cap = 300;
+        if ($raw !== null && $last_success > 0) {
+            $in_fresh = time() - $last_success < $ttl;
+            $backed_off = time() - $last_attempt < $backoff;
+            $stale = time() - $last_success >= $stale_cap;
+            if ($in_fresh || ($backed_off && !$stale)) {
+                self::$cli_usage_limits_cache[$cacheKey] = ['time' => time(), 'limits' => $last_good];
+                return $last_good;
+            }
         }
-        $finish = function (array $limits) use ($cacheKey, $cache_file, $last_good): ?array {
-            // keep the last good result on failure; record every attempt time (throttles failures too)
-            $store = !empty($limits) ? $limits : $last_good;
-            file_put_contents($cache_file, json_encode(['time' => time(), 'limits' => $store]));
+        $finish = function (array $limits) use ($cacheKey, $cache_file, $last_good, $last_success): ?array {
+            $success = !empty($limits);
+            $store = $success ? $limits : $last_good;
+            file_put_contents(
+                $cache_file,
+                json_encode([
+                    'time' => time(),
+                    'last_attempt' => time(),
+                    'last_success' => $success ? time() : $last_success,
+                    'limits' => $store
+                ])
+            );
             self::$cli_usage_limits_cache[$cacheKey] = ['time' => time(), 'limits' => $store];
             return $store;
         };
