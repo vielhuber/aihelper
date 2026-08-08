@@ -11013,6 +11013,11 @@ class ai_codex extends ai_harness
                 $is_mcp = $item_type === 'mcp_tool_call';
                 $tool_name = $is_mcp ? ($item['server'] ?? '') . '__' . ($item['tool'] ?? '') : 'shell';
                 $tool_input = $is_mcp ? $item['arguments'] ?? [] : ['command' => $item['command'] ?? ''];
+                // a tool without arguments arrives as "{}", which json_decode turns into an
+                // empty array — anthropic requires tool_use.input to stay a dict
+                if ($tool_input === []) {
+                    $tool_input = new \stdClass();
+                }
                 if ($this->isHarnessSkillTool((string) $tool_name, $tool_input)) {
                     return;
                 }
