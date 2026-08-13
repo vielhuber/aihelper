@@ -6015,6 +6015,9 @@ abstract class aihelper
                     $value = (array) $value;
                 }
                 if (is_array($value)) {
+                    $contentType = strtolower((string) ($value['type'] ?? ''));
+                    $mimeType = $value['mimeType'] ?? $value['mime_type'] ?? null;
+                    $binaryData = $value['data'] ?? null;
                     foreach ($value as $key => $item) {
                         if (
                             is_string($key) &&
@@ -6026,6 +6029,26 @@ abstract class aihelper
                             $value[$key] = '***';
                             continue;
                         }
+                        if (
+                            $key === 'data' &&
+                            in_array($contentType, ['audio', 'image'], true) &&
+                            is_string($binaryData) &&
+                            is_string($mimeType)
+                        ) {
+                            $payload = strtr($binaryData, '-_', '+/');
+                            $payload .= str_repeat('=', (4 - (strlen($payload) % 4)) % 4);
+                            $binary = base64_decode($payload, true);
+                            if ($binary === false) {
+                                $binary = $binaryData;
+                            }
+                            $value[$key] = sprintf(
+                                '[binary data omitted: mime=%s bytes=%d sha256=%s]',
+                                $mimeType,
+                                strlen($binary),
+                                hash('sha256', $binary)
+                            );
+                            continue;
+                        }
                         $value[$key] = $redact($item);
                     }
                     return $value;
@@ -6035,6 +6058,19 @@ abstract class aihelper
                 }
                 if ($sensitiveValues !== []) {
                     $value = str_replace($sensitiveValues, '***', $value);
+                }
+                $trimmedValue = trim($value);
+                if (
+                    ($trimmedValue[0] ?? '') === '{' ||
+                    ($trimmedValue[0] ?? '') === '['
+                ) {
+                    $decodedValue = json_decode($value, true);
+                    if (is_array($decodedValue)) {
+                        return json_encode(
+                            $redact($decodedValue),
+                            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                        );
+                    }
                 }
                 return preg_replace(
                     '/(?i)(\bAIHELPER_MCP_TOKEN_[A-Z0-9_]+\s*=\s*)(?:"(?:\\.|[^"])*"|\'(?:\\.|[^\'])*\'|[^\s,;]+)/',
@@ -6076,6 +6112,29 @@ abstract class aihelper
                         strlen($binary),
                         hash('sha256', $binary)
                     );
+                },
+                $msg
+            );
+            $msg = preg_replace_callback(
+                '/(?<prefix>\\\\?"data\\\\?"\s*:\s*\\\\?")(?<payload>[A-Za-z0-9+\/=\-_]+)(?<middle>\\\\?"\s*,\s*\\\\?"(?:mimeType|mime_type)\\\\?"\s*:\s*\\\\?")(?<mime>[A-Za-z0-9.+-]+\/[A-Za-z0-9.+-]+)(?<suffix>\\\\?")/i',
+                static function (array $matches): string {
+                    $payload = strtr($matches['payload'], '-_', '+/');
+                    $payload .= str_repeat('=', (4 - (strlen($payload) % 4)) % 4);
+                    $binary = base64_decode($payload, true);
+                    if ($binary === false) {
+                        $binary = $matches['payload'];
+                    }
+                    return
+                        $matches['prefix'] .
+                        sprintf(
+                            '[binary data omitted: mime=%s bytes=%d sha256=%s]',
+                            $matches['mime'],
+                            strlen($binary),
+                            hash('sha256', $binary)
+                        ) .
+                        $matches['middle'] .
+                        $matches['mime'] .
+                        $matches['suffix'];
                 },
                 $msg
             );

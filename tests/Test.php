@@ -828,6 +828,9 @@ class Test extends \PHPUnit\Framework\TestCase
         unlink($log);
     }
 
+    /**
+     * Keep binary payloads out of logs while retaining diagnostic metadata.
+     */
     function test__logs_replace_embedded_binary_data_with_metadata(): void
     {
         $log = tempnam(sys_get_temp_dir(), 'aihelper-log-');
@@ -839,6 +842,23 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertStringNotContainsString(base64_encode('binary-image'), $contents);
         $this->assertStringContainsString(
             '[binary data omitted: mime=image/png bytes=12 sha256=' . hash('sha256', 'binary-image') . ']',
+            $contents
+        );
+
+        $codex->log([
+            'content' => json_encode([
+                'content' => [[
+                    'type' => 'image',
+                    'data' => base64_encode('mcp-image'),
+                    'mimeType' => 'image/png'
+                ]]
+            ], JSON_THROW_ON_ERROR)
+        ], 'test');
+        $contents = (string) file_get_contents($log);
+
+        $this->assertStringNotContainsString(base64_encode('mcp-image'), $contents);
+        $this->assertStringContainsString(
+            '[binary data omitted: mime=image/png bytes=9 sha256=' . hash('sha256', 'mcp-image') . ']',
             $contents
         );
         unlink($log);
