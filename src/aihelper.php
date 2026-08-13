@@ -6061,6 +6061,24 @@ abstract class aihelper
                 '$1***',
                 $msg
             );
+            $msg = preg_replace_callback(
+                '/data:(?<mime>[A-Za-z0-9.+-]+\/[A-Za-z0-9.+-]+)(?:;[^,\s]*)?;base64,(?<payload>[A-Za-z0-9+\/=\-_]+)/i',
+                static function (array $matches): string {
+                    $payload = strtr($matches['payload'], '-_', '+/');
+                    $payload .= str_repeat('=', (4 - (strlen($payload) % 4)) % 4);
+                    $binary = base64_decode($payload, true);
+                    if ($binary === false) {
+                        $binary = $matches['payload'];
+                    }
+                    return sprintf(
+                        '[binary data omitted: mime=%s bytes=%d sha256=%s]',
+                        $matches['mime'],
+                        strlen($binary),
+                        hash('sha256', $binary)
+                    );
+                },
+                $msg
+            );
             /*
             $msg = str_replace(["\r\n", "\r", "\n"], ' ', $msg);
             $msg = preg_replace_callback(

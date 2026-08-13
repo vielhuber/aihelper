@@ -828,6 +828,22 @@ class Test extends \PHPUnit\Framework\TestCase
         unlink($log);
     }
 
+    function test__logs_replace_embedded_binary_data_with_metadata(): void
+    {
+        $log = tempnam(sys_get_temp_dir(), 'aihelper-log-');
+        $this->assertIsString($log);
+        $codex = aihelper::create(provider: 'codex', log: $log);
+        $codex->log('data:image/png;base64,' . base64_encode('binary-image'), 'test');
+        $contents = (string) file_get_contents($log);
+
+        $this->assertStringNotContainsString(base64_encode('binary-image'), $contents);
+        $this->assertStringContainsString(
+            '[binary data omitted: mime=image/png bytes=12 sha256=' . hash('sha256', 'binary-image') . ']',
+            $contents
+        );
+        unlink($log);
+    }
+
     function test__harnesses_allow_slow_remote_mcp_initialization(): void
     {
         foreach (['claudecode', 'opencode'] as $provider) {
