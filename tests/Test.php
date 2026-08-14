@@ -812,6 +812,12 @@ class Test extends \PHPUnit\Framework\TestCase
         ];
         ob_start();
         ob_start();
+        $codexHandler->invoke(
+            $codex,
+            ['type' => 'turn.started', 'turn_id' => 'turn-1'],
+            $result,
+            null
+        );
         $codexHandler->invoke($codex, ['type' => 'item.started'] + $codexEvent, $result, null);
         $codexHandler->invoke($codex, ['type' => 'item.completed'] + $codexEvent, $result, null);
         $codexCommandEvent = [
@@ -886,6 +892,8 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertStringContainsString('Searched current documentation', $codexOutput);
         $this->assertStringContainsString('Updated plan', $codexOutput);
         $this->assertStringContainsString('Loaded skill filesystem', $codexOutput);
+        $this->assertStringContainsString('Turn started', $codexOutput);
+        $this->assertStringContainsString('turn-1', $codexOutput);
         $this->assertStringNotContainsString('internal', $codexOutput);
         $codexMcpResult = array_values(
             array_filter(
@@ -913,6 +921,39 @@ class Test extends \PHPUnit\Framework\TestCase
         $claudeHandler = new \ReflectionMethod(\vielhuber\aihelper\ai_claudecode::class, 'handleEvent');
         ob_start();
         ob_start();
+        $claudeHandler->invoke(
+            $claude,
+            [
+                'type' => 'system',
+                'subtype' => 'hook_started',
+                'hook_name' => 'SessionStart:startup',
+                'session_id' => 'session-1'
+            ],
+            $result,
+            null
+        );
+        $claudeHandler->invoke(
+            $claude,
+            [
+                'type' => 'system',
+                'subtype' => 'status',
+                'status' => 'requesting',
+                'session_id' => 'session-1'
+            ],
+            $result,
+            null
+        );
+        $claudeHandler->invoke(
+            $claude,
+            [
+                'type' => 'system',
+                'subtype' => 'init',
+                'session_id' => 'session-1',
+                'mcp_servers' => [['name' => 'filesystem', 'status' => 'connected']]
+            ],
+            $result,
+            null
+        );
         $claudeHandler->invoke(
             $claude,
             [
@@ -944,10 +985,37 @@ class Test extends \PHPUnit\Framework\TestCase
             $result,
             null
         );
+        $claudeHandler->invoke(
+            $claude,
+            [
+                'type' => 'result',
+                'subtype' => 'success',
+                'is_error' => false,
+                'stop_reason' => 'end_turn',
+                'result' => 'OK',
+                'usage' => [
+                    'input_tokens' => 1,
+                    'cache_creation_input_tokens' => 2,
+                    'cache_read_input_tokens' => 3,
+                    'output_tokens' => 4
+                ],
+                'total_cost_usd' => 0.01
+            ],
+            $result,
+            null
+        );
         ob_end_flush();
         $claudeOutput = (string) ob_get_clean();
         $this->assertStringContainsString('Used Trello · get card', $claudeOutput);
         $this->assertStringContainsString('ok', $claudeOutput);
+        $this->assertStringContainsString('System init · Mcp servers', $claudeOutput);
+        $this->assertStringContainsString('connected', $claudeOutput);
+        $this->assertStringContainsString('System hook started', $claudeOutput);
+        $this->assertStringContainsString('System status', $claudeOutput);
+        $this->assertStringContainsString('requesting', $claudeOutput);
+        $this->assertStringContainsString('├', $claudeOutput);
+        $this->assertStringContainsString('Result success', $claudeOutput);
+        $this->assertStringContainsString('"captures_content":false', $claudeOutput);
 
         $opencode = aihelper::create(provider: 'opencode');
         (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($opencode, true);
@@ -959,6 +1027,15 @@ class Test extends \PHPUnit\Framework\TestCase
         ];
         ob_start();
         ob_start();
+        $opencodeHandler->invoke(
+            $opencode,
+            [
+                'type' => 'step_start',
+                'sessionID' => 'session-1'
+            ],
+            $result,
+            null
+        );
         $opencodeHandler->invoke($opencode, ['type' => 'tool', 'part' => $opencodePart], $result, null);
         $opencodePart['state'] = [
             'status' => 'error',
@@ -1003,6 +1080,8 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertStringContainsString('Used Trello get card', $opencodeOutput);
         $this->assertStringContainsString('failed', $opencodeOutput);
         $this->assertStringContainsString('Loaded skill filesystem', $opencodeOutput);
+        $this->assertStringContainsString('Step start', $opencodeOutput);
+        $this->assertStringContainsString('session-1', $opencodeOutput);
         $this->assertStringNotContainsString('internal', $opencodeOutput);
         $opencodeResult = array_values(
             array_filter(

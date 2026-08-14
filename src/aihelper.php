@@ -7388,7 +7388,8 @@ abstract class aihelper
         ?string $id,
         string $label,
         string $status,
-        mixed $detail = null
+        mixed $detail = null,
+        bool $capturesContent = true
     ): string
     {
         $id = trim((string) $id);
@@ -7478,7 +7479,8 @@ abstract class aihelper
                 [
                     'delta' => $delta,
                     'kind' => 'transcript',
-                    'boundary' => $started
+                    'boundary' => $started,
+                    'captures_content' => $capturesContent
                 ],
                 JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
             ) .
@@ -10096,6 +10098,67 @@ abstract class ai_harness extends ai_anthropic
      */
     abstract protected function handleEvent(array $event, object $result, ?\Closure $emit): void;
 
+    /**
+     * Preserve native lifecycle data without interpreting provider-specific fields.
+     */
+    protected function emitHarnessLifecycleEvent(array $event): void
+    {
+        $type = trim((string) ($event['type'] ?? ''));
+        if ($type === '') {
+            return;
+        }
+        $subtype = trim((string) ($event['subtype'] ?? ''));
+        $eventName = trim($type . ($subtype === '' ? '' : ' ' . $subtype));
+        $label = ucfirst(str_replace(['_', '.'], ' ', $eventName));
+        $normalizedEventName = strtolower($eventName);
+        $eventStatusValue = $event['status'] ?? ($event['outcome'] ?? '');
+        $eventStatus = is_scalar($eventStatusValue) ? strtolower(trim((string) $eventStatusValue)) : '';
+        $status = 'completed';
+        if (
+            preg_match('/(?:^|[._ ])(?:start|started|starting)$/', $normalizedEventName) === 1 ||
+            in_array($eventStatus, ['pending', 'running', 'requesting', 'start', 'started', 'starting'], true)
+        ) {
+            $status = 'running';
+        }
+        if (
+            ($event['is_error'] ?? false) === true ||
+            preg_match('/(?:^|[._ ])(?:error|failed|failure)$/', $normalizedEventName) === 1 ||
+            in_array($eventStatus, ['error', 'failed', 'failure'], true)
+        ) {
+            $status = 'error';
+        }
+        $encodedEvent = json_encode(
+            $event,
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+        ) ?: $eventName;
+        $eventId = 'harness-event-' . hash('sha256', $encodedEvent);
+        $scalarDetails = [];
+        foreach ($event as $key => $value) {
+            if (in_array($key, ['type', 'subtype'], true)) {
+                continue;
+            }
+            if (is_array($value) || is_object($value)) {
+                $fieldLabel = ucfirst(str_replace(['_', '.'], ' ', (string) $key));
+                $this->emitTranscript(
+                    id: $eventId . '-' . (string) $key,
+                    label: $label . ' · ' . $fieldLabel,
+                    status: $status,
+                    detail: $value,
+                    capturesContent: false
+                );
+                continue;
+            }
+            $scalarDetails[$key] = $value;
+        }
+        $this->emitTranscript(
+            id: $eventId,
+            label: $label,
+            status: $status,
+            detail: $scalarDetails,
+            capturesContent: false
+        );
+    }
+
     public function fetchModelsFromProvider(): array
     {
         return $this->models;
@@ -10616,6 +10679,7 @@ abstract class ai_harness extends ai_anthropic
         $errors = '';
         $exit_code = null;
         $drain_until = null;
+        $stderrEntries = [];
         $sensitiveValues = array_values($this->harnessMcpTokenEnvironment());
         $redact = function (mixed $value) use (&$redact, $sensitiveValues): mixed {
             if (is_array($value)) {
@@ -10646,6 +10710,14 @@ abstract class ai_harness extends ai_anthropic
                 $value
             ) ?? $value;
         };
+        $harnessTranscriptId = 'harness-' . (string) $this->harness_run_id;
+        $harnessLabel = trim((string) $this->title) ?: ucfirst($this->binaryName());
+        $this->emitTranscript(
+            id: $harnessTranscriptId,
+            label: $harnessLabel,
+            status: 'running',
+            capturesContent: false
+        );
         while (true) {
             $read = [];
             if (!feof($pipes[1])) {
@@ -10670,6 +10742,22 @@ abstract class ai_harness extends ai_anthropic
                 $last_activity_at = time();
                 if ($stream === $pipes[2]) {
                     $errors .= $chunk;
+                    $nativeOutput = $redact($chunk);
+                    if (is_string($nativeOutput)) {
+                        $nativeOutput = preg_replace('/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -\/]*[@-~])/', '', $nativeOutput) ?? $nativeOutput;
+                        $nativeOutput = trim($nativeOutput);
+                        $nativeOutputId = hash('sha256', $nativeOutput);
+                        if ($nativeOutput !== '' && !isset($stderrEntries[$nativeOutputId])) {
+                            $stderrEntries[$nativeOutputId] = true;
+                            $this->emitTranscript(
+                                id: 'harness-output-' . $nativeOutputId,
+                                label: $harnessLabel . ' output',
+                                status: 'completed',
+                                detail: $nativeOutput,
+                                capturesContent: false
+                            );
+                        }
+                    }
                     continue;
                 }
                 $buffer .= $chunk;
@@ -10710,6 +10798,13 @@ abstract class ai_harness extends ai_anthropic
         if ($exit_code === null) {
             $exit_code = $closed;
         }
+        $this->emitTranscript(
+            id: $harnessTranscriptId,
+            label: '',
+            status: $exit_code === 0 ? 'completed' : 'error',
+            detail: 'Exit code: ' . $exit_code,
+            capturesContent: false
+        );
 
         if (
             $result->result->stop_reason === null &&
@@ -11008,6 +11103,7 @@ class ai_claudecode extends ai_harness
 
         if ($type === 'system' && ($event['subtype'] ?? null) === 'init' && !empty($event['session_id'])) {
             $this->log((string) $event['session_id'], 'harness session');
+            $this->emitHarnessLifecycleEvent($event);
             return;
         }
 
@@ -11090,8 +11186,10 @@ class ai_claudecode extends ai_harness
         }
 
         if ($type !== 'result') {
+            $this->emitHarnessLifecycleEvent($event);
             return;
         }
+        $this->emitHarnessLifecycleEvent($event);
         $result->result->stop_reason = $event['stop_reason'] ?? 'end_turn';
         $result->result->usage = (object) [
             'input_tokens' => (int) ($event['usage']['input_tokens'] ?? 0),
@@ -11327,6 +11425,7 @@ class ai_codex extends ai_harness
 
         if ($type === 'thread.started' && !empty($event['thread_id'])) {
             $this->log((string) $event['thread_id'], 'harness session');
+            $this->emitHarnessLifecycleEvent($event);
             $this->emitAnthropicEvent($emit, [
                 'type' => 'message_start',
                 'message' => [
@@ -11481,6 +11580,7 @@ class ai_codex extends ai_harness
             $item_type = $event['item']['type'] ?? null;
             $text = (string) ($event['item']['text'] ?? '');
             if ($text === '' || !in_array($item_type, ['agent_message', 'reasoning'], true)) {
+                $this->emitHarnessLifecycleEvent($event);
                 return;
             }
             $thinking = $item_type === 'reasoning';
@@ -11504,6 +11604,7 @@ class ai_codex extends ai_harness
         }
 
         if ($type === 'turn.completed') {
+            $this->emitHarnessLifecycleEvent($event);
             $result->result->stop_reason = 'end_turn';
             $result->result->usage = (object) [
                 'input_tokens' => (int) ($event['usage']['input_tokens'] ?? 0),
@@ -11525,6 +11626,7 @@ class ai_codex extends ai_harness
                 'message' => (string) ($event['error']['message'] ?? ($event['message'] ?? 'codex turn failed'))
             ];
         }
+        $this->emitHarnessLifecycleEvent($event);
     }
 }
 
@@ -12177,6 +12279,7 @@ class ai_opencode extends ai_harness
             if (!empty($event['sessionID'])) {
                 $this->log((string) $event['sessionID'], 'harness session');
             }
+            $this->emitHarnessLifecycleEvent($event);
             if ($this->message_started === false) {
                 $this->message_started = true;
                 $this->content_block_index = 0;
@@ -12280,6 +12383,7 @@ class ai_opencode extends ai_harness
         }
 
         if ($type === 'step_finish') {
+            $this->emitHarnessLifecycleEvent($event);
             $tokens = is_array($event['part']['tokens'] ?? null) ? $event['part']['tokens'] : [];
             $cache = is_array($tokens['cache'] ?? null) ? $tokens['cache'] : [];
             $result->result->usage->input_tokens += (int) ($tokens['input'] ?? 0);
@@ -12309,5 +12413,6 @@ class ai_opencode extends ai_harness
             $result->result->error = (object) ['message' => $message];
             $this->message_started = false;
         }
+        $this->emitHarnessLifecycleEvent($event);
     }
 }
