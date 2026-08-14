@@ -745,6 +745,183 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame("HALLO123\n", $result->result->content[3]->content);
     }
 
+    function test__activity_events_are_normalized_across_tool_paths(): void
+    {
+        $mcpResponse = [
+            'result' => [
+                'isError' => false,
+                'content' => [['type' => 'text', 'text' => 'ok']]
+            ]
+        ];
+        $provider = $this->toolImageAihelper('openai', $mcpResponse);
+        (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($provider, true);
+        ob_start();
+        ob_start();
+        $provider->runToolLoop();
+        ob_end_flush();
+        $providerOutput = (string) ob_get_clean();
+        $this->assertStringContainsString('event: activity', $providerOutput);
+        $this->assertStringContainsString('"label":"Render image"', $providerOutput);
+        $this->assertStringContainsString('"status":"running"', $providerOutput);
+        $this->assertStringContainsString('"status":"completed"', $providerOutput);
+
+        $result = (object) ['result' => (object) ['content' => []]];
+        $codex = aihelper::create(provider: 'codex');
+        (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($codex, true);
+        $codexHandler = new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'handleEvent');
+        $codexEvent = [
+            'item' => [
+                'id' => 'codex-tool-1',
+                'type' => 'mcp_tool_call',
+                'server' => 'trello',
+                'tool' => 'get_card',
+                'arguments' => [],
+                'status' => 'completed',
+                'result' => ['content' => [['type' => 'text', 'text' => 'ok']]]
+            ]
+        ];
+        ob_start();
+        ob_start();
+        $codexHandler->invoke($codex, ['type' => 'item.started'] + $codexEvent, $result, null);
+        $codexHandler->invoke($codex, ['type' => 'item.completed'] + $codexEvent, $result, null);
+        $codexCommandEvent = [
+            'item' => [
+                'id' => 'codex-command-1',
+                'type' => 'command_execution',
+                'command' => 'false',
+                'aggregated_output' => '',
+                'exit_code' => 1,
+                'status' => 'completed'
+            ]
+        ];
+        $codexHandler->invoke($codex, ['type' => 'item.started'] + $codexCommandEvent, $result, null);
+        $codexHandler->invoke($codex, ['type' => 'item.completed'] + $codexCommandEvent, $result, null);
+        $codexHandler->invoke(
+            $codex,
+            ['type' => 'item.started', 'item' => ['id' => 'codex-skill-1', 'type' => 'command_execution']],
+            $result,
+            null
+        );
+        $codexHandler->invoke(
+            $codex,
+            [
+                'type' => 'item.completed',
+                'item' => [
+                    'id' => 'codex-skill-1',
+                    'type' => 'command_execution',
+                    'command' => 'cat /tmp/aihelper-payload/test/codex/skills/filesystem/SKILL.md',
+                    'aggregated_output' => 'internal',
+                    'exit_code' => 0,
+                    'status' => 'completed'
+                ]
+            ],
+            $result,
+            null
+        );
+        ob_end_flush();
+        $codexOutput = (string) ob_get_clean();
+        $this->assertStringContainsString('"id":"codex-tool-1"', $codexOutput);
+        $this->assertStringContainsString('"label":"Trello · get card"', $codexOutput);
+        $this->assertMatchesRegularExpression(
+            '/"id":"codex-command-1".*"status":"error"/s',
+            $codexOutput
+        );
+        $this->assertStringNotContainsString('codex-skill-1', $codexOutput);
+
+        $claude = aihelper::create(provider: 'claudecode');
+        (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($claude, true);
+        $claudeHandler = new \ReflectionMethod(\vielhuber\aihelper\ai_claudecode::class, 'handleEvent');
+        ob_start();
+        ob_start();
+        $claudeHandler->invoke(
+            $claude,
+            [
+                'type' => 'assistant',
+                'message' => [
+                    'content' => [
+                        [
+                            'type' => 'tool_use',
+                            'id' => 'claude-tool-1',
+                            'name' => 'mcp__trello__get_card',
+                            'input' => []
+                        ]
+                    ]
+                ]
+            ],
+            $result,
+            null
+        );
+        $claudeHandler->invoke(
+            $claude,
+            [
+                'type' => 'user',
+                'message' => [
+                    'content' => [
+                        ['type' => 'tool_result', 'tool_use_id' => 'claude-tool-1', 'content' => 'ok']
+                    ]
+                ]
+            ],
+            $result,
+            null
+        );
+        ob_end_flush();
+        $claudeOutput = (string) ob_get_clean();
+        $this->assertStringContainsString('"id":"claude-tool-1"', $claudeOutput);
+        $this->assertStringContainsString('"label":"Trello · get card"', $claudeOutput);
+        $this->assertStringContainsString('"status":"completed"', $claudeOutput);
+
+        $opencode = aihelper::create(provider: 'opencode');
+        (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($opencode, true);
+        $opencodeHandler = new \ReflectionMethod(\vielhuber\aihelper\ai_opencode::class, 'handleEvent');
+        $opencodePart = [
+            'callID' => 'opencode-tool-1',
+            'tool' => 'trello_get_card',
+            'state' => ['status' => 'running', 'input' => []]
+        ];
+        ob_start();
+        ob_start();
+        $opencodeHandler->invoke($opencode, ['type' => 'tool', 'part' => $opencodePart], $result, null);
+        $opencodePart['state'] = ['status' => 'error', 'input' => [], 'error' => 'failed'];
+        $opencodeHandler->invoke($opencode, ['type' => 'tool', 'part' => $opencodePart], $result, null);
+        $opencodeHandler->invoke(
+            $opencode,
+            [
+                'type' => 'tool',
+                'part' => [
+                    'callID' => 'opencode-skill-1',
+                    'tool' => 'bash',
+                    'state' => ['status' => 'pending']
+                ]
+            ],
+            $result,
+            null
+        );
+        $opencodeHandler->invoke(
+            $opencode,
+            [
+                'type' => 'tool',
+                'part' => [
+                    'callID' => 'opencode-skill-1',
+                    'tool' => 'bash',
+                    'state' => [
+                        'status' => 'completed',
+                        'input' => [
+                            'command' => 'cat /tmp/aihelper-payload/test/opencode/skills/filesystem/SKILL.md'
+                        ],
+                        'output' => 'internal'
+                    ]
+                ]
+            ],
+            $result,
+            null
+        );
+        ob_end_flush();
+        $opencodeOutput = (string) ob_get_clean();
+        $this->assertStringContainsString('"id":"opencode-tool-1"', $opencodeOutput);
+        $this->assertStringContainsString('"status":"error"', $opencodeOutput);
+        $this->assertStringNotContainsString('opencode-skill-1', $opencodeOutput);
+    }
+
     function test__large_payloads_are_passed_as_files_not_arguments(): void
     {
         $this->skipOnCi();

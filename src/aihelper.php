@@ -51,6 +51,8 @@ abstract class aihelper
     protected bool $stream_tool_call_strip_in_block = false;
     protected string $stream_tool_call_strip_tag_buf = '';
     protected ?\Closure $stream_callback = null;
+    protected array $activity_states = [];
+    protected array $activity_labels = [];
 
     protected ?string $session_id = null;
     protected static array $sessions = [];
@@ -4245,6 +4247,8 @@ abstract class aihelper
             $tool_results = [];
             foreach ($tool_calls as $tc) {
                 $tool_images = [];
+                $activity_id = null;
+                $activity_failed = false;
                 if (isset($this->mcp_servers_tools_map[$tc['name']])) {
                     foreach ($this->mcp_servers_tools_map[$tc['name']]['default_arguments'] ?? [] as $key => $value) {
                         if (
@@ -4269,6 +4273,12 @@ abstract class aihelper
                     $repeat_count = 1;
                 }
                 if ($repeat_count > $repeat_threshold) {
+                    $this->emitActivity(
+                        null,
+                        'tool',
+                        $this->toolActivityLabel((string) $tc['name']),
+                        'error'
+                    );
                     $this->log(
                         'loop-guard tripped for "' . $tc['name'] . '" after ' . $repeat_threshold . ' identical calls',
                         'local tool loop'
@@ -4288,6 +4298,12 @@ abstract class aihelper
                 // accumulating without intermediate progress
                 $prev_hashes = $signature_results[$signature] ?? [];
                 if (count($prev_hashes) >= $cumulative_threshold && count(array_unique($prev_hashes)) === 1) {
+                    $this->emitActivity(
+                        null,
+                        'tool',
+                        $this->toolActivityLabel((string) $tc['name']),
+                        'error'
+                    );
                     $this->log(
                         'loop-guard tripped (cumulative): "' .
                             $tc['name'] .
@@ -4309,10 +4325,23 @@ abstract class aihelper
                     continue;
                 }
                 if (!isset($this->mcp_servers_tools_map[$tc['name']])) {
+                    $activity_id = $this->emitActivity(
+                        null,
+                        'tool',
+                        $this->toolActivityLabel((string) $tc['name']),
+                        'running'
+                    );
                     $this->log('unknown tool: ' . $tc['name'], 'local tool loop');
                     $output = 'Error: unknown tool "' . $tc['name'] . '"';
+                    $activity_failed = true;
                 } else {
                     $server = $this->mcp_servers_tools_map[$tc['name']];
+                    $activity_id = $this->emitActivity(
+                        null,
+                        'tool',
+                        $this->toolActivityLabel((string) $tc['name']),
+                        'running'
+                    );
                     $this->log(
                         $tc['name'] . '(' . json_encode($tc['arguments'], JSON_UNESCAPED_UNICODE) . ')',
                         'local tool call'
@@ -4332,6 +4361,7 @@ abstract class aihelper
                     );
                     if ($result === null) {
                         $output = 'Error: tool call failed (no response from MCP server)';
+                        $activity_failed = true;
                     } elseif (($result['result']['isError'] ?? false) === true) {
                         $output = json_encode(
                             [
@@ -4340,6 +4370,7 @@ abstract class aihelper
                             ],
                             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
                         );
+                        $activity_failed = true;
                     } elseif (isset($result['result']['content']) && is_array($result['result']['content'])) {
                         $parts = [];
                         foreach ($result['result']['content'] as $item) {
@@ -4371,6 +4402,12 @@ abstract class aihelper
                     $output = $this->truncateLocalToolOutput($output, $max_output_chars);
                     $this->log(mb_substr($output, 0, 200), 'local tool result');
                 }
+                $this->emitActivity(
+                    $activity_id,
+                    'tool',
+                    $this->toolActivityLabel((string) $tc['name']),
+                    $activity_failed ? 'error' : 'completed'
+                );
                 // record the hash of this round's output for the cumulative
                 // loop-guard. this happens unconditionally (also for unknown-
                 // tool errors) so a model that keeps calling a non-existent
@@ -7342,6 +7379,56 @@ abstract class aihelper
         flush();
 
         return $this->stream_callback;
+    }
+
+    /**
+     * Emit a compact provider-independent activity update without exposing tool payloads.
+     */
+    protected function emitActivity(?string $id, string $type, string $label, string $status): string
+    {
+        $id = trim((string) $id);
+        if ($id === '') {
+            $id = 'activity-' . md5(uniqid('', true));
+        }
+        $label = trim($label) !== '' ? trim($label) : ($this->activity_labels[$id] ?? 'Activity');
+        $this->activity_labels[$id] = $label;
+        $signature = $type . '|' . $label . '|' . $status;
+        if (($this->activity_states[$id] ?? null) === $signature) {
+            return $id;
+        }
+        $this->activity_states[$id] = $signature;
+        if ($this->stream !== true) {
+            return $id;
+        }
+        echo "event: activity\n";
+        echo 'data: ' .
+            json_encode(
+                [
+                    'id' => $id,
+                    'type' => $type,
+                    'label' => $label,
+                    'status' => $status,
+                    'timestamp' => (int) round(microtime(true) * 1000)
+                ],
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            ) .
+            "\n\n";
+        if (ob_get_level() > 0) {
+            ob_flush();
+        }
+        flush();
+        return $id;
+    }
+
+    /**
+     * Turn a technical tool identifier into a compact activity label.
+     */
+    protected function toolActivityLabel(string $name): string
+    {
+        $label = preg_replace('/^mcp__/', '', trim($name));
+        $label = preg_replace('/__+/', ' · ', (string) $label);
+        $label = preg_replace('/_+/', ' ', (string) $label);
+        return ucfirst(trim((string) $label)) ?: 'Tool';
     }
 }
 
@@ -10865,6 +10952,12 @@ class ai_claudecode extends ai_harness
                         $this->hidden_harness_stream_tool_ids[$tool_id] = true;
                         continue;
                     }
+                    $this->emitActivity(
+                        $tool_id,
+                        'tool',
+                        $this->toolActivityLabel((string) ($content__value['name'] ?? 'tool')),
+                        'running'
+                    );
                 }
                 if (
                     $type === 'user' &&
@@ -10873,6 +10966,14 @@ class ai_claudecode extends ai_harness
                 ) {
                     unset($this->hidden_harness_tool_ids[(string) $content__value['tool_use_id']]);
                     continue;
+                }
+                if ($type === 'user' && $content_type === 'tool_result') {
+                    $this->emitActivity(
+                        (string) ($content__value['tool_use_id'] ?? ''),
+                        'tool',
+                        '',
+                        ($content__value['is_error'] ?? false) === true ? 'error' : 'completed'
+                    );
                 }
                 if ($content_type === ($type === 'assistant' ? 'tool_use' : 'tool_result')) {
                     $result->result->content[] = (object) $content__value;
@@ -11079,7 +11180,65 @@ class ai_codex extends ai_harness
             return;
         }
 
-        // codex reports whole items instead of token deltas, so one completed
+        if (in_array($type, ['item.started', 'item.completed'], true)) {
+            $item = is_array($event['item'] ?? null) ? $event['item'] : [];
+            $item_type = $item['type'] ?? null;
+            $activity_type = null;
+            $activity_label = null;
+            if ($item_type === 'mcp_tool_call') {
+                $activity_type = 'tool';
+                $activity_label = $this->toolActivityLabel(
+                    (string) (($item['server'] ?? '') . '__' . ($item['tool'] ?? 'tool'))
+                );
+            }
+            if ($item_type === 'command_execution') {
+                $activity_type = 'command';
+                $activity_label = 'Shell command';
+            }
+            if ($item_type === 'file_change') {
+                $activity_type = 'file';
+                $activity_label = 'File changes';
+            }
+            if ($item_type === 'web_search') {
+                $activity_type = 'search';
+                $activity_label = 'Web search';
+            }
+            if ($item_type === 'todo_list') {
+                $activity_type = 'status';
+                $activity_label = 'Plan updated';
+            }
+            $activity_tool_name = $item_type === 'mcp_tool_call'
+                ? (string) (($item['server'] ?? '') . '__' . ($item['tool'] ?? ''))
+                : ($item_type === 'command_execution' ? 'shell' : (string) $item_type);
+            $activity_tool_input = $item_type === 'mcp_tool_call'
+                ? ($item['arguments'] ?? [])
+                : ['command' => $item['command'] ?? ''];
+            $hidden_skill = $this->isHarnessSkillTool($activity_tool_name, $activity_tool_input);
+            $activity_ready = !(
+                $item_type === 'command_execution' &&
+                $type === 'item.started' &&
+                trim((string) ($item['command'] ?? '')) === ''
+            );
+            if ($activity_type !== null && $hidden_skill === false && $activity_ready) {
+                $activity_failed =
+                    ($item['status'] ?? 'completed') !== 'completed' ||
+                    ($item_type === 'command_execution' && (int) ($item['exit_code'] ?? 0) !== 0);
+                $status = $type === 'item.started'
+                    ? 'running'
+                    : ($activity_failed ? 'error' : 'completed');
+                $this->emitActivity(
+                    (string) ($item['id'] ?? ''),
+                    $activity_type,
+                    (string) $activity_label,
+                    $status
+                );
+            }
+            if ($type === 'item.started') {
+                return;
+            }
+        }
+
+        // codex reports whole completed items instead of token deltas, so one
         // item becomes one closed content block
         if ($type === 'item.completed') {
             $item_type = $event['item']['type'] ?? null;
@@ -11868,6 +12027,18 @@ class ai_opencode extends ai_harness
             $call_id = (string) ($event['part']['callID'] ?? '');
             $state = is_array($event['part']['state'] ?? null) ? $event['part']['state'] : [];
             $status = (string) ($state['status'] ?? '');
+            if (
+                $call_id !== '' &&
+                (isset($state['input']) || in_array($status, ['completed', 'error'], true)) &&
+                !$this->isHarnessSkillTool((string) ($event['part']['tool'] ?? ''), $state['input'] ?? [])
+            ) {
+                $this->emitActivity(
+                    $call_id,
+                    'tool',
+                    $this->toolActivityLabel((string) ($event['part']['tool'] ?? 'tool')),
+                    $status === 'error' ? 'error' : ($status === 'completed' ? 'completed' : 'running')
+                );
+            }
             // opencode reports the part on every state change, so only the terminal one is recorded
             if ($call_id === '' || !in_array($status, ['completed', 'error'], true)) {
                 return;
