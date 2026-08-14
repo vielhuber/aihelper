@@ -149,6 +149,9 @@ opencode auth login
 ```
 
 every turn continues the newest thread of `cli_workdir` and opens a new one only when that directory has none yet.
+codex keeps injected config and skills isolated per aihelper session while storing its threads in the native
+`~/.codex` state. to include threads originally started by aihelper's non-interactive `codex exec`, resume from
+an interactive terminal with `codex resume --last --include-non-interactive`.
 
 set `cli_ssh_host` to run the agent on another machine instead of locally — the working directory, the login and the threads are then that machine's:
 
@@ -220,7 +223,7 @@ $result = $ai->ask('Wer wurde 2018 Fußball-Weltmeister?');
 // $result = ['response' => 'Frankreich.', 'success' => true, 'costs' => 0.001]
 ```
 
-if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled for the streaming route and also adjust your virtualhost so fastcgi forwards packets immediately (no buffering):
+`event: reasoning` contains native model reasoning and a provider-independent, redacted process transcript for tool, shell, file, search, plan and skill activity. Large details are shortened only in this visible stream; `getSessionContent()` retains the complete structured tool history. if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled for the streaming route and also adjust your virtualhost so fastcgi forwards packets immediately (no buffering):
 
 **before**
 

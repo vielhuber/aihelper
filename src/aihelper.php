@@ -51,8 +51,8 @@ abstract class aihelper
     protected bool $stream_tool_call_strip_in_block = false;
     protected string $stream_tool_call_strip_tag_buf = '';
     protected ?\Closure $stream_callback = null;
-    protected array $activity_states = [];
-    protected array $activity_labels = [];
+    protected array $transcript_states = [];
+    protected array $transcript_labels = [];
 
     protected ?string $session_id = null;
     protected static array $sessions = [];
@@ -4247,8 +4247,8 @@ abstract class aihelper
             $tool_results = [];
             foreach ($tool_calls as $tc) {
                 $tool_images = [];
-                $activity_id = null;
-                $activity_failed = false;
+                $transcript_id = null;
+                $transcript_failed = false;
                 if (isset($this->mcp_servers_tools_map[$tc['name']])) {
                     foreach ($this->mcp_servers_tools_map[$tc['name']]['default_arguments'] ?? [] as $key => $value) {
                         if (
@@ -4273,11 +4273,11 @@ abstract class aihelper
                     $repeat_count = 1;
                 }
                 if ($repeat_count > $repeat_threshold) {
-                    $this->emitActivity(
+                    $this->emitTranscript(
                         null,
-                        'tool',
-                        $this->toolActivityLabel((string) $tc['name']),
-                        'error'
+                        $this->toolTranscriptLabel((string) $tc['name'], $tc['arguments']),
+                        'error',
+                        'Loop guard stopped repeated identical calls.'
                     );
                     $this->log(
                         'loop-guard tripped for "' . $tc['name'] . '" after ' . $repeat_threshold . ' identical calls',
@@ -4298,11 +4298,11 @@ abstract class aihelper
                 // accumulating without intermediate progress
                 $prev_hashes = $signature_results[$signature] ?? [];
                 if (count($prev_hashes) >= $cumulative_threshold && count(array_unique($prev_hashes)) === 1) {
-                    $this->emitActivity(
+                    $this->emitTranscript(
                         null,
-                        'tool',
-                        $this->toolActivityLabel((string) $tc['name']),
-                        'error'
+                        $this->toolTranscriptLabel((string) $tc['name'], $tc['arguments']),
+                        'error',
+                        'Loop guard stopped repeated identical results.'
                     );
                     $this->log(
                         'loop-guard tripped (cumulative): "' .
@@ -4325,22 +4325,22 @@ abstract class aihelper
                     continue;
                 }
                 if (!isset($this->mcp_servers_tools_map[$tc['name']])) {
-                    $activity_id = $this->emitActivity(
+                    $transcript_id = $this->emitTranscript(
                         null,
-                        'tool',
-                        $this->toolActivityLabel((string) $tc['name']),
-                        'running'
+                        $this->toolTranscriptLabel((string) $tc['name'], $tc['arguments']),
+                        'running',
+                        $tc['arguments']
                     );
                     $this->log('unknown tool: ' . $tc['name'], 'local tool loop');
                     $output = 'Error: unknown tool "' . $tc['name'] . '"';
-                    $activity_failed = true;
+                    $transcript_failed = true;
                 } else {
                     $server = $this->mcp_servers_tools_map[$tc['name']];
-                    $activity_id = $this->emitActivity(
+                    $transcript_id = $this->emitTranscript(
                         null,
-                        'tool',
-                        $this->toolActivityLabel((string) $tc['name']),
-                        'running'
+                        $this->toolTranscriptLabel((string) $tc['name'], $tc['arguments']),
+                        'running',
+                        $tc['arguments']
                     );
                     $this->log(
                         $tc['name'] . '(' . json_encode($tc['arguments'], JSON_UNESCAPED_UNICODE) . ')',
@@ -4361,7 +4361,7 @@ abstract class aihelper
                     );
                     if ($result === null) {
                         $output = 'Error: tool call failed (no response from MCP server)';
-                        $activity_failed = true;
+                        $transcript_failed = true;
                     } elseif (($result['result']['isError'] ?? false) === true) {
                         $output = json_encode(
                             [
@@ -4370,7 +4370,7 @@ abstract class aihelper
                             ],
                             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
                         );
-                        $activity_failed = true;
+                        $transcript_failed = true;
                     } elseif (isset($result['result']['content']) && is_array($result['result']['content'])) {
                         $parts = [];
                         foreach ($result['result']['content'] as $item) {
@@ -4402,11 +4402,11 @@ abstract class aihelper
                     $output = $this->truncateLocalToolOutput($output, $max_output_chars);
                     $this->log(mb_substr($output, 0, 200), 'local tool result');
                 }
-                $this->emitActivity(
-                    $activity_id,
-                    'tool',
-                    $this->toolActivityLabel((string) $tc['name']),
-                    $activity_failed ? 'error' : 'completed'
+                $this->emitTranscript(
+                    $transcript_id,
+                    $this->toolTranscriptLabel((string) $tc['name'], $tc['arguments']),
+                    $transcript_failed ? 'error' : 'completed',
+                    $output
                 );
                 // record the hash of this round's output for the cumulative
                 // loop-guard. this happens unconditionally (also for unknown-
@@ -7382,33 +7382,103 @@ abstract class aihelper
     }
 
     /**
-     * Emit a compact provider-independent activity update without exposing tool payloads.
+     * Stream one provider-independent process entry while keeping complete payloads in structured content.
      */
-    protected function emitActivity(?string $id, string $type, string $label, string $status): string
+    protected function emitTranscript(
+        ?string $id,
+        string $label,
+        string $status,
+        mixed $detail = null
+    ): string
     {
         $id = trim((string) $id);
         if ($id === '') {
-            $id = 'activity-' . md5(uniqid('', true));
+            $id = 'transcript-' . md5(uniqid('', true));
         }
-        $label = trim($label) !== '' ? trim($label) : ($this->activity_labels[$id] ?? 'Activity');
-        $this->activity_labels[$id] = $label;
-        $signature = $type . '|' . $label . '|' . $status;
-        if (($this->activity_states[$id] ?? null) === $signature) {
+        $label = trim($label) !== '' ? trim($label) : ($this->transcript_labels[$id] ?? 'Activity');
+        $this->transcript_labels[$id] = $label;
+        $previousStatus = $this->transcript_states[$id] ?? null;
+        if ($previousStatus === $status) {
             return $id;
         }
-        $this->activity_states[$id] = $signature;
+        $this->transcript_states[$id] = $status;
         if ($this->stream !== true) {
             return $id;
         }
-        echo "event: activity\n";
+
+        if (
+            (is_array($detail) && $detail === []) ||
+            (is_object($detail) && get_object_vars($detail) === [])
+        ) {
+            $detail = null;
+        }
+        $detailText = '';
+        if ($detail !== null) {
+            $detailText = is_string($detail)
+                ? $detail
+                : (json_encode($detail, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '');
+            foreach ($this->mcp_servers ?? [] as $mcpServer) {
+                $token = $mcpServer['authorization_token'] ?? null;
+                if (is_string($token) && $token !== '') {
+                    $detailText = str_replace($token, '***', $detailText);
+                }
+            }
+            $detailText = preg_replace(
+                '/(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,\'"}]+/',
+                '$1***',
+                $detailText
+            ) ?? $detailText;
+            $detailText = preg_replace(
+                '/(?i)("?(?:access_token|refresh_token|id_token|client_secret|token|secret|password|passwd|passphrase|api[_-]?key|private[_-]?key|access[_-]?key|cookie)"?\s*[:=]\s*)(?:"[^"]*"|\'[^\']*\'|[^\s,;}]+)/',
+                '$1***',
+                $detailText
+            ) ?? $detailText;
+            $detailText = preg_replace(
+                '/(?i)(\bAIHELPER_MCP_TOKEN_[A-Z0-9_]+\s*=\s*)(?:"(?:\\.|[^"])*"|\'(?:\\.|[^\'])*\'|[^\s,;]+)/',
+                '$1***',
+                $detailText
+            ) ?? $detailText;
+            $detailText = preg_replace(
+                '/("data"\s*:\s*")[A-Za-z0-9+\/=\-_]{256,}"/',
+                '$1[binary data omitted]"',
+                $detailText
+            ) ?? $detailText;
+            $detailText = preg_replace(
+                '/data:[A-Za-z0-9.+-]+\/[A-Za-z0-9.+-]+(?:;[^,\s]*)?;base64,[A-Za-z0-9+\/=\-_]+/i',
+                '[binary data omitted]',
+                $detailText
+            ) ?? $detailText;
+            $detailText = trim(str_replace(["\r\n", "\r"], "\n", $detailText));
+            if (mb_strlen($detailText) > 6000) {
+                $omitted = mb_strlen($detailText) - 5000;
+                $detailText =
+                    mb_substr($detailText, 0, 4000) .
+                    "\n… " .
+                    $omitted .
+                    " characters omitted …\n" .
+                    mb_substr($detailText, -1000);
+            }
+        }
+
+        $started = $previousStatus === null;
+        $delta = $started ? "\n\n• " . $label : '';
+        if ($detailText !== '') {
+            $prefix = $status === 'running' ? '  ├ ' : '  └ ';
+            $delta .= "\n" . $prefix . str_replace("\n", "\n    ", $detailText);
+        } elseif ($status === 'error') {
+            $delta .= "\n  └ Failed.";
+        }
+        if ($delta === '') {
+            return $id;
+        }
+
+        echo "event: reasoning\n";
         echo 'data: ' .
             json_encode(
                 [
-                    'id' => $id,
-                    'type' => $type,
-                    'label' => $label,
-                    'status' => $status,
-                    'timestamp' => (int) round(microtime(true) * 1000)
+                    'delta' => $delta,
+                    'kind' => 'transcript',
+                    'boundary' => $started
                 ],
                 JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
             ) .
@@ -7421,14 +7491,30 @@ abstract class aihelper
     }
 
     /**
-     * Turn a technical tool identifier into a compact activity label.
+     * Turn a technical tool invocation into the same concise wording used by coding CLIs.
      */
-    protected function toolActivityLabel(string $name): string
+    protected function toolTranscriptLabel(string $name, mixed $input = null): string
     {
         $label = preg_replace('/^mcp__/', '', trim($name));
         $label = preg_replace('/__+/', ' · ', (string) $label);
         $label = preg_replace('/_+/', ' ', (string) $label);
-        return ucfirst(trim((string) $label)) ?: 'Tool';
+        $label = ucfirst(trim((string) $label)) ?: 'Tool';
+        $input = is_object($input) ? (array) $input : $input;
+        $input = is_array($input) ? $input : [];
+        $normalizedName = strtolower(trim($name));
+        $command = trim((string) ($input['command'] ?? ''));
+        if ($command !== '' && preg_match('/(?:^|__|_)(?:bash|shell)$/', $normalizedName) === 1) {
+            return 'Ran ' . $command;
+        }
+        $path = trim((string) ($input['file_path'] ?? ($input['path'] ?? '')));
+        if ($path !== '' && preg_match('/(?:^|__|_)(?:read|read_file)$/', $normalizedName) === 1) {
+            return 'Read ' . $path;
+        }
+        $query = trim((string) ($input['query'] ?? ($input['pattern'] ?? '')));
+        if ($query !== '' && preg_match('/(?:search|grep|glob)/', $normalizedName) === 1) {
+            return 'Searched ' . $query;
+        }
+        return 'Used ' . $label;
     }
 }
 
@@ -10950,13 +11036,27 @@ class ai_claudecode extends ai_harness
                     ) {
                         $this->hidden_harness_tool_ids[$tool_id] = true;
                         $this->hidden_harness_stream_tool_ids[$tool_id] = true;
+                        $skillInput = json_encode(
+                            $content__value['input'] ?? [],
+                            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                        ) ?: '';
+                        preg_match('#/skills/([^/]+)/SKILL\.md#', $skillInput, $skillMatch);
+                        $this->emitTranscript(
+                            $tool_id,
+                            'Loaded skill ' . ($skillMatch[1] ?? 'instructions'),
+                            'running'
+                        );
+                        $result->result->content[] = (object) $content__value;
                         continue;
                     }
-                    $this->emitActivity(
+                    $this->emitTranscript(
                         $tool_id,
-                        'tool',
-                        $this->toolActivityLabel((string) ($content__value['name'] ?? 'tool')),
-                        'running'
+                        $this->toolTranscriptLabel(
+                            (string) ($content__value['name'] ?? 'tool'),
+                            $content__value['input'] ?? []
+                        ),
+                        'running',
+                        $content__value['input'] ?? []
                     );
                 }
                 if (
@@ -10964,15 +11064,22 @@ class ai_claudecode extends ai_harness
                     $content_type === 'tool_result' &&
                     isset($this->hidden_harness_tool_ids[(string) ($content__value['tool_use_id'] ?? '')])
                 ) {
-                    unset($this->hidden_harness_tool_ids[(string) $content__value['tool_use_id']]);
+                    $toolId = (string) $content__value['tool_use_id'];
+                    $this->emitTranscript(
+                        $toolId,
+                        '',
+                        ($content__value['is_error'] ?? false) === true ? 'error' : 'completed'
+                    );
+                    unset($this->hidden_harness_tool_ids[$toolId]);
+                    $result->result->content[] = (object) $content__value;
                     continue;
                 }
                 if ($type === 'user' && $content_type === 'tool_result') {
-                    $this->emitActivity(
+                    $this->emitTranscript(
                         (string) ($content__value['tool_use_id'] ?? ''),
-                        'tool',
                         '',
-                        ($content__value['is_error'] ?? false) === true ? 'error' : 'completed'
+                        ($content__value['is_error'] ?? false) === true ? 'error' : 'completed',
+                        $content__value['content'] ?? ''
                     );
                 }
                 if ($content_type === ($type === 'assistant' ? 'tool_use' : 'tool_result')) {
@@ -11014,6 +11121,8 @@ class ai_codex extends ai_harness
     SVG;
 
     protected ?string $url = null;
+
+    protected ?string $shared_codex_home = null;
 
     public array $models = [
         [
@@ -11070,9 +11179,8 @@ class ai_codex extends ai_harness
             $options[] = '-c';
             $options[] = 'model_reasoning_effort="' . $this->effort . '"';
         }
-        // with a system prompt the run gets its own CODEX_HOME (see the environment
-        // overrides), which already isolates the config and carries these keys — reading
-        // it must not be suppressed here
+        // with a system prompt the run gets its own config and skill scope (see the
+        // environment overrides), which already carries these keys
         if ($this->isolate_harness_config === true && $this->system_prompt === null && $this->cli_skills === []) {
             // drops config.toml and the AGENTS.md files found from the working
             // directory upwards; the one in CODEX_HOME is out of reach here
@@ -11123,40 +11231,93 @@ class ai_codex extends ai_harness
     protected function harnessEnvironmentOverrides(): array
     {
         $overrides = $this->harnessMcpTokenEnvironment();
-        // codex knows no file variant for "instructions", and the prompt is far too large for
-        // an argument — so an isolated run gets its own CODEX_HOME whose config.toml carries
-        // it. the auth file stays a link into the real home, so refreshed tokens are shared.
-        // without isolation the user's own CODEX_HOME has to keep being read
-        // skills are discovered from "$CODEX_HOME/skills", so they need the own home too
+        // the prompt is too large for an argument, so an isolated config.toml carries it.
+        // config and skills stay run-specific while auth, sessions and sqlite state remain
+        // in the user's native codex home, making the conversation resumable from the cli
         if (($this->system_prompt === null && $this->cli_skills === []) || $this->isolate_harness_config !== true) {
             return $overrides;
         }
-        $config = 'project_doc_max_bytes = 0' . PHP_EOL;
+        $payload_home = dirname($this->payloadFile('codex/.root', ''));
+        $this->placeSkills('codex/skills');
+        if ($this->shared_codex_home === null) {
+            $user_home = getenv('HOME') ?: '/root';
+            if ($this->isRemote()) {
+                $remote_home_command = array_merge($this->sshCommand(), ['printf %s "$HOME"']);
+                $remote_home_output = [];
+                $remote_home_status = 1;
+                exec(
+                    implode(' ', array_map('escapeshellarg', $remote_home_command)) . ' 2>/dev/null',
+                    $remote_home_output,
+                    $remote_home_status
+                );
+                $user_home = $remote_home_status === 0 ? trim(implode(PHP_EOL, $remote_home_output)) : '';
+            }
+            if ($user_home === '') {
+                throw new \RuntimeException('harness: failed to resolve codex home.');
+            }
+            $native_home = rtrim($user_home, '/') . '/.codex';
+            $shared_codex_home =
+                $native_home .
+                '/charly/' .
+                preg_replace('/[^a-zA-Z0-9_\-]/', '_', (string) $this->session_id);
+            $links = [
+                $shared_codex_home . '/auth.json' => $native_home . '/auth.json',
+                $shared_codex_home . '/config.toml' => $payload_home . '/config.toml',
+                $shared_codex_home . '/skills' => $payload_home . '/skills'
+            ];
+            if ($this->isRemote()) {
+                $commands = [
+                    'umask 077 && mkdir -p ' .
+                    escapeshellarg($native_home) .
+                    ' ' .
+                    escapeshellarg($shared_codex_home) .
+                    ' && chmod 700 ' .
+                    escapeshellarg($shared_codex_home)
+                ];
+                foreach ($links as $link => $target) {
+                    $commands[] =
+                        'if [ -L ' . escapeshellarg($link) . ' ]; then ln -sfn ' .
+                        escapeshellarg($target) . ' ' . escapeshellarg($link) .
+                        '; elif [ -e ' . escapeshellarg($link) . ' ]; then exit 1; else ln -s ' .
+                        escapeshellarg($target) . ' ' . escapeshellarg($link) . '; fi';
+                }
+                $this->remoteCommand(
+                    implode(' && ', $commands),
+                    '',
+                    'prepare shared codex home'
+                );
+            } else {
+                foreach ([$native_home, $shared_codex_home] as $directory) {
+                    if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
+                        throw new \RuntimeException('harness: failed to create ' . $directory);
+                    }
+                }
+                chmod($shared_codex_home, 0700);
+                foreach ($links as $link => $target) {
+                    if (is_link($link) && readlink($link) === $target) {
+                        continue;
+                    }
+                    if (is_link($link)) {
+                        unlink($link);
+                    }
+                    if (file_exists($link)) {
+                        throw new \RuntimeException('harness: refusing to replace ' . $link);
+                    }
+                    if (!symlink($target, $link)) {
+                        throw new \RuntimeException('harness: failed to link ' . $link);
+                    }
+                }
+            }
+            $this->shared_codex_home = $shared_codex_home;
+        }
+        $config = 'project_doc_max_bytes = 0' . PHP_EOL .
+            'sqlite_home = ' . $this->tomlString(dirname(dirname($this->shared_codex_home))) . PHP_EOL;
         if ($this->system_prompt !== null) {
             $config =
                 'instructions = ' . $this->tomlString($this->system_prompt) . PHP_EOL . $config;
         }
-        $home = dirname($this->payloadFile('codex/config.toml', $config));
-        $this->placeSkills('codex/skills');
-        $link = $home . '/auth.json';
-        // the overrides are rebuilt several times per run, the link is placed once
-        if (!isset($this->payload_files[$link])) {
-            if ($this->isRemote()) {
-                $this->remoteCommand(
-                    'ln -sfn "$HOME/.codex/auth.json" ' . escapeshellarg($link),
-                    '',
-                    'link codex authentication'
-                );
-            } else {
-                $auth = (getenv('HOME') ?: '/root') . '/.codex/auth.json';
-                if (is_file($auth)) {
-                    @unlink($link);
-                    symlink($auth, $link);
-                }
-            }
-            $this->payload_files[$link] = true;
-        }
-        $overrides['CODEX_HOME'] = $home;
+        $this->payloadFile('codex/config.toml', $config);
+        $overrides['CODEX_HOME'] = $this->shared_codex_home;
         return $overrides;
     }
 
@@ -11182,86 +11343,121 @@ class ai_codex extends ai_harness
 
         if (in_array($type, ['item.started', 'item.completed'], true)) {
             $item = is_array($event['item'] ?? null) ? $event['item'] : [];
-            $item_type = $item['type'] ?? null;
-            $activity_type = null;
-            $activity_label = null;
-            if ($item_type === 'mcp_tool_call') {
-                $activity_type = 'tool';
-                $activity_label = $this->toolActivityLabel(
-                    (string) (($item['server'] ?? '') . '__' . ($item['tool'] ?? 'tool'))
-                );
-            }
-            if ($item_type === 'command_execution') {
-                $activity_type = 'command';
-                $activity_label = 'Shell command';
-            }
-            if ($item_type === 'file_change') {
-                $activity_type = 'file';
-                $activity_label = 'File changes';
-            }
-            if ($item_type === 'web_search') {
-                $activity_type = 'search';
-                $activity_label = 'Web search';
-            }
-            if ($item_type === 'todo_list') {
-                $activity_type = 'status';
-                $activity_label = 'Plan updated';
-            }
-            $activity_tool_name = $item_type === 'mcp_tool_call'
-                ? (string) (($item['server'] ?? '') . '__' . ($item['tool'] ?? ''))
-                : ($item_type === 'command_execution' ? 'shell' : (string) $item_type);
-            $activity_tool_input = $item_type === 'mcp_tool_call'
-                ? ($item['arguments'] ?? [])
-                : ['command' => $item['command'] ?? ''];
-            $hidden_skill = $this->isHarnessSkillTool($activity_tool_name, $activity_tool_input);
-            $activity_ready = !(
-                $item_type === 'command_execution' &&
-                $type === 'item.started' &&
-                trim((string) ($item['command'] ?? '')) === ''
-            );
-            if ($activity_type !== null && $hidden_skill === false && $activity_ready) {
-                $activity_failed =
+            $item_type = (string) ($item['type'] ?? '');
+            $supportedItemTypes = ['mcp_tool_call', 'command_execution', 'file_change', 'web_search', 'todo_list'];
+            if (in_array($item_type, $supportedItemTypes, true)) {
+                $isMcp = $item_type === 'mcp_tool_call';
+                $tool_name = $isMcp
+                    ? (string) (($item['server'] ?? '') . '__' . ($item['tool'] ?? ''))
+                    : ($item_type === 'command_execution' ? 'shell' : $item_type);
+                $tool_input = match ($item_type) {
+                    'mcp_tool_call' => $item['arguments'] ?? [],
+                    'command_execution' => ['command' => $item['command'] ?? ''],
+                    'file_change' => ['changes' => $item['changes'] ?? []],
+                    'web_search' => ['query' => $item['query'] ?? ''],
+                    'todo_list' => ['items' => $item['items'] ?? []]
+                };
+                $hiddenSkill = $this->isHarnessSkillTool($tool_name, $tool_input);
+                if ($hiddenSkill) {
+                    if ($type !== 'item.completed') {
+                        return;
+                    }
+                }
+
+                $label = $this->toolTranscriptLabel($tool_name, $tool_input);
+                if ($item_type === 'file_change') {
+                    $paths = [];
+                    foreach ($item['changes'] ?? [] as $change) {
+                        if (is_array($change) && trim((string) ($change['path'] ?? '')) !== '') {
+                            $paths[] = (string) $change['path'];
+                        }
+                    }
+                    $label = $paths === [] ? 'Changed files' : 'Changed ' . implode(', ', $paths);
+                }
+                if ($item_type === 'web_search') {
+                    $label = trim((string) ($item['query'] ?? '')) === ''
+                        ? 'Searched the web'
+                        : 'Searched ' . trim((string) $item['query']);
+                }
+                if ($item_type === 'todo_list') {
+                    $label = 'Updated plan';
+                }
+
+                $toolOutput = '';
+                $transcriptOutput = '';
+                if ($isMcp) {
+                    $mcpResult = is_array($item['result'] ?? null) ? $item['result'] : [];
+                    $outputParts = [];
+                    $hasNonTextContent = false;
+                    foreach ($mcpResult['content'] ?? [] as $block) {
+                        if (isset($block['text'])) {
+                            $outputParts[] = (string) $block['text'];
+                        }
+                        if (($block['type'] ?? 'text') !== 'text') {
+                            $hasNonTextContent = true;
+                        }
+                    }
+                    $transcriptOutput = $outputParts !== []
+                        ? implode(PHP_EOL, $outputParts)
+                        : (string) ($item['error'] ?? '');
+                    $additionalResultData = array_diff_key(
+                        $mcpResult,
+                        ['content' => true, 'structuredContent' => true, 'structured_content' => true]
+                    );
+                    $hasStructuredContent = ($mcpResult['structuredContent'] ?? $mcpResult['structured_content'] ?? null) !== null;
+                    $toolOutput = $hasNonTextContent || $hasStructuredContent || $additionalResultData !== []
+                        ? (json_encode(
+                            $mcpResult,
+                            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+                        ) ?: $transcriptOutput)
+                        : $transcriptOutput;
+                }
+                if ($item_type === 'command_execution') {
+                    $toolOutput = (string) ($item['aggregated_output'] ?? '');
+                    $transcriptOutput = $toolOutput;
+                }
+                if (in_array($item_type, ['file_change', 'web_search', 'todo_list'], true)) {
+                    $toolOutput = json_encode($item, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+                    $transcriptOutput = $toolOutput;
+                }
+                $toolFailed =
                     ($item['status'] ?? 'completed') !== 'completed' ||
                     ($item_type === 'command_execution' && (int) ($item['exit_code'] ?? 0) !== 0);
-                $status = $type === 'item.started'
-                    ? 'running'
-                    : ($activity_failed ? 'error' : 'completed');
-                $this->emitActivity(
-                    (string) ($item['id'] ?? ''),
-                    $activity_type,
-                    (string) $activity_label,
-                    $status
-                );
-            }
-            if ($type === 'item.started') {
-                return;
-            }
-        }
-
-        // codex reports whole completed items instead of token deltas, so one
-        // item becomes one closed content block
-        if ($type === 'item.completed') {
-            $item_type = $event['item']['type'] ?? null;
-            // the cli runs its tools itself, so the calls only become visible to the
-            // caller when they are written into the session like a native provider does
-            if (in_array($item_type, ['mcp_tool_call', 'command_execution'], true)) {
-                $item = $event['item'];
-                $is_mcp = $item_type === 'mcp_tool_call';
-                $tool_name = $is_mcp ? ($item['server'] ?? '') . '__' . ($item['tool'] ?? '') : 'shell';
-                $tool_input = $is_mcp ? $item['arguments'] ?? [] : ['command' => $item['command'] ?? ''];
-                // a tool without arguments arrives as "{}", which json_decode turns into an
-                // empty array — anthropic requires tool_use.input to stay a dict
-                if ($tool_input === []) {
-                    $tool_input = new \stdClass();
-                }
-                if ($this->isHarnessSkillTool((string) $tool_name, $tool_input)) {
+                if ($type === 'item.started') {
+                    $ready = $item_type !== 'command_execution' || trim((string) ($item['command'] ?? '')) !== '';
+                    if ($ready) {
+                        $this->emitTranscript(
+                            (string) ($item['id'] ?? ''),
+                            $label,
+                            'running',
+                            $isMcp ? $tool_input : null
+                        );
+                    }
                     return;
                 }
-                $output = [];
-                foreach ($item['result']['content'] ?? [] as $block) {
-                    if (isset($block['text'])) {
-                        $output[] = (string) $block['text'];
-                    }
+                if ($hiddenSkill) {
+                    $skillInput = json_encode($tool_input, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+                    preg_match('#/skills/([^/]+)/SKILL\.md#', $skillInput, $skillMatch);
+                    $this->emitTranscript(
+                        (string) ($item['id'] ?? ''),
+                        'Loaded skill ' . ($skillMatch[1] ?? 'instructions'),
+                        $toolFailed ? 'error' : 'completed',
+                        $toolFailed ? $transcriptOutput : null
+                    );
+                }
+                if (!$hiddenSkill) {
+                    $this->emitTranscript(
+                        (string) ($item['id'] ?? ''),
+                        $label,
+                        $toolFailed ? 'error' : 'completed',
+                        $transcriptOutput
+                    );
+                }
+
+                // the cli runs its tools itself, so every completed operation is
+                // retained in the canonical session even when the visible transcript is shortened
+                if ($tool_input === []) {
+                    $tool_input = new \stdClass();
                 }
                 $result->result->content[] = (object) [
                     'type' => 'tool_use',
@@ -11272,13 +11468,17 @@ class ai_codex extends ai_harness
                 $result->result->content[] = (object) [
                     'type' => 'tool_result',
                     'tool_use_id' => (string) ($item['id'] ?? ''),
-                    'is_error' => ($item['status'] ?? '') !== 'completed',
-                    'content' => $is_mcp
-                        ? ($output !== [] ? implode(PHP_EOL, $output) : (string) ($item['error'] ?? ''))
-                        : (string) ($item['aggregated_output'] ?? '')
+                    'is_error' => $toolFailed,
+                    'content' => $toolOutput
                 ];
                 return;
             }
+        }
+
+        // codex reports whole completed items instead of token deltas, so one
+        // item becomes one closed content block
+        if ($type === 'item.completed') {
+            $item_type = $event['item']['type'] ?? null;
             $text = (string) ($event['item']['text'] ?? '');
             if ($text === '' || !in_array($item_type, ['agent_message', 'reasoning'], true)) {
                 return;
@@ -12027,29 +12227,42 @@ class ai_opencode extends ai_harness
             $call_id = (string) ($event['part']['callID'] ?? '');
             $state = is_array($event['part']['state'] ?? null) ? $event['part']['state'] : [];
             $status = (string) ($state['status'] ?? '');
+            $toolName = (string) ($event['part']['tool'] ?? 'tool');
+            $hiddenSkill = $this->isHarnessSkillTool($toolName, $state['input'] ?? []);
             if (
                 $call_id !== '' &&
                 (isset($state['input']) || in_array($status, ['completed', 'error'], true)) &&
-                !$this->isHarnessSkillTool((string) ($event['part']['tool'] ?? ''), $state['input'] ?? [])
+                !$hiddenSkill
             ) {
-                $this->emitActivity(
+                $this->emitTranscript(
                     $call_id,
-                    'tool',
-                    $this->toolActivityLabel((string) ($event['part']['tool'] ?? 'tool')),
-                    $status === 'error' ? 'error' : ($status === 'completed' ? 'completed' : 'running')
+                    $this->toolTranscriptLabel($toolName, $state['input'] ?? []),
+                    $status === 'error' ? 'error' : ($status === 'completed' ? 'completed' : 'running'),
+                    in_array($status, ['completed', 'error'], true)
+                        ? ($state['output'] ?? ($state['error'] ?? ''))
+                        : ($state['input'] ?? null)
                 );
             }
             // opencode reports the part on every state change, so only the terminal one is recorded
             if ($call_id === '' || !in_array($status, ['completed', 'error'], true)) {
                 return;
             }
-            if (
-                $this->isHarnessSkillTool(
-                    (string) ($event['part']['tool'] ?? ''),
-                    $state['input'] ?? []
-                )
-            ) {
-                return;
+            if ($hiddenSkill) {
+                $skillInput = json_encode($state['input'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+                preg_match('#/skills/([^/]+)/SKILL\.md#', $skillInput, $skillMatch);
+                $this->emitTranscript(
+                    $call_id,
+                    'Loaded skill ' . ($skillMatch[1] ?? 'instructions'),
+                    $status === 'error' ? 'error' : 'completed',
+                    $status === 'error' ? ($state['error'] ?? '') : null
+                );
+            }
+            $toolOutput = $state['output'] ?? ($state['error'] ?? '');
+            if (!is_string($toolOutput)) {
+                $toolOutput = json_encode(
+                    $toolOutput,
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+                ) ?: '';
             }
             $result->result->content[] = (object) [
                 'type' => 'tool_use',
@@ -12061,7 +12274,7 @@ class ai_opencode extends ai_harness
                 'type' => 'tool_result',
                 'tool_use_id' => $call_id,
                 'is_error' => $status === 'error',
-                'content' => (string) ($state['output'] ?? ($state['error'] ?? ''))
+                'content' => $toolOutput
             ];
             return;
         }

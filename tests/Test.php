@@ -736,16 +736,19 @@ class Test extends \PHPUnit\Framework\TestCase
             null
         );
 
-        $this->assertCount(4, $result->result->content);
-        $this->assertSame('charly__charly_create_sub_chat', $result->result->content[0]->name);
-        $this->assertSame(['message' => 'test'], $result->result->content[0]->input);
-        $this->assertSame('PONG-4711', $result->result->content[1]->content);
-        $this->assertFalse($result->result->content[1]->is_error);
-        $this->assertSame('shell', $result->result->content[2]->name);
-        $this->assertSame("HALLO123\n", $result->result->content[3]->content);
+        $this->assertCount(6, $result->result->content);
+        $this->assertSame('shell', $result->result->content[0]->name);
+        $this->assertStringContainsString('SKILL.md', $result->result->content[0]->input['command']);
+        $this->assertStringContainsString('name: filesystem', $result->result->content[1]->content);
+        $this->assertSame('charly__charly_create_sub_chat', $result->result->content[2]->name);
+        $this->assertSame(['message' => 'test'], $result->result->content[2]->input);
+        $this->assertSame('PONG-4711', $result->result->content[3]->content);
+        $this->assertFalse($result->result->content[3]->is_error);
+        $this->assertSame('shell', $result->result->content[4]->name);
+        $this->assertSame("HALLO123\n", $result->result->content[5]->content);
     }
 
-    function test__activity_events_are_normalized_across_tool_paths(): void
+    function test__tool_activity_is_streamed_as_a_reasoning_transcript(): void
     {
         $mcpResponse = [
             'result' => [
@@ -760,10 +763,31 @@ class Test extends \PHPUnit\Framework\TestCase
         $provider->runToolLoop();
         ob_end_flush();
         $providerOutput = (string) ob_get_clean();
-        $this->assertStringContainsString('event: activity', $providerOutput);
-        $this->assertStringContainsString('"label":"Render image"', $providerOutput);
-        $this->assertStringContainsString('"status":"running"', $providerOutput);
-        $this->assertStringContainsString('"status":"completed"', $providerOutput);
+        $this->assertStringContainsString('event: reasoning', $providerOutput);
+        $this->assertStringContainsString('"kind":"transcript"', $providerOutput);
+        $this->assertStringContainsString('Used Render image', $providerOutput);
+        $this->assertStringContainsString('ok', $providerOutput);
+
+        $transcript = new \ReflectionMethod(aihelper::class, 'emitTranscript');
+        ob_start();
+        ob_start();
+        $transcript->invoke(
+            $provider,
+            null,
+            'Used protected tool',
+            'completed',
+            [
+                'api_key' => 'secret-value',
+                'output' => 'AIHELPER_MCP_TOKEN_TEST=token-value',
+                'image' => ['type' => 'image', 'data' => str_repeat('A', 1000)]
+            ]
+        );
+        ob_end_flush();
+        $protectedOutput = (string) ob_get_clean();
+        $this->assertStringNotContainsString('secret-value', $protectedOutput);
+        $this->assertStringNotContainsString('token-value', $protectedOutput);
+        $this->assertStringNotContainsString(str_repeat('A', 100), $protectedOutput);
+        $this->assertStringContainsString('[binary data omitted]', $protectedOutput);
 
         $result = (object) ['result' => (object) ['content' => []]];
         $codex = aihelper::create(provider: 'codex');
@@ -777,7 +801,13 @@ class Test extends \PHPUnit\Framework\TestCase
                 'tool' => 'get_card',
                 'arguments' => [],
                 'status' => 'completed',
-                'result' => ['content' => [['type' => 'text', 'text' => 'ok']]]
+                'result' => [
+                    'content' => [
+                        ['type' => 'text', 'text' => 'ok'],
+                        ['type' => 'image', 'data' => str_repeat('A', 1000), 'mimeType' => 'image/png']
+                    ],
+                    'structuredContent' => ['ticket' => ['id' => '4711']]
+                ]
             ]
         ];
         ob_start();
@@ -796,6 +826,35 @@ class Test extends \PHPUnit\Framework\TestCase
         ];
         $codexHandler->invoke($codex, ['type' => 'item.started'] + $codexCommandEvent, $result, null);
         $codexHandler->invoke($codex, ['type' => 'item.completed'] + $codexCommandEvent, $result, null);
+        foreach (
+            [
+                [
+                    'id' => 'codex-files-1',
+                    'type' => 'file_change',
+                    'changes' => [['path' => '/tmp/example.php', 'kind' => 'update']],
+                    'status' => 'completed'
+                ],
+                [
+                    'id' => 'codex-search-1',
+                    'type' => 'web_search',
+                    'query' => 'current documentation',
+                    'status' => 'completed'
+                ],
+                [
+                    'id' => 'codex-plan-1',
+                    'type' => 'todo_list',
+                    'items' => [['text' => 'Run tests', 'completed' => false]],
+                    'status' => 'completed'
+                ]
+            ] as $codexItem
+        ) {
+            $codexHandler->invoke(
+                $codex,
+                ['type' => 'item.completed', 'item' => $codexItem],
+                $result,
+                null
+            );
+        }
         $codexHandler->invoke(
             $codex,
             ['type' => 'item.started', 'item' => ['id' => 'codex-skill-1', 'type' => 'command_execution']],
@@ -820,13 +879,34 @@ class Test extends \PHPUnit\Framework\TestCase
         );
         ob_end_flush();
         $codexOutput = (string) ob_get_clean();
-        $this->assertStringContainsString('"id":"codex-tool-1"', $codexOutput);
-        $this->assertStringContainsString('"label":"Trello · get card"', $codexOutput);
-        $this->assertMatchesRegularExpression(
-            '/"id":"codex-command-1".*"status":"error"/s',
-            $codexOutput
+        $this->assertStringContainsString('Used Trello · get card', $codexOutput);
+        $this->assertStringContainsString('Ran false', $codexOutput);
+        $this->assertStringContainsString('Failed.', $codexOutput);
+        $this->assertStringContainsString('Changed /tmp/example.php', $codexOutput);
+        $this->assertStringContainsString('Searched current documentation', $codexOutput);
+        $this->assertStringContainsString('Updated plan', $codexOutput);
+        $this->assertStringContainsString('Loaded skill filesystem', $codexOutput);
+        $this->assertStringNotContainsString('internal', $codexOutput);
+        $codexMcpResult = array_values(
+            array_filter(
+                $result->result->content,
+                fn(object $entry): bool => $entry->type === 'tool_result' &&
+                    ($entry->tool_use_id ?? null) === 'codex-tool-1'
+            )
+        )[0];
+        $decodedCodexMcpResult = json_decode($codexMcpResult->content, true, 512, JSON_THROW_ON_ERROR);
+        $this->assertSame('4711', $decodedCodexMcpResult['structuredContent']['ticket']['id']);
+        $this->assertSame(str_repeat('A', 1000), $decodedCodexMcpResult['content'][1]['data']);
+        $this->assertStringNotContainsString(str_repeat('A', 100), $codexOutput);
+        $this->assertSame(
+            ['trello__get_card', 'shell', 'file_change', 'web_search', 'todo_list', 'shell'],
+            array_values(
+                array_map(
+                    fn(object $entry): string => (string) $entry->name,
+                    array_filter($result->result->content, fn(object $entry): bool => $entry->type === 'tool_use')
+                )
+            )
         );
-        $this->assertStringNotContainsString('codex-skill-1', $codexOutput);
 
         $claude = aihelper::create(provider: 'claudecode');
         (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($claude, true);
@@ -866,9 +946,8 @@ class Test extends \PHPUnit\Framework\TestCase
         );
         ob_end_flush();
         $claudeOutput = (string) ob_get_clean();
-        $this->assertStringContainsString('"id":"claude-tool-1"', $claudeOutput);
-        $this->assertStringContainsString('"label":"Trello · get card"', $claudeOutput);
-        $this->assertStringContainsString('"status":"completed"', $claudeOutput);
+        $this->assertStringContainsString('Used Trello · get card', $claudeOutput);
+        $this->assertStringContainsString('ok', $claudeOutput);
 
         $opencode = aihelper::create(provider: 'opencode');
         (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($opencode, true);
@@ -881,7 +960,11 @@ class Test extends \PHPUnit\Framework\TestCase
         ob_start();
         ob_start();
         $opencodeHandler->invoke($opencode, ['type' => 'tool', 'part' => $opencodePart], $result, null);
-        $opencodePart['state'] = ['status' => 'error', 'input' => [], 'error' => 'failed'];
+        $opencodePart['state'] = [
+            'status' => 'error',
+            'input' => [],
+            'output' => ['message' => 'failed', 'code' => 4711]
+        ];
         $opencodeHandler->invoke($opencode, ['type' => 'tool', 'part' => $opencodePart], $result, null);
         $opencodeHandler->invoke(
             $opencode,
@@ -917,9 +1000,21 @@ class Test extends \PHPUnit\Framework\TestCase
         );
         ob_end_flush();
         $opencodeOutput = (string) ob_get_clean();
-        $this->assertStringContainsString('"id":"opencode-tool-1"', $opencodeOutput);
-        $this->assertStringContainsString('"status":"error"', $opencodeOutput);
-        $this->assertStringNotContainsString('opencode-skill-1', $opencodeOutput);
+        $this->assertStringContainsString('Used Trello get card', $opencodeOutput);
+        $this->assertStringContainsString('failed', $opencodeOutput);
+        $this->assertStringContainsString('Loaded skill filesystem', $opencodeOutput);
+        $this->assertStringNotContainsString('internal', $opencodeOutput);
+        $opencodeResult = array_values(
+            array_filter(
+                $result->result->content,
+                fn(object $entry): bool => $entry->type === 'tool_result' &&
+                    ($entry->tool_use_id ?? null) === 'opencode-tool-1'
+            )
+        )[0];
+        $this->assertSame(
+            ['message' => 'failed', 'code' => 4711],
+            json_decode($opencodeResult->content, true, 512, JSON_THROW_ON_ERROR)
+        );
     }
 
     function test__large_payloads_are_passed_as_files_not_arguments(): void
@@ -943,25 +1038,49 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->assertLessThan(128 * 1024, strlen((string) $argument));
         }
 
-        $codex = (new \ReflectionClass(\vielhuber\aihelper\ai_codex::class))->newInstanceWithoutConstructor();
-        (new \ReflectionProperty(aihelper::class, 'session_id'))->setValue($codex, 'payload-args-test');
-        (new \ReflectionProperty(aihelper::class, 'system_prompt'))->setValue($codex, $prompt);
-        $environment = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'harnessEnvironmentOverrides'))->invoke(
-            $codex
-        );
-        $codexArgs = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'buildArgs'))->invoke($codex);
+        $previousHome = getenv('HOME');
+        $testHome = sys_get_temp_dir() . '/aihelper-test-home-' . uniqid();
+        putenv('HOME=' . $testHome);
+        try {
+            $codex = (new \ReflectionClass(\vielhuber\aihelper\ai_codex::class))->newInstanceWithoutConstructor();
+            (new \ReflectionProperty(aihelper::class, 'session_id'))->setValue($codex, 'payload-args-test');
+            (new \ReflectionProperty(aihelper::class, 'system_prompt'))->setValue($codex, $prompt);
+            $environment = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'harnessEnvironmentOverrides'))->invoke(
+                $codex
+            );
+            $codexArgs = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'buildArgs'))->invoke($codex);
 
-        $this->assertArrayHasKey('CODEX_HOME', $environment);
-        $config = (string) file_get_contents($environment['CODEX_HOME'] . '/config.toml');
-        $this->assertStringContainsString('🤖', $config);
-        $this->assertStringNotContainsString('\\ud83e', $config);
-        $this->assertSame(
-            $prompt,
-            json_decode(trim(substr(strtok($config, "\n"), strlen('instructions = '))), false, 512, JSON_THROW_ON_ERROR)
-        );
-        $this->assertNotContains('--ignore-user-config', $codexArgs);
-        foreach ($codexArgs as $argument) {
-            $this->assertLessThan(128 * 1024, strlen((string) $argument));
+            $this->assertArrayHasKey('CODEX_HOME', $environment);
+            $this->assertStringContainsString('/.codex/charly/payload-args-test', $environment['CODEX_HOME']);
+            $this->assertSame(0700, fileperms($environment['CODEX_HOME']) & 0777);
+            $this->assertTrue(is_link($environment['CODEX_HOME'] . '/config.toml'));
+            $this->assertTrue(is_link($environment['CODEX_HOME'] . '/skills'));
+            $config = (string) file_get_contents($environment['CODEX_HOME'] . '/config.toml');
+            $this->assertStringContainsString('🤖', $config);
+            $this->assertStringNotContainsString('\\ud83e', $config);
+            $this->assertStringContainsString(
+                'sqlite_home = ' . json_encode(
+                    dirname(dirname($environment['CODEX_HOME'])),
+                    JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES
+                ),
+                $config
+            );
+            $this->assertSame(
+                $prompt,
+                json_decode(
+                    trim(substr(strtok($config, "\n"), strlen('instructions = '))),
+                    false,
+                    512,
+                    JSON_THROW_ON_ERROR
+                )
+            );
+            $this->assertNotContains('--ignore-user-config', $codexArgs);
+            foreach ($codexArgs as $argument) {
+                $this->assertLessThan(128 * 1024, strlen((string) $argument));
+            }
+        } finally {
+            putenv($previousHome === false ? 'HOME' : 'HOME=' . $previousHome);
+            __::rrmdir($testHome);
         }
 
         unlink($path);
