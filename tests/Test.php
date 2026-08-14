@@ -803,7 +803,7 @@ class Test extends \PHPUnit\Framework\TestCase
         ]);
         $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'buildArgs'))->invoke($codex);
 
-        $this->assertContains('mcp_servers.github.startup_timeout_sec=180', $args);
+        $this->assertContains('mcp_servers.github.startup_timeout_sec=300', $args);
         $this->assertContains('mcp_servers.github.required=true', $args);
     }
 
@@ -859,6 +859,24 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertStringNotContainsString(base64_encode('mcp-image'), $contents);
         $this->assertStringContainsString(
             '[binary data omitted: mime=image/png bytes=9 sha256=' . hash('sha256', 'mcp-image') . ']',
+            $contents
+        );
+
+        $codex->log([
+            'content' => [[
+                'type' => 'image',
+                'source' => [
+                    'type' => 'base64',
+                    'media_type' => 'image/png',
+                    'data' => base64_encode('anthropic-image')
+                ]
+            ]]
+        ], 'test');
+        $contents = (string) file_get_contents($log);
+
+        $this->assertStringNotContainsString(base64_encode('anthropic-image'), $contents);
+        $this->assertStringContainsString(
+            '[binary data omitted: mime=image/png bytes=15 sha256=' . hash('sha256', 'anthropic-image') . ']',
             $contents
         );
         unlink($log);

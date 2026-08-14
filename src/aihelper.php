@@ -6016,7 +6016,7 @@ abstract class aihelper
                 }
                 if (is_array($value)) {
                     $contentType = strtolower((string) ($value['type'] ?? ''));
-                    $mimeType = $value['mimeType'] ?? $value['mime_type'] ?? null;
+                    $mimeType = $value['mimeType'] ?? $value['mime_type'] ?? $value['media_type'] ?? null;
                     $binaryData = $value['data'] ?? null;
                     foreach ($value as $key => $item) {
                         if (
@@ -6031,7 +6031,7 @@ abstract class aihelper
                         }
                         if (
                             $key === 'data' &&
-                            in_array($contentType, ['audio', 'image'], true) &&
+                            in_array($contentType, ['audio', 'image', 'base64'], true) &&
                             is_string($binaryData) &&
                             is_string($mimeType)
                         ) {
@@ -10999,7 +10999,7 @@ class ai_codex extends ai_harness
             // toml has no "\/" escape, so the slashes must survive unescaped
             $options[] = $key . '.url=' . json_encode($server['url'], JSON_UNESCAPED_SLASHES);
             $options[] = '-c';
-            $options[] = $key . '.startup_timeout_sec=180';
+            $options[] = $key . '.startup_timeout_sec=300';
             if ($server['required'] === true) {
                 $options[] = '-c';
                 $options[] = $key . '.required=true';
