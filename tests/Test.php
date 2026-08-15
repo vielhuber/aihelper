@@ -1180,6 +1180,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $this->assertContains('mcp_servers.github.startup_timeout_sec=300', $args);
         $this->assertContains('mcp_servers.github.required=true', $args);
+        $this->assertSame('shell_snapshot', $args[array_search('--disable', $args, true) + 1]);
     }
 
     function test__harness_logs_redact_mcp_tokens(): void

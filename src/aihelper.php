@@ -11268,7 +11268,14 @@ class ai_codex extends ai_harness
         // when the directory has none yet; the bypass flag (alias "--yolo") is
         // required because codex sandboxes via bubblewrap, which needs a user
         // namespace that a default docker container does not grant
-        $options = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox'];
+        // Shell snapshots can serialize interactive functions that a clean Bash cannot parse.
+        $options = [
+            '--json',
+            '--skip-git-repo-check',
+            '--dangerously-bypass-approvals-and-sandbox',
+            '--disable',
+            'shell_snapshot'
+        ];
         if ($this->model !== null) {
             $options[] = '--model';
             $options[] = $this->model;
