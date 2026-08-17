@@ -1270,6 +1270,26 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame('shell_snapshot', $args[array_search('--disable', $args, true) + 1]);
     }
 
+    /**
+     * Keep model metadata aligned with each harness CLI's accepted effort values.
+     */
+    function test__harness_models_define_supported_efforts(): void
+    {
+        $expectedEfforts = [
+            'codex' => ['minimal', 'low', 'medium', 'high', 'xhigh'],
+            'claudecode' => ['low', 'medium', 'high', 'xhigh', 'max'],
+            'opencode' => ['minimal', 'low', 'medium', 'high', 'max']
+        ];
+
+        foreach ($expectedEfforts as $provider => $efforts) {
+            $harness = aihelper::create(provider: $provider);
+            foreach ($harness->models as $model) {
+                $this->assertTrue($model['supports_effort'] ?? false, (string) ($model['name'] ?? 'unknown'));
+                $this->assertSame($efforts, $model['efforts'] ?? [], (string) ($model['name'] ?? 'unknown'));
+            }
+        }
+    }
+
     function test__harness_logs_redact_mcp_tokens(): void
     {
         $log = tempnam(sys_get_temp_dir(), 'aihelper-log-');

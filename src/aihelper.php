@@ -10959,6 +10959,8 @@ class ai_claudecode extends ai_harness
             'supports_text_to_audio' => false,
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
+            'supports_effort' => true,
+            'efforts' => ['low', 'medium', 'high', 'xhigh', 'max'],
             'default' => true
         ],
         [
@@ -10972,6 +10974,8 @@ class ai_claudecode extends ai_harness
             'supports_text_to_audio' => false,
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
+            'supports_effort' => true,
+            'efforts' => ['low', 'medium', 'high', 'xhigh', 'max'],
             'default' => false
         ],
         [
@@ -10985,6 +10989,8 @@ class ai_claudecode extends ai_harness
             'supports_text_to_audio' => false,
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
+            'supports_effort' => true,
+            'efforts' => ['low', 'medium', 'high', 'xhigh', 'max'],
             'default' => false
         ]
     ];
@@ -11296,6 +11302,8 @@ class ai_codex extends ai_harness
             'supports_text_to_audio' => false,
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
+            'supports_effort' => true,
+            'efforts' => ['minimal', 'low', 'medium', 'high', 'xhigh'],
             'default' => true
         ],
         [
@@ -11309,6 +11317,8 @@ class ai_codex extends ai_harness
             'supports_text_to_audio' => false,
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
+            'supports_effort' => true,
+            'efforts' => ['minimal', 'low', 'medium', 'high', 'xhigh'],
             'default' => false
         ]
     ];
