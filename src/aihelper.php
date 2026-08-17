@@ -28,6 +28,8 @@ abstract class aihelper
     protected ?string $ssh_user = null;
     protected ?int $ssh_port = null;
     protected ?string $ssh_key = null;
+    protected ?string $cli_session_id = null;
+    protected bool $cli_resume_latest = true;
     protected ?string $log = null;
     protected ?int $max_tries = null;
     protected ?bool $enable_thinking = null;
@@ -88,7 +90,9 @@ abstract class aihelper
         ?int $cli_ssh_port = null,
         ?string $cli_ssh_key = null,
         ?string $system_prompt = null,
-        ?array $cli_skills = null
+        ?array $cli_skills = null,
+        ?string $cli_session_id = null,
+        bool $cli_resume_latest = true
     ): ?self {
         if ($provider === 'openai') {
             return new ai_openai(
@@ -343,6 +347,8 @@ abstract class aihelper
                 cli_ssh_user: $cli_ssh_user,
                 cli_ssh_port: $cli_ssh_port,
                 cli_ssh_key: $cli_ssh_key,
+                cli_session_id: $cli_session_id,
+                cli_resume_latest: $cli_resume_latest,
                 system_prompt: $system_prompt,
                 cli_skills: $cli_skills
             );
@@ -369,6 +375,8 @@ abstract class aihelper
                 cli_ssh_user: $cli_ssh_user,
                 cli_ssh_port: $cli_ssh_port,
                 cli_ssh_key: $cli_ssh_key,
+                cli_session_id: $cli_session_id,
+                cli_resume_latest: $cli_resume_latest,
                 system_prompt: $system_prompt,
                 cli_skills: $cli_skills
             );
@@ -395,6 +403,8 @@ abstract class aihelper
                 cli_ssh_user: $cli_ssh_user,
                 cli_ssh_port: $cli_ssh_port,
                 cli_ssh_key: $cli_ssh_key,
+                cli_session_id: $cli_session_id,
+                cli_resume_latest: $cli_resume_latest,
                 system_prompt: $system_prompt,
                 cli_skills: $cli_skills
             );
@@ -708,7 +718,9 @@ abstract class aihelper
         ?int $cli_ssh_port = null,
         ?string $cli_ssh_key = null,
         ?string $system_prompt = null,
-        ?array $cli_skills = null
+        ?array $cli_skills = null,
+        ?string $cli_session_id = null,
+        bool $cli_resume_latest = true
     ) {
         if ($cli_workdir !== null) {
             $this->workdir = $cli_workdir;
@@ -725,6 +737,9 @@ abstract class aihelper
         if ($cli_ssh_key !== null) {
             $this->ssh_key = $cli_ssh_key;
         }
+        $cli_session_id = trim((string) ($cli_session_id ?? ''));
+        $this->cli_session_id = $cli_session_id !== '' ? $cli_session_id : null;
+        $this->cli_resume_latest = $cli_resume_latest;
         if ($cli_skills !== null) {
             $this->cli_skills = $cli_skills;
         }
@@ -5992,6 +6007,14 @@ abstract class aihelper
         return $this->session_id;
     }
 
+    /**
+     * Return the native conversation identifier reported by a CLI harness.
+     */
+    public function getCliSessionId(): ?string
+    {
+        return $this->cli_session_id;
+    }
+
     public function getSessionContent(): array
     {
         return self::$sessions[$this->session_id];
@@ -6423,6 +6446,18 @@ abstract class aihelper
                         if ($line === '' && $this->stream_event !== null && $this->stream_buffer_data !== '') {
                             $parsed = json_decode($this->stream_buffer_data, true);
                             $this->stream_running = true;
+
+                            if ($this->stream_event === 'harness_session' && is_array($parsed)) {
+                                echo "event: harness_session\n";
+                                echo 'data: ' .
+                                    json_encode($parsed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) .
+                                    "\n\n";
+                                if (ob_get_level() > 0) {
+                                    ob_flush();
+                                }
+                                flush();
+                                $this->stream_running = false;
+                            }
 
                             // extract stop_reason from message_delta event
                             if (
@@ -10052,9 +10087,9 @@ class ai_cliproxyapi extends ai_openrouter
  * Unlike every other provider these do not call a chat completion endpoint:
  * they drive a local CLI process that owns its own system prompt, tool
  * execution and conversation history. Only the newest user turn is handed
- * over — continuity comes from a harness session keyed by the aihelper
- * session id, which keeps the very same conversation resumable by hand from
- * a terminal.
+ * over. Continuity either follows the latest workdir session or an explicitly
+ * supplied native session ID, which keeps the same conversation resumable by
+ * hand from a terminal.
  */
 abstract class ai_harness extends ai_anthropic
 {
@@ -10097,6 +10132,22 @@ abstract class ai_harness extends ai_anthropic
      * @return void
      */
     abstract protected function handleEvent(array $event, object $result, ?\Closure $emit): void;
+
+    /**
+     * Publish the native identifier before a long-running harness turn can fail.
+     */
+    protected function emitHarnessSession(?\Closure $emit, string $sessionId): void
+    {
+        $sessionId = trim($sessionId);
+        if ($sessionId === '') {
+            return;
+        }
+        $this->cli_session_id = $sessionId;
+        $this->emitAnthropicEvent($emit, [
+            'type' => 'harness_session',
+            'session_id' => $sessionId
+        ]);
+    }
 
     /**
      * Preserve native lifecycle data without interpreting provider-specific fields.
@@ -10976,18 +11027,24 @@ class ai_claudecode extends ai_harness
 
     protected function buildArgs(): array
     {
-        $this->dropFailedTurns();
-        // "--continue" picks the newest conversation of the working directory
-        // and falls back to a fresh one when the directory has none yet
+        if ($this->cli_session_id !== null || $this->cli_resume_latest) {
+            $this->dropFailedTurns();
+        }
         $args = [
             '-p',
             '--verbose',
             '--input-format',
             'stream-json',
             '--output-format',
-            'stream-json',
-            '--continue'
+            'stream-json'
         ];
+        if ($this->cli_session_id !== null) {
+            $args[] = '--resume';
+            $args[] = $this->cli_session_id;
+        }
+        if ($this->cli_session_id === null && $this->cli_resume_latest) {
+            $args[] = '--continue';
+        }
         if ($this->stream === true) {
             $args[] = '--include-partial-messages';
         }
@@ -11065,10 +11122,13 @@ class ai_claudecode extends ai_harness
         // claude code stores a conversation under its working directory with every
         // character outside [a-z0-9-] folded into a dash
         $project = preg_replace('/[^A-Za-z0-9]/', '-', $this->workspace());
+        $file = $this->cli_session_id === null
+            ? 'f=$(ls -t "$d"/*.jsonl 2>/dev/null | head -1)'
+            : 'f="$d"/' . escapeshellarg($this->cli_session_id . '.jsonl');
         $command =
             'd="${HOME:-/root}/.claude/projects/' .
             $project .
-            '"; f=$(ls -t "$d"/*.jsonl 2>/dev/null | head -1); [ -n "$f" ] || exit 0; ' .
+            '"; ' . $file . '; [ -f "$f" ] || exit 0; ' .
             'awk \'index($0, "<synthetic>") && index($0, "API Error") { exit } { print }\' "$f" > "$f.heal" || exit 0; ' .
             'if [ -s "$f.heal" ] && [ "$(wc -c < "$f.heal")" -lt "$(wc -c < "$f")" ]; ' .
             'then mv "$f.heal" "$f"; else rm -f "$f.heal"; fi';
@@ -11102,7 +11162,9 @@ class ai_claudecode extends ai_harness
         $type = $event['type'] ?? null;
 
         if ($type === 'system' && ($event['subtype'] ?? null) === 'init' && !empty($event['session_id'])) {
-            $this->log((string) $event['session_id'], 'harness session');
+            $sessionId = (string) $event['session_id'];
+            $this->log($sessionId, 'harness session');
+            $this->emitHarnessSession($emit, $sessionId);
             $this->emitHarnessLifecycleEvent($event);
             return;
         }
@@ -11264,10 +11326,10 @@ class ai_codex extends ai_harness
 
     protected function buildArgs(): array
     {
-        // "--last" is filtered by working directory and starts a fresh thread
-        // when the directory has none yet; the bypass flag (alias "--yolo") is
-        // required because codex sandboxes via bubblewrap, which needs a user
-        // namespace that a default docker container does not grant
+        /**
+         * The bypass flag is required because the Codex sandbox needs a user namespace
+         * that a default Docker container does not grant.
+         */
         // Shell snapshots can serialize interactive functions that a clean Bash cannot parse.
         $options = [
             '--json',
@@ -11324,6 +11386,12 @@ class ai_codex extends ai_harness
             $options[] = '-c';
             $options[] =
                 $key . '.bearer_token_env_var=' . json_encode($this->harnessMcpTokenVariable($name), JSON_UNESCAPED_SLASHES);
+        }
+        if ($this->cli_session_id !== null) {
+            return array_merge(['exec', 'resume', $this->cli_session_id], $options);
+        }
+        if (!$this->cli_resume_latest) {
+            return array_merge(['exec'], $options);
         }
         return array_merge(['exec', 'resume', '--last'], $options);
     }
@@ -11431,7 +11499,9 @@ class ai_codex extends ai_harness
         $type = $event['type'] ?? null;
 
         if ($type === 'thread.started' && !empty($event['thread_id'])) {
-            $this->log((string) $event['thread_id'], 'harness session');
+            $sessionId = (string) $event['thread_id'];
+            $this->log($sessionId, 'harness session');
+            $this->emitHarnessSession($emit, $sessionId);
             $this->emitHarnessLifecycleEvent($event);
             $this->emitAnthropicEvent($emit, [
                 'type' => 'message_start',
@@ -12263,7 +12333,15 @@ class ai_opencode extends ai_harness
 
     protected function buildArgs(): array
     {
-        $args = ['run', '--continue', '--format', 'json', '--auto'];
+        $args = ['run'];
+        if ($this->cli_session_id !== null) {
+            $args[] = '--session';
+            $args[] = $this->cli_session_id;
+        }
+        if ($this->cli_session_id === null && $this->cli_resume_latest) {
+            $args[] = '--continue';
+        }
+        $args = array_merge($args, ['--format', 'json', '--auto']);
         foreach ($this->harnessFilePaths() as $path) {
             $args[] = '--file';
             $args[] = $path;
@@ -12284,7 +12362,9 @@ class ai_opencode extends ai_harness
         $type = $event['type'] ?? null;
         if ($type === 'step_start') {
             if (!empty($event['sessionID'])) {
-                $this->log((string) $event['sessionID'], 'harness session');
+                $sessionId = (string) $event['sessionID'];
+                $this->log($sessionId, 'harness session');
+                $this->emitHarnessSession($emit, $sessionId);
             }
             $this->emitHarnessLifecycleEvent($event);
             if ($this->message_started === false) {

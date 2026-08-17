@@ -539,6 +539,93 @@ class Test extends \PHPUnit\Framework\TestCase
         );
     }
 
+    function test__harness_session_selection_is_explicit_when_requested(): void
+    {
+        $cases = [
+            'claudecode' => [
+                'legacy' => ['--continue'],
+                'fresh_absent' => ['--continue', '--resume'],
+                'resume' => ['--resume', 'native-session']
+            ],
+            'codex' => [
+                'legacy' => ['exec', 'resume', '--last'],
+                'fresh_absent' => ['resume', '--last'],
+                'resume' => ['exec', 'resume', 'native-session']
+            ],
+            'opencode' => [
+                'legacy' => ['--continue'],
+                'fresh_absent' => ['--continue', '--session'],
+                'resume' => ['--session', 'native-session']
+            ]
+        ];
+
+        foreach ($cases as $provider => $expectations) {
+            $harness = aihelper::create(provider: $provider);
+            $args = (new \ReflectionMethod($harness, 'buildArgs'))->invoke($harness);
+            foreach ($expectations['legacy'] as $argument) {
+                $this->assertContains($argument, $args);
+            }
+
+            $harness = aihelper::create(provider: $provider, cli_resume_latest: false);
+            $args = (new \ReflectionMethod($harness, 'buildArgs'))->invoke($harness);
+            foreach ($expectations['fresh_absent'] as $argument) {
+                $this->assertNotContains($argument, $args);
+            }
+
+            $harness = aihelper::create(provider: $provider, cli_session_id: 'native-session');
+            $args = (new \ReflectionMethod($harness, 'buildArgs'))->invoke($harness);
+            $this->assertSame('native-session', $harness->getCliSessionId());
+            $positions = [];
+            foreach ($expectations['resume'] as $argument) {
+                $position = array_search($argument, $args, true);
+                $this->assertNotFalse($position);
+                $positions[] = $position;
+            }
+            $this->assertSame($positions, array_values(array_unique($positions)));
+        }
+    }
+
+    function test__harnesses_emit_their_native_session_id(): void
+    {
+        $cases = [
+            'claudecode' => ['type' => 'system', 'subtype' => 'init', 'session_id' => 'claude-session'],
+            'codex' => ['type' => 'thread.started', 'thread_id' => 'codex-session'],
+            'opencode' => ['type' => 'step_start', 'sessionID' => 'opencode-session']
+        ];
+
+        foreach ($cases as $provider => $event) {
+            $harness = aihelper::create(provider: $provider);
+            (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($harness, true);
+            $result = (object) [
+                'result' => (object) [
+                    'content' => [],
+                    'stop_reason' => null,
+                    'usage' => (object) [
+                        'input_tokens' => 0,
+                        'cache_creation_input_tokens' => 0,
+                        'cache_read_input_tokens' => 0,
+                        'output_tokens' => 0
+                    ]
+                ]
+            ];
+            ob_start();
+            ob_start();
+            $emit = (new \ReflectionMethod($harness, 'getStreamCallback'))->invoke($harness);
+            (new \ReflectionMethod($harness, 'handleEvent'))->invoke($harness, $event, $result, $emit);
+            ob_end_flush();
+            $output = (string) ob_get_clean();
+            $nativeSessionId = match ($provider) {
+                'claudecode' => 'claude-session',
+                'codex' => 'codex-session',
+                default => 'opencode-session'
+            };
+
+            $this->assertSame($nativeSessionId, $harness->getCliSessionId());
+            $this->assertStringContainsString('event: harness_session', $output);
+            $this->assertStringContainsString('"session_id":"' . $nativeSessionId . '"', $output);
+        }
+    }
+
     function test__opencode_uses_json_mode_and_maps_variant(): void
     {
         $this->skipOnCi();
