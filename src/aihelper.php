@@ -30,6 +30,7 @@ abstract class aihelper
     protected ?string $ssh_key = null;
     protected ?string $cli_session_id = null;
     protected bool $cli_resume_latest = true;
+    protected bool $cli_native_memory = true;
     protected ?string $log = null;
     protected ?int $max_tries = null;
     protected ?bool $enable_thinking = null;
@@ -92,7 +93,8 @@ abstract class aihelper
         ?string $system_prompt = null,
         ?array $cli_skills = null,
         ?string $cli_session_id = null,
-        bool $cli_resume_latest = true
+        bool $cli_resume_latest = true,
+        bool $cli_native_memory = true
     ): ?self {
         if ($provider === 'openai') {
             return new ai_openai(
@@ -349,6 +351,7 @@ abstract class aihelper
                 cli_ssh_key: $cli_ssh_key,
                 cli_session_id: $cli_session_id,
                 cli_resume_latest: $cli_resume_latest,
+                cli_native_memory: $cli_native_memory,
                 system_prompt: $system_prompt,
                 cli_skills: $cli_skills
             );
@@ -377,6 +380,7 @@ abstract class aihelper
                 cli_ssh_key: $cli_ssh_key,
                 cli_session_id: $cli_session_id,
                 cli_resume_latest: $cli_resume_latest,
+                cli_native_memory: $cli_native_memory,
                 system_prompt: $system_prompt,
                 cli_skills: $cli_skills
             );
@@ -405,6 +409,7 @@ abstract class aihelper
                 cli_ssh_key: $cli_ssh_key,
                 cli_session_id: $cli_session_id,
                 cli_resume_latest: $cli_resume_latest,
+                cli_native_memory: $cli_native_memory,
                 system_prompt: $system_prompt,
                 cli_skills: $cli_skills
             );
@@ -720,7 +725,8 @@ abstract class aihelper
         ?string $system_prompt = null,
         ?array $cli_skills = null,
         ?string $cli_session_id = null,
-        bool $cli_resume_latest = true
+        bool $cli_resume_latest = true,
+        bool $cli_native_memory = true
     ) {
         if ($cli_workdir !== null) {
             $this->workdir = $cli_workdir;
@@ -740,6 +746,7 @@ abstract class aihelper
         $cli_session_id = trim((string) ($cli_session_id ?? ''));
         $this->cli_session_id = $cli_session_id !== '' ? $cli_session_id : null;
         $this->cli_resume_latest = $cli_resume_latest;
+        $this->cli_native_memory = $cli_native_memory;
         if ($cli_skills !== null) {
             $this->cli_skills = $cli_skills;
         }
@@ -11020,6 +11027,9 @@ class ai_claudecode extends ai_harness
             'MCP_TIMEOUT' => '300000',
             'CLAUDE_CODE_DISABLE_BUNDLED_SKILLS' => '1'
         ];
+        if ($this->cli_native_memory === false) {
+            $overrides['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1';
+        }
         if ($this->url !== null && trim($this->url) !== '') {
             // claude code appends "/v1" itself, while gateway urls are usually
             // configured with it — keeping both would request "/v1/v1/messages"
@@ -11348,6 +11358,12 @@ class ai_codex extends ai_harness
             '--disable',
             'shell_snapshot'
         ];
+        if ($this->cli_native_memory === false) {
+            $options[] = '-c';
+            $options[] = 'memories.generate_memories=false';
+            $options[] = '-c';
+            $options[] = 'memories.use_memories=false';
+        }
         if ($this->model !== null) {
             $options[] = '--model';
             $options[] = $this->model;

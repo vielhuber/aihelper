@@ -44,6 +44,7 @@ $ai = aihelper::create(
     session_id: null, // submit session to continue a conversation (get with $ai->getSessionId())
     cli_session_id: null, // cli harness only: resume this exact native session (get with $ai->getCliSessionId())
     cli_resume_latest: true, // cli harness only: without cli_session_id, continue the newest session in cli_workdir instead of starting fresh
+    cli_native_memory: true, // cli harness only: let the harness load and maintain its own automatic long-term memory
     history: null, // submit messages (get with $ai->getSessionContent()),
     system_prompt: null, // works with every provider — cli harnesses receive it as a real system prompt, everyone else gets it prepended to the session (same as writing it into `history` yourself or calling $ai->setSystemPrompt() later)
     stream: false,
@@ -156,6 +157,11 @@ set `cli_resume_latest: false` for an explicitly fresh thread, then persist `$ai
 codex keeps injected config and skills isolated per aihelper session while storing its threads in the native
 `~/.codex` state. to include threads originally started by aihelper's non-interactive `codex exec`, resume from
 an interactive terminal with `codex resume --last --include-non-interactive`.
+
+set `cli_native_memory: false` when the caller supplies its own long-term memory. claude code then disables auto
+memory while retaining `CLAUDE.md`, plugins and skills; codex neither generates nor loads its native memories.
+opencode currently has no equivalent automatic semantic memory layer, so the option does not alter its sessions
+or instruction files.
 
 set `cli_ssh_host` to run the agent on another machine instead of locally — the working directory, the login and the threads are then that machine's:
 

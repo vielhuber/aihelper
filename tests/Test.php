@@ -585,6 +585,23 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
+    function test__native_harness_memory_can_be_disabled(): void
+    {
+        $claude = aihelper::create(provider: 'claudecode', cli_native_memory: false);
+        $claudeEnvironment = (new \ReflectionMethod($claude, 'harnessEnvironmentOverrides'))->invoke($claude);
+        $this->assertSame('1', $claudeEnvironment['CLAUDE_CODE_DISABLE_AUTO_MEMORY']);
+
+        $codex = aihelper::create(provider: 'codex', cli_native_memory: false);
+        $codexArguments = (new \ReflectionMethod($codex, 'buildArgs'))->invoke($codex);
+        $this->assertContains('memories.generate_memories=false', $codexArguments);
+        $this->assertContains('memories.use_memories=false', $codexArguments);
+
+        $codexWithMemory = aihelper::create(provider: 'codex');
+        $codexWithMemoryArguments = (new \ReflectionMethod($codexWithMemory, 'buildArgs'))->invoke($codexWithMemory);
+        $this->assertNotContains('memories.generate_memories=false', $codexWithMemoryArguments);
+        $this->assertNotContains('memories.use_memories=false', $codexWithMemoryArguments);
+    }
+
     function test__harnesses_emit_their_native_session_id(): void
     {
         $cases = [
