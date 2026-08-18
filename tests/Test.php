@@ -36,6 +36,12 @@ class Test extends \PHPUnit\Framework\TestCase
                     $this->stream_text_emitted_since_tool = true;
                     throw new \RuntimeException('stream disconnected before completion');
                 }
+                if ($outcome === 'mcp_startup_after_text') {
+                    $this->stream_text_emitted_since_tool = true;
+                    throw new \RuntimeException(
+                        'required MCP servers failed to initialize: charly: empty sse stream, when process initialize response'
+                    );
+                }
                 if (is_string($outcome)) {
                     throw new \RuntimeException($outcome);
                 }
@@ -410,6 +416,36 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame('ok', $result['response']);
         $this->assertSame(3, $ai->attempts);
         $this->assertSame([true, false, false], $ai->promptAdditions);
+    }
+
+    function test__harness_mcp_startup_errors_are_retried_once(): void
+    {
+        $error =
+            'AI Request fehlgeschlagen: required MCP servers failed to initialize: charly: ' .
+            'handshaking with MCP server failed: empty sse stream, when process initialize response';
+        $ai = $this->retryAihelper([$error, $error, $error]);
+        $ai->is_harness = true;
+
+        $result = $ai->ask('test');
+
+        $this->assertFalse($result['success']);
+        $this->assertSame($error, $result['response']);
+        $this->assertSame(2, $ai->attempts);
+        $this->assertSame([true, false], $ai->promptAdditions);
+    }
+
+    function test__harness_mcp_startup_errors_are_not_retried_after_streaming(): void
+    {
+        $ai = $this->retryAihelper(['mcp_startup_after_text']);
+        $ai->is_harness = true;
+
+        try {
+            $ai->ask('test');
+            $this->fail('Expected the interrupted MCP startup to be surfaced.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('required MCP servers failed to initialize', $exception->getMessage());
+        }
+        $this->assertSame(1, $ai->attempts);
     }
 
     function test__local_tool_output_keeps_compact_results_within_budget(): void

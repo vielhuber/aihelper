@@ -2536,8 +2536,10 @@ abstract class aihelper
         $this->stream_text_emitted_since_tool = false;
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
         $max_tries = $this->max_tries;
+        $extra_mcp_startup_retries = max(0, 2 - $this->max_tries);
         $extra_transient_retries = max(0, 3 - $this->max_tries);
         $extra_availability_retries = max(0, 9 - $this->max_tries);
+        $mcp_startup_retry = false;
         $transient_retry = false;
         $availability_retry = false;
         $attempt = 0;
@@ -2549,6 +2551,7 @@ abstract class aihelper
                     sleep($backoff_s);
                 }
             }
+            $mcp_startup_retry = false;
             $transient_retry = false;
             $availability_retry = false;
             try {
@@ -2596,7 +2599,9 @@ abstract class aihelper
                     : strtolower(
                         json_encode($return['response'] ?? null, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: ''
                     );
+                $mcp_startup_retry = $this->isHarnessMcpStartupError($retryResponse);
                 $availability_retry =
+                    $mcp_startup_retry ||
                     str_contains($retryResponse, 'auth_unavailable') ||
                     str_contains($retryResponse, 'no auth available') ||
                     str_contains($retryResponse, 'connection refused') ||
@@ -2611,7 +2616,12 @@ abstract class aihelper
                     str_contains($retryResponse, 'error code: 520') ||
                     str_contains($retryResponse, '(http 0)');
             }
-            if ($availability_retry) {
+            if ($mcp_startup_retry) {
+                if ($extra_mcp_startup_retries > 0) {
+                    $extra_mcp_startup_retries--;
+                    $max_tries++;
+                }
+            } elseif ($availability_retry) {
                 $maximum_availability_tries =
                     str_contains($retryResponse, 'auth_unavailable') ||
                     str_contains($retryResponse, 'no auth available')
@@ -2654,6 +2664,9 @@ abstract class aihelper
             $message = json_encode($message, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: serialize($message);
         }
         $message = strtolower($message);
+        if ($this->isHarnessMcpStartupError($message)) {
+            return $this->stream_text_emitted_since_tool !== true;
+        }
         if (preg_match('/\b(?:http\s*)?(?:408|500|502|503|504|520)\b/', $message) === 1) {
             return true;
         }
@@ -2708,6 +2721,18 @@ abstract class aihelper
             }
         }
         return false;
+    }
+
+    protected function isHarnessMcpStartupError(string $message): bool
+    {
+        if ($this->is_harness !== true) {
+            return false;
+        }
+        $message = strtolower($message);
+        return
+            str_contains($message, 'required mcp servers failed to initialize') ||
+            str_contains($message, 'handshaking with mcp server failed') ||
+            str_contains($message, 'empty sse stream, when process initialize response');
     }
 
     protected function retryBackoffSeconds(int $attempt, bool $transient, bool $availabilityFailure = false): int
