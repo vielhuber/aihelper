@@ -10114,6 +10114,8 @@ abstract class ai_harness extends ai_anthropic
 
     protected ?string $harness_run_id = null;
 
+    protected ?string $harness_remote_pid_file = null;
+
     protected array $payload_files = [];
 
     protected array $hidden_harness_tool_ids = [];
@@ -10139,6 +10141,30 @@ abstract class ai_harness extends ai_anthropic
      * @return void
      */
     abstract protected function handleEvent(array $event, object $result, ?\Closure $emit): void;
+
+    /**
+     * Reset provider-specific state before observing an additional native event source.
+     */
+    protected function resetNativeEventStream(): void
+    {
+    }
+
+    /**
+     * Provide a sidecar command when the primary CLI omits internally continued turns.
+     *
+     * @return array<int, string>|null
+     */
+    protected function nativeEventCommand(): ?array
+    {
+        return null;
+    }
+
+    /**
+     * Merge one sidecar event into the same canonical response and live transcript.
+     */
+    protected function handleNativeEvent(array $event, object $result, ?\Closure $emit): void
+    {
+    }
 
     /**
      * Publish the native identifier before a long-running harness turn can fail.
@@ -10657,6 +10683,8 @@ abstract class ai_harness extends ai_anthropic
         }
 
         $this->harness_run_id = md5(uniqid('', true));
+        $this->harness_remote_pid_file = null;
+        $this->resetNativeEventStream();
         if ($this->isRemote()) {
             // the whole invocation becomes one remote shell line: the run id
             // tags the process tree so an abort can find it again, and the
@@ -10673,8 +10701,22 @@ abstract class ai_harness extends ai_anthropic
             foreach ($this->harnessEnvironmentOverrides() as $name => $value) {
                 $exports[] = $name . '=' . escapeshellarg((string) $value);
             }
+            $this->harness_remote_pid_file =
+                '/tmp/aihelper-runs/' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $this->harness_run_id) . '.pid';
+            $remoteRun =
+                'umask 077; mkdir -p /tmp/aihelper-runs; chmod 700 /tmp/aihelper-runs; ' .
+                'setsid --wait bash -c ' .
+                escapeshellarg(
+                    'printf "%s\\n" "$$" > ' .
+                        escapeshellarg($this->harness_remote_pid_file) .
+                        ' && exec ' .
+                        $this->remoteShell($script)
+                ) .
+                '; status=$?; rm -f ' .
+                escapeshellarg($this->harness_remote_pid_file) .
+                '; exit "$status"';
             $command = array_merge($this->sshCommand(), [
-                implode(' ', $exports) . ' setsid --wait bash -c ' . escapeshellarg($this->remoteShell($script))
+                'export ' . implode(' ', $exports) . '; ' . $remoteRun
             ]);
         } else {
             $command = array_merge(['setsid', '--wait', $binary], $this->buildArgs());
@@ -10770,6 +10812,10 @@ abstract class ai_harness extends ai_anthropic
         };
         $harnessTranscriptId = 'harness-' . (string) $this->harness_run_id;
         $harnessLabel = trim((string) $this->title) ?: ucfirst($this->binaryName());
+        $nativeEventProcess = null;
+        $nativeEventPipes = [];
+        $nativeEventBuffer = '';
+        $nativeEventAttempted = false;
         $this->emitTranscript(
             id: $harnessTranscriptId,
             label: $harnessLabel,
@@ -10777,12 +10823,38 @@ abstract class ai_harness extends ai_anthropic
             capturesContent: false
         );
         while (true) {
+            if (!$nativeEventAttempted && !is_resource($nativeEventProcess)) {
+                $nativeEventCommand = $this->nativeEventCommand();
+                if ($nativeEventCommand !== null) {
+                    $nativeEventAttempted = true;
+                    $nativeEventProcess = proc_open(
+                        $nativeEventCommand,
+                        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+                        $nativeEventPipes,
+                        $this->isRemote() ? null : $this->workspace(),
+                        null
+                    );
+                    if (is_resource($nativeEventProcess)) {
+                        fclose($nativeEventPipes[0]);
+                        stream_set_blocking($nativeEventPipes[1], false);
+                        stream_set_blocking($nativeEventPipes[2], false);
+                    }
+                }
+            }
             $read = [];
             if (!feof($pipes[1])) {
                 $read[] = $pipes[1];
             }
             if (!feof($pipes[2])) {
                 $read[] = $pipes[2];
+            }
+            if (is_resource($nativeEventProcess)) {
+                if (isset($nativeEventPipes[1]) && !feof($nativeEventPipes[1])) {
+                    $read[] = $nativeEventPipes[1];
+                }
+                if (isset($nativeEventPipes[2]) && !feof($nativeEventPipes[2])) {
+                    $read[] = $nativeEventPipes[2];
+                }
             }
             if ($read === []) {
                 break;
@@ -10798,6 +10870,25 @@ abstract class ai_harness extends ai_anthropic
                     continue;
                 }
                 $last_activity_at = time();
+                if (is_resource($nativeEventProcess) && $stream === ($nativeEventPipes[1] ?? null)) {
+                    $nativeEventBuffer .= $chunk;
+                    while (($position = strpos($nativeEventBuffer, "\n")) !== false) {
+                        $line = trim(substr($nativeEventBuffer, 0, $position));
+                        $nativeEventBuffer = substr($nativeEventBuffer, $position + 1);
+                        if ($line === '' || $line[0] !== '{') {
+                            continue;
+                        }
+                        $event = json_decode($line, true);
+                        if (!is_array($event)) {
+                            continue;
+                        }
+                        $this->handleNativeEvent($redact($event), $result, $emit);
+                    }
+                    continue;
+                }
+                if (is_resource($nativeEventProcess) && $stream === ($nativeEventPipes[2] ?? null)) {
+                    continue;
+                }
                 if ($stream === $pipes[2]) {
                     $errors .= $chunk;
                     $nativeOutput = $redact($chunk);
@@ -10845,11 +10936,13 @@ abstract class ai_harness extends ai_anthropic
                 break;
             }
             if (time() - $last_activity_at >= (int) $this->timeout) {
+                $this->closeNativeEventProcess($nativeEventProcess, $nativeEventPipes);
                 $this->terminateProcess($process, $pid);
                 throw new \RuntimeException('harness: inactivity timeout after ' . $this->timeout . ' seconds.');
             }
         }
 
+        $this->closeNativeEventProcess($nativeEventProcess, $nativeEventPipes);
         fclose($pipes[1]);
         fclose($pipes[2]);
         $closed = proc_close($process);
@@ -10915,19 +11008,56 @@ abstract class ai_harness extends ai_anthropic
         return $result;
     }
 
+    /**
+     * Stop a read-only sidecar without leaving its local SSH client behind.
+     */
+    protected function closeNativeEventProcess(mixed &$process, array &$pipes): void
+    {
+        if (!is_resource($process)) {
+            return;
+        }
+        proc_terminate($process, SIGTERM);
+        for ($attempt = 0; $attempt < 10; $attempt++) {
+            if ((proc_get_status($process)['running'] ?? false) !== true) {
+                break;
+            }
+            usleep(20000);
+        }
+        if ((proc_get_status($process)['running'] ?? false) === true) {
+            proc_terminate($process, SIGKILL);
+        }
+        foreach ($pipes as $pipe) {
+            if (is_resource($pipe)) {
+                fclose($pipe);
+            }
+        }
+        proc_close($process);
+        $process = null;
+        $pipes = [];
+    }
+
     protected function terminateProcess(mixed $process, int $pid): void
     {
-        if ($this->isRemote() && $this->harness_run_id !== null) {
+        if (
+            $this->isRemote() &&
+            $this->harness_run_id !== null &&
+            $this->harness_remote_pid_file !== null
+        ) {
             $tag = 'AIHELPER_RUN_ID=' . $this->harness_run_id;
-            foreach (['TERM', 'KILL'] as $signal) {
-                $kill = array_merge($this->sshCommand(), [
-                    'pkill -' . $signal . ' -f ' . escapeshellarg($tag)
-                ]);
-                exec(implode(' ', array_map('escapeshellarg', $kill)) . ' >/dev/null 2>&1');
-                if ($signal === 'TERM') {
-                    usleep(500000);
-                }
-            }
+            $pidFile = escapeshellarg($this->harness_remote_pid_file);
+            $terminate =
+                'pid=$(cat ' . $pidFile . ' 2>/dev/null || true); ' .
+                'case "$pid" in ""|*[!0-9]*) rm -f ' . $pidFile . '; exit 0;; esac; ' .
+                'if [ ! -r "/proc/$pid/environ" ] || ! tr "\\0" "\\n" < "/proc/$pid/environ" | grep -Fqx ' .
+                escapeshellarg($tag) .
+                '; then rm -f ' .
+                $pidFile .
+                '; exit 0; fi; ' .
+                'kill -TERM -- "-$pid" 2>/dev/null || true; sleep 0.5; ' .
+                'kill -KILL -- "-$pid" 2>/dev/null || true; rm -f ' .
+                $pidFile;
+            $kill = array_merge($this->sshCommand(), [$terminate]);
+            exec(implode(' ', array_map('escapeshellarg', $kill)) . ' >/dev/null 2>&1');
         }
         $group = $pid > 0 ? posix_getpgid($pid) : false;
         if ($group !== false && $group > 0 && $group !== posix_getpgrp()) {
@@ -11300,6 +11430,12 @@ class ai_codex extends ai_harness
 
     protected ?string $shared_codex_home = null;
 
+    protected bool $native_initial_turn_completed = false;
+
+    protected bool $native_goal_turn_active = false;
+
+    protected array $native_goal_tool_calls = [];
+
     public array $models = [
         [
             'name' => 'gpt-5.6-sol',
@@ -11520,6 +11656,239 @@ class ai_codex extends ai_harness
         return $overrides;
     }
 
+    protected function resetNativeEventStream(): void
+    {
+        $this->native_initial_turn_completed = false;
+        $this->native_goal_turn_active = false;
+        $this->native_goal_tool_calls = [];
+    }
+
+    /**
+     * Follow the native rollout because Codex omits automatic goal turns from exec JSON output.
+     *
+     * @return array<int, string>|null
+     */
+    protected function nativeEventCommand(): ?array
+    {
+        if ($this->cli_session_id === null) {
+            return null;
+        }
+        $sessionDirectory = $this->shared_codex_home !== null
+            ? escapeshellarg($this->shared_codex_home . '/sessions')
+            : '"$HOME/.codex/sessions"';
+        $filePattern = '*-' . $this->cli_session_id . '.jsonl';
+        $script =
+            'directory=' . $sessionDirectory . '; file=""; ' .
+            'while [ -z "$file" ]; do ' .
+            'file=$(find "$directory" -type f -name ' . escapeshellarg($filePattern) . ' -print -quit 2>/dev/null); ' .
+            '[ -n "$file" ] || sleep 0.1; done; exec tail -n 0 -F -- "$file"';
+        if ($this->isRemote()) {
+            return array_merge($this->sshCommand(), [$this->remoteShell($script)]);
+        }
+        return ['bash', '-c', $script];
+    }
+
+    /**
+     * Expose only turns that Codex started after the explicitly requested turn completed.
+     */
+    protected function handleNativeEvent(array $event, object $result, ?\Closure $emit): void
+    {
+        $payload = is_array($event['payload'] ?? null) ? $event['payload'] : [];
+        $type = (string) ($payload['type'] ?? '');
+        if (($event['type'] ?? null) === 'event_msg' && $type === 'task_complete') {
+            if (!$this->native_goal_turn_active) {
+                $this->native_initial_turn_completed = true;
+                return;
+            }
+            $result->result->stop_reason = 'end_turn';
+            $this->emitTranscript(
+                id: 'codex-native-turn-' . (string) ($payload['turn_id'] ?? ''),
+                label: 'Turn completed',
+                status: 'completed',
+                capturesContent: false
+            );
+            return;
+        }
+        if (($event['type'] ?? null) === 'event_msg' && $type === 'task_started') {
+            if (!$this->native_initial_turn_completed) {
+                return;
+            }
+            $this->native_goal_turn_active = true;
+            $this->emitTranscript(
+                id: 'codex-native-turn-' . (string) ($payload['turn_id'] ?? ''),
+                label: 'Goal continuation started',
+                status: 'running',
+                capturesContent: false
+            );
+            return;
+        }
+        if (!$this->native_goal_turn_active) {
+            return;
+        }
+        if (($event['type'] ?? null) === 'event_msg' && $type === 'agent_message') {
+            $text = trim((string) ($payload['message'] ?? ''));
+            if ($text === '') {
+                return;
+            }
+            $messageId = hash(
+                'sha256',
+                (string) ($event['timestamp'] ?? '') . '|' . (string) ($payload['turn_id'] ?? '') . '|' . $text
+            );
+            $this->handleEvent(
+                [
+                    'type' => 'item.completed',
+                    'item' => ['id' => 'native-agent-' . $messageId, 'type' => 'agent_message', 'text' => $text]
+                ],
+                $result,
+                $emit
+            );
+            return;
+        }
+        if (($event['type'] ?? null) === 'event_msg' && $type === 'mcp_tool_call_end') {
+            $invocation = is_array($payload['invocation'] ?? null) ? $payload['invocation'] : [];
+            $nativeResult = is_array($payload['result'] ?? null) ? $payload['result'] : [];
+            $isError = array_key_exists('Err', $nativeResult);
+            $mcpResult = $nativeResult['Ok'] ?? null;
+            $errorText = '';
+            if (!is_array($mcpResult)) {
+                $error = $nativeResult['Err'] ?? $nativeResult;
+                $errorText = is_string($error)
+                    ? $error
+                    : (json_encode($error, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: 'Tool failed');
+                $mcpResult = ['content' => [['type' => 'text', 'text' => $errorText]], 'isError' => true];
+            }
+            $this->handleEvent(
+                [
+                    'type' => 'item.completed',
+                    'item' => [
+                        'id' => (string) ($payload['call_id'] ?? ''),
+                        'type' => 'mcp_tool_call',
+                        'server' => (string) ($invocation['server'] ?? ''),
+                        'tool' => (string) ($invocation['tool'] ?? ''),
+                        'arguments' => $invocation['arguments'] ?? [],
+                        'result' => $mcpResult,
+                        'error' => $isError ? $errorText : null,
+                        'status' => $isError || ($mcpResult['isError'] ?? false) === true ? 'failed' : 'completed'
+                    ]
+                ],
+                $result,
+                $emit
+            );
+            return;
+        }
+        if (($event['type'] ?? null) === 'event_msg' && $type === 'patch_apply_end') {
+            $changes = [];
+            foreach (array_keys(is_array($payload['changes'] ?? null) ? $payload['changes'] : []) as $path) {
+                $changes[] = ['path' => (string) $path];
+            }
+            $this->handleEvent(
+                [
+                    'type' => 'item.completed',
+                    'item' => [
+                        'id' => (string) ($payload['call_id'] ?? ''),
+                        'type' => 'file_change',
+                        'changes' => $changes,
+                        'status' => ($payload['success'] ?? false) === true ? 'completed' : 'failed'
+                    ]
+                ],
+                $result,
+                $emit
+            );
+            return;
+        }
+        if (($event['type'] ?? null) === 'event_msg' && $type === 'web_search_end') {
+            $this->handleEvent(
+                [
+                    'type' => 'item.completed',
+                    'item' => [
+                        'id' => (string) ($payload['call_id'] ?? ''),
+                        'type' => 'web_search',
+                        'query' => (string) ($payload['query'] ?? ''),
+                        'status' => 'completed'
+                    ]
+                ],
+                $result,
+                $emit
+            );
+            return;
+        }
+        if (($event['type'] ?? null) === 'response_item' && in_array($type, ['custom_tool_call', 'function_call'], true)) {
+            $callId = (string) ($payload['call_id'] ?? ($payload['id'] ?? ''));
+            $input = $payload['input'] ?? ($payload['arguments'] ?? null);
+            $toolName = trim((string) ($payload['name'] ?? 'action')) ?: 'action';
+            $this->native_goal_tool_calls[$callId] = ['name' => $toolName, 'input' => $input];
+            $this->handleEvent(
+                [
+                    'type' => 'item.started',
+                    'item' => [
+                        'id' => $callId,
+                        'type' => 'mcp_tool_call',
+                        'server' => 'codex',
+                        'tool' => $toolName,
+                        'arguments' => is_array($input) ? $input : ['input' => $input],
+                        'status' => 'running'
+                    ]
+                ],
+                $result,
+                $emit
+            );
+            return;
+        }
+        if (
+            ($event['type'] ?? null) === 'response_item' &&
+            in_array($type, ['custom_tool_call_output', 'function_call_output'], true)
+        ) {
+            $callId = (string) ($payload['call_id'] ?? ($payload['id'] ?? ''));
+            $call = $this->native_goal_tool_calls[$callId] ?? ['name' => 'action', 'input' => null];
+            unset($this->native_goal_tool_calls[$callId]);
+            $output = $payload['output'] ?? '';
+            $content = [];
+            foreach (is_array($output) ? $output : [['text' => $output]] as $block) {
+                if (!is_array($block)) {
+                    continue;
+                }
+                $text = $block['text'] ?? null;
+                if (is_scalar($text)) {
+                    $content[] = ['type' => 'text', 'text' => (string) $text];
+                }
+            }
+            if ($content === []) {
+                $content[] = [
+                    'type' => 'text',
+                    'text' => is_string($output)
+                        ? $output
+                        : (json_encode($output, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '')
+                ];
+            }
+            $input = $call['input'] ?? null;
+            $this->handleEvent(
+                [
+                    'type' => 'item.completed',
+                    'item' => [
+                        'id' => $callId,
+                        'type' => 'mcp_tool_call',
+                        'server' => 'codex',
+                        'tool' => (string) ($call['name'] ?? 'action'),
+                        'arguments' => is_array($input) ? $input : ['input' => $input],
+                        'result' => ['content' => $content, 'isError' => false],
+                        'status' => 'completed'
+                    ]
+                ],
+                $result,
+                $emit
+            );
+            return;
+        }
+        if (($event['type'] ?? null) === 'event_msg' && $type === 'context_compacted') {
+            $this->emitTranscript(
+                id: 'codex-compaction-' . hash('sha256', (string) ($event['timestamp'] ?? uniqid('', true))),
+                label: 'Context compacted',
+                status: 'completed',
+                capturesContent: false
+            );
+        }
+    }
+
     protected function handleEvent(array $event, object $result, ?\Closure $emit): void
     {
         $type = $event['type'] ?? null;
@@ -11707,6 +12076,7 @@ class ai_codex extends ai_harness
         }
 
         if ($type === 'turn.completed') {
+            $this->native_initial_turn_completed = true;
             $this->emitHarnessLifecycleEvent($event);
             $result->result->stop_reason = 'end_turn';
             $result->result->usage = (object) [

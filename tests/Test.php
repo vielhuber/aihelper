@@ -852,6 +852,118 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame("HALLO123\n", $result->result->content[5]->content);
     }
 
+    function test__codex_maps_native_goal_continuations(): void
+    {
+        class_exists(aihelper::class);
+        $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_codex::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($harness, true);
+        $result = (object) [
+            'result' => (object) [
+                'content' => [],
+                'stop_reason' => null,
+                'usage' => (object) []
+            ]
+        ];
+        $handler = new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'handleNativeEvent');
+        $primaryHandler = new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'handleEvent');
+
+        ob_start();
+        ob_start();
+        $primaryHandler->invoke(
+            $harness,
+            [
+                'type' => 'turn.completed',
+                'usage' => [
+                    'input_tokens' => 10,
+                    'cache_write_input_tokens' => 0,
+                    'cached_input_tokens' => 0,
+                    'output_tokens' => 5
+                ]
+            ],
+            $result,
+            null
+        );
+        $handler->invoke(
+            $harness,
+            ['type' => 'event_msg', 'payload' => ['type' => 'task_started', 'turn_id' => 'goal-turn']],
+            $result,
+            null
+        );
+        $handler->invoke(
+            $harness,
+            [
+                'type' => 'event_msg',
+                'payload' => [
+                    'type' => 'mcp_tool_call_end',
+                    'call_id' => 'native-tool',
+                    'invocation' => [
+                        'server' => 'filesystem',
+                        'tool' => 'read_file',
+                        'arguments' => ['path' => '/tmp/example.txt']
+                    ],
+                    'result' => ['Ok' => ['content' => [['type' => 'text', 'text' => 'contents']], 'isError' => false]]
+                ]
+            ],
+            $result,
+            null
+        );
+        $agentEvent = [
+            'type' => 'event_msg',
+            'timestamp' => '2026-08-18T12:00:00.000Z',
+            'payload' => ['type' => 'agent_message', 'message' => 'Goal continuation result']
+        ];
+        $handler->invoke($harness, $agentEvent, $result, null);
+        $agentEvent['timestamp'] = '2026-08-18T12:00:01.000Z';
+        $handler->invoke($harness, $agentEvent, $result, null);
+        $handler->invoke(
+            $harness,
+            [
+                'type' => 'response_item',
+                'payload' => [
+                    'type' => 'custom_tool_call',
+                    'call_id' => 'native-action',
+                    'name' => 'exec',
+                    'input' => 'run command'
+                ]
+            ],
+            $result,
+            null
+        );
+        $handler->invoke(
+            $harness,
+            [
+                'type' => 'response_item',
+                'payload' => [
+                    'type' => 'custom_tool_call_output',
+                    'call_id' => 'native-action',
+                    'output' => [['type' => 'input_text', 'text' => 'command output']]
+                ]
+            ],
+            $result,
+            null
+        );
+        $handler->invoke(
+            $harness,
+            ['type' => 'event_msg', 'payload' => ['type' => 'task_complete', 'turn_id' => 'goal-turn']],
+            $result,
+            null
+        );
+        ob_end_flush();
+        $output = (string) ob_get_clean();
+
+        $this->assertStringContainsString('Goal continuation started', $output);
+        $this->assertStringContainsString('Read /tmp/example.txt', $output);
+        $this->assertCount(6, $result->result->content);
+        $this->assertSame('filesystem__read_file', $result->result->content[0]->name);
+        $this->assertStringContainsString('contents', $result->result->content[1]->content);
+        $this->assertSame('Goal continuation result', $result->result->content[2]->text);
+        $this->assertSame('Goal continuation result', $result->result->content[3]->text);
+        $this->assertSame('codex__exec', $result->result->content[4]->name);
+        $this->assertSame(['input' => 'run command'], $result->result->content[4]->input);
+        $this->assertStringContainsString('command output', $result->result->content[5]->content);
+        $this->assertSame('end_turn', $result->result->stop_reason);
+    }
+
     function test__tool_activity_is_streamed_as_a_reasoning_transcript(): void
     {
         $mcpResponse = [
@@ -1433,7 +1545,10 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $this->assertIsString($source);
         $this->assertStringContainsString("['setsid', '--wait', \$binary]", $source);
-        $this->assertStringContainsString("' setsid --wait bash -c '", $source);
+        $this->assertStringContainsString("'setsid --wait bash -c '", $source);
+        $this->assertStringContainsString('/tmp/aihelper-runs/', $source);
+        $this->assertStringContainsString('"/proc/$pid/environ"', $source);
+        $this->assertStringNotContainsString("'pkill -' . \$signal", $source);
     }
 
     function test__remote_harness_reuses_preflight_connection(): void
