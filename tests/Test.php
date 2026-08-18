@@ -1543,6 +1543,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $source = file_get_contents(__DIR__ . '/../src/aihelper.php');
 
         $this->assertIsString($source);
+        $source = str_replace("\r\n", "\n", $source);
         $this->assertStringContainsString("['setsid', '--wait', \$binary]", $source);
         $this->assertStringContainsString("'setsid --wait bash -c '", $source);
         $this->assertStringContainsString("' && ' .\n                        \$this->remoteShell(\$script)", $source);
