@@ -10709,7 +10709,7 @@ abstract class ai_harness extends ai_anthropic
                 escapeshellarg(
                     'printf "%s\\n" "$$" > ' .
                         escapeshellarg($this->harness_remote_pid_file) .
-                        ' && exec ' .
+                        ' && ' .
                         $this->remoteShell($script)
                 ) .
                 '; status=$?; rm -f ' .

@@ -1540,12 +1540,13 @@ class Test extends \PHPUnit\Framework\TestCase
 
     function test__harness_waits_for_process_group_leader(): void
     {
-        $this->skipOnCi();
-        $source =file_get_contents(__DIR__ . '/../src/aihelper.php');
+        $source = file_get_contents(__DIR__ . '/../src/aihelper.php');
 
         $this->assertIsString($source);
         $this->assertStringContainsString("['setsid', '--wait', \$binary]", $source);
         $this->assertStringContainsString("'setsid --wait bash -c '", $source);
+        $this->assertStringContainsString("' && ' .\n                        \$this->remoteShell(\$script)", $source);
+        $this->assertStringNotContainsString("' && exec ' .\n                        \$this->remoteShell(\$script)", $source);
         $this->assertStringContainsString('/tmp/aihelper-runs/', $source);
         $this->assertStringContainsString('"/proc/$pid/environ"', $source);
         $this->assertStringNotContainsString("'pkill -' . \$signal", $source);
