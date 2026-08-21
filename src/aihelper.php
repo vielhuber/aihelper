@@ -31,6 +31,10 @@ abstract class aihelper
     protected ?string $cli_session_id = null;
     protected bool $cli_resume_latest = true;
     protected bool $cli_native_memory = true;
+
+    protected ?\Closure $abort_callback = null;
+
+    protected bool $aborted = false;
     protected ?string $log = null;
     protected ?int $max_tries = null;
     protected ?bool $enable_thinking = null;
@@ -94,7 +98,8 @@ abstract class aihelper
         ?array $cli_skills = null,
         ?string $cli_session_id = null,
         bool $cli_resume_latest = true,
-        bool $cli_native_memory = true
+        bool $cli_native_memory = true,
+        ?callable $abort_callback = null
     ): ?self {
         if ($provider === 'openai') {
             return new ai_openai(
@@ -114,7 +119,8 @@ abstract class aihelper
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'anthropic') {
@@ -135,7 +141,8 @@ abstract class aihelper
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'google') {
@@ -156,7 +163,8 @@ abstract class aihelper
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'xai') {
@@ -177,7 +185,8 @@ abstract class aihelper
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'deepseek') {
@@ -198,7 +207,8 @@ abstract class aihelper
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'openrouter') {
@@ -219,7 +229,8 @@ abstract class aihelper
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'llamacpp') {
@@ -240,7 +251,8 @@ abstract class aihelper
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'lmstudio') {
@@ -261,7 +273,8 @@ abstract class aihelper
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'nvidia') {
@@ -282,7 +295,8 @@ abstract class aihelper
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'cliproxyapi') {
@@ -303,7 +317,8 @@ abstract class aihelper
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'elevenlabs') {
@@ -324,7 +339,8 @@ abstract class aihelper
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'claudecode') {
@@ -353,7 +369,8 @@ abstract class aihelper
                 cli_resume_latest: $cli_resume_latest,
                 cli_native_memory: $cli_native_memory,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'codex') {
@@ -382,7 +399,8 @@ abstract class aihelper
                 cli_resume_latest: $cli_resume_latest,
                 cli_native_memory: $cli_native_memory,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'opencode') {
@@ -411,7 +429,8 @@ abstract class aihelper
                 cli_resume_latest: $cli_resume_latest,
                 cli_native_memory: $cli_native_memory,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         if ($provider === 'test') {
@@ -432,7 +451,8 @@ abstract class aihelper
                 enable_thinking: $enable_thinking,
                 auto_compact: $auto_compact,
                 system_prompt: $system_prompt,
-                cli_skills: $cli_skills
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
             );
         }
         return null;
@@ -726,7 +746,8 @@ abstract class aihelper
         ?array $cli_skills = null,
         ?string $cli_session_id = null,
         bool $cli_resume_latest = true,
-        bool $cli_native_memory = true
+        bool $cli_native_memory = true,
+        ?callable $abort_callback = null
     ) {
         if ($cli_workdir !== null) {
             $this->workdir = $cli_workdir;
@@ -747,6 +768,7 @@ abstract class aihelper
         $this->cli_session_id = $cli_session_id !== '' ? $cli_session_id : null;
         $this->cli_resume_latest = $cli_resume_latest;
         $this->cli_native_memory = $cli_native_memory;
+        $this->abort_callback = $abort_callback !== null ? \Closure::fromCallable($abort_callback) : null;
         if ($cli_skills !== null) {
             $this->cli_skills = $cli_skills;
         }
@@ -2534,6 +2556,7 @@ abstract class aihelper
         $this->autoCompactSession();
         $this->stubOversizedFileBlocks();
         $this->stream_text_emitted_since_tool = false;
+        $this->aborted = false;
         $return = ['response' => null, 'success' => false, 'costs' => 0.0];
         $max_tries = $this->max_tries;
         $extra_mcp_startup_retries = max(0, 2 - $this->max_tries);
@@ -2543,7 +2566,7 @@ abstract class aihelper
         $transient_retry = false;
         $availability_retry = false;
         $attempt = 0;
-        while ($return['success'] === false && $max_tries > 0) {
+        while ($return['success'] === false && $max_tries > 0 && $this->aborted === false) {
             if ($attempt > 0) {
                 $backoff_s = $this->retryBackoffSeconds($attempt, $transient_retry, $availability_retry);
                 $this->log('⚠️ tries left: ' . $max_tries . ' — backoff ' . $backoff_s . 's');
@@ -2655,6 +2678,8 @@ abstract class aihelper
         ) {
             $return = $this->runLocalToolLoop($return);
         }
+        // a stopped request has no answer, but nothing went wrong either
+        $return['aborted'] = $this->aborted;
         return $return;
     }
 
@@ -6437,6 +6462,12 @@ abstract class aihelper
             ];
 
             $this->stream_callback = function ($chunk) {
+                // libcurl aborts once the write callback reports a length other
+                // than the one it handed in
+                if ($this->shouldAbort()) {
+                    $this->aborted = true;
+                    return 0;
+                }
                 /*
                 echo $chunk;
                 return strlen($chunk);
@@ -6782,6 +6813,12 @@ abstract class aihelper
             ];
 
             $this->stream_callback = function ($chunk) {
+                // libcurl aborts once the write callback reports a length other
+                // than the one it handed in
+                if ($this->shouldAbort()) {
+                    $this->aborted = true;
+                    return 0;
+                }
                 /*
                 echo $chunk;
                 return strlen($chunk);
@@ -7038,6 +7075,12 @@ abstract class aihelper
             $this->resetToolCallStripState();
 
             $this->stream_callback = function ($chunk) {
+                // libcurl aborts once the write callback reports a length other
+                // than the one it handed in
+                if ($this->shouldAbort()) {
+                    $this->aborted = true;
+                    return 0;
+                }
                 $this->log($chunk, 'chunk');
                 $this->stream_buffer_in .= $chunk;
 
@@ -7282,6 +7325,12 @@ abstract class aihelper
             ];
 
             $this->stream_callback = function ($chunk) {
+                // libcurl aborts once the write callback reports a length other
+                // than the one it handed in
+                if ($this->shouldAbort()) {
+                    $this->aborted = true;
+                    return 0;
+                }
                 $this->log($chunk, 'chunk');
                 $this->stream_buffer_in .= $chunk;
 
@@ -7446,6 +7495,34 @@ abstract class aihelper
         flush();
 
         return $this->stream_callback;
+    }
+
+    /**
+     * Whether the caller asked for the running request to stop.
+     *
+     * Polled between chunks, so it must stay cheap — a file check or a flag,
+     * never a database round trip. A callback that throws is treated as "keep
+     * going": an unreachable cancel signal must not kill a healthy request.
+     */
+    /**
+     * Install or clear the probe that stops a running request.
+     */
+    public function setAbortCallback(?callable $abort_callback): static
+    {
+        $this->abort_callback = $abort_callback !== null ? \Closure::fromCallable($abort_callback) : null;
+        return $this;
+    }
+
+    protected function shouldAbort(): bool
+    {
+        if ($this->abort_callback === null) {
+            return false;
+        }
+        try {
+            return ($this->abort_callback)() === true;
+        } catch (\Throwable $exception) {
+            return false;
+        }
     }
 
     /**
@@ -10848,6 +10925,16 @@ abstract class ai_harness extends ai_anthropic
             capturesContent: false
         );
         while (true) {
+            if ($this->shouldAbort()) {
+                $this->aborted = true;
+                // ctrl+c first: the cli writes an append-only session file and
+                // should get the chance to close it before terminateProcess()
+                // takes the local and the remote side down
+                @proc_terminate($process, 2);
+                usleep(500000);
+                $this->terminateProcess($process, $pid);
+                break;
+            }
             if (!$nativeEventAttempted && !is_resource($nativeEventProcess)) {
                 $nativeEventCommand = $this->nativeEventCommand();
                 if ($nativeEventCommand !== null) {

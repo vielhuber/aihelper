@@ -253,6 +253,88 @@ class Test extends \PHPUnit\Framework\TestCase
         return true;
     }
 
+    private function abortAihelper(?callable $abort): object
+    {
+        return new class ($abort) extends aihelper {
+            public int $attempts = 0;
+
+            public function __construct(?callable $abort)
+            {
+                $this->model = 'test';
+                $this->session_id = 'abort-test';
+                $this->max_tries = 3;
+                $this->setAbortCallback($abort);
+            }
+
+            public function probeAbort(): bool
+            {
+                return $this->shouldAbort();
+            }
+
+            protected function askThis(
+                ?string $prompt = null,
+                mixed $files = null,
+                bool $add_prompt_to_session = true,
+                ?string $prev_output_text = null,
+                float $prev_costs = 0.0,
+                int $length_continuation_count = 0
+            ): array {
+                $this->attempts++;
+                if ($this->shouldAbort()) {
+                    $this->aborted = true;
+                    return ['response' => null, 'success' => false, 'costs' => 0.0];
+                }
+                return ['response' => 'ok', 'success' => true, 'costs' => 0.0];
+            }
+
+            protected function makeApiCall(?array $args = null): mixed
+            {
+                return null;
+            }
+
+            protected function bringPromptInFormat(string $prompt, mixed $files = null): array
+            {
+                return [];
+            }
+
+            protected function addResponseToSession(mixed $response): void {}
+        };
+    }
+
+    function test__abort_callback_stops_the_request_without_retrying(): void
+    {
+        $ai = $this->abortAihelper(fn(): bool => true);
+
+        $result = $ai->ask('test');
+
+        $this->assertTrue($result['aborted']);
+        $this->assertFalse($result['success']);
+        $this->assertNull($result['response']);
+        // three tries are configured, but a stopped request must not restart
+        $this->assertSame(1, $ai->attempts);
+    }
+
+    function test__without_an_abort_callback_nothing_changes(): void
+    {
+        $ai = $this->abortAihelper(null);
+
+        $result = $ai->ask('test');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('ok', $result['response']);
+        $this->assertFalse($result['aborted']);
+    }
+
+    function test__a_throwing_abort_callback_lets_the_request_continue(): void
+    {
+        $ai = $this->abortAihelper(function (): bool {
+            throw new \RuntimeException('cancel signal unreachable');
+        });
+
+        $this->assertFalse($ai->probeAbort());
+        $this->assertTrue($ai->ask('test')['success']);
+    }
+
     function test__transient_request_errors_are_retried(): void
     {
         $ai = $this->retryAihelper([

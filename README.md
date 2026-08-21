@@ -267,3 +267,20 @@ $result = $ai->ask('Wer wurde 2018 Fußball-Weltmeister?');
   ...
 </VirtualHost>
 ```
+
+### aborting a request
+
+pass an `abort_callback` to stop a request that is already running. it is asked between chunks, so keep it cheap — a file check or a flag, never a database round trip. hand it over on `create()` or later with `setAbortCallback()`, which also accepts `null` to clear it again.
+
+```php
+$ai = aihelper::create(
+    /* ... */
+    abort_callback: fn(): bool => is_file('/tmp/cancel-' . $id)
+);
+
+$result = $ai->ask('Wer wurde 2018 Fußball-Weltmeister?');
+// $result = ['response' => null, 'success' => false, 'costs' => 0.0, 'aborted' => true]
+```
+
+with a chat completion endpoint the http stream is cancelled mid-transfer. a cli harness receives `SIGINT` first so it can close its append-only session file the way ctrl+c would, and is terminated on the local and the remote side only afterwards; the interrupted turn stays in the native thread and is resumed by the next call. check `$result['aborted']` to tell a stop apart from a failure — a stopped request has no answer, but nothing went wrong, and it is never retried. a callback that throws counts as
+"keep going", so an unreachable cancel signal cannot kill a healthy request.
