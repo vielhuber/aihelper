@@ -325,6 +325,76 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertFalse($result['aborted']);
     }
 
+    function test__cli_request_limit_returns_newest_requests(): void
+    {
+        $testDirectory = sys_get_temp_dir() . '/aihelper-cli-limit-' . bin2hex(random_bytes(8));
+        $dataDirectory = $testDirectory . '/opencode';
+        mkdir($dataDirectory, recursive: true);
+        $databasePath = $dataDirectory . '/opencode.db';
+        $connection = new \PDO('sqlite:' . $databasePath);
+        $connection->exec('CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT)');
+        $connection->exec('CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT)');
+        $connection->exec('CREATE TABLE part (message_id TEXT, time_created INTEGER, data TEXT)');
+        $connection->exec("INSERT INTO session (id, directory) VALUES ('session-1', '/tmp/project')");
+        $statement = $connection->prepare(
+            'INSERT INTO message (id, session_id, time_created, data) VALUES (:id, :session_id, :time_created, :data)'
+        );
+        foreach ([1, 2, 3] as $requestNumber) {
+            $timeCreated = 2208988800000 + $requestNumber * 1000;
+            $statement->execute([
+                'id' => 'message-' . $requestNumber,
+                'session_id' => 'session-1',
+                'time_created' => $timeCreated,
+                'data' => json_encode(
+                    [
+                        'role' => 'assistant',
+                        'providerID' => 'opencode-go',
+                        'modelID' => 'model-' . $requestNumber,
+                        'tokens' => ['input' => $requestNumber, 'output' => $requestNumber],
+                        'time' => ['created' => $timeCreated, 'completed' => $timeCreated + 100]
+                    ],
+                    JSON_THROW_ON_ERROR
+                )
+            ]);
+        }
+        $originalDataHome = getenv('XDG_DATA_HOME');
+        putenv('XDG_DATA_HOME=' . $testDirectory);
+
+        try {
+            $requests = aihelper::getCliApiRequests(
+                limit: 2,
+                date_from: '2040-01-01 00:00:00',
+                date_until: '2040-12-31 23:59:59',
+                group_by: false
+            );
+
+            $this->assertCount(2, $requests);
+            $this->assertSame(['model-3', 'model-2'], array_column($requests, 'model'));
+
+            $groupedRequests = aihelper::getCliApiRequests(
+                limit: 2,
+                date_from: '2040-01-01 00:00:00',
+                date_until: '2040-12-31 23:59:59',
+                group_by: true
+            );
+
+            $this->assertCount(1, $groupedRequests);
+            $this->assertSame(3, $groupedRequests[0]['calls']);
+            $this->assertSame(6, $groupedRequests[0]['usage']['input_tokens']);
+        } finally {
+            if ($originalDataHome === false) {
+                putenv('XDG_DATA_HOME');
+            }
+            if ($originalDataHome !== false) {
+                putenv('XDG_DATA_HOME=' . $originalDataHome);
+            }
+            $connection = null;
+            unlink($databasePath);
+            rmdir($dataDirectory);
+            rmdir($testDirectory);
+        }
+    }
+
     function test__a_throwing_abort_callback_lets_the_request_continue(): void
     {
         $ai = $this->abortAihelper(function (): bool {
@@ -3548,5 +3618,41 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->markTestSkipped('Skipped.');
         }
         $this->assertTrue($success);
+    }
+
+    private function harnessStoreAihelper(string $provider, ?string $home): object
+    {
+        $ai = aihelper::create(provider: $provider, model: 'test', log: 'tests/aihelper.log');
+        $ai->harness_home = $home;
+        return $ai;
+    }
+
+    private function harnessOverrides(object $ai): array
+    {
+        return (new \ReflectionMethod($ai, 'harnessEnvironmentOverrides'))->invoke($ai);
+    }
+
+    public function test__a_harness_home_moves_every_cli_store_below_it()
+    {
+        $home = sys_get_temp_dir() . '/aihelper-harness-' . getmypid();
+        $overrides = $this->harnessOverrides($this->harnessStoreAihelper('claudecode', $home));
+        $this->assertSame($home . '/claude', $overrides['CLAUDE_CONFIG_DIR'] ?? null);
+
+        $overrides = $this->harnessOverrides($this->harnessStoreAihelper('opencode', $home));
+        $this->assertSame($home . '/opencode/data', $overrides['XDG_DATA_HOME'] ?? null);
+        $this->assertSame($home . '/opencode/config', $overrides['XDG_CONFIG_HOME'] ?? null);
+
+        $this->assertDirectoryExists($home . '/claude');
+        $this->assertDirectoryExists($home . '/opencode/data/opencode');
+        exec('rm -rf ' . escapeshellarg($home));
+    }
+
+    public function test__without_a_harness_home_the_clis_keep_their_native_store()
+    {
+        $overrides = $this->harnessOverrides($this->harnessStoreAihelper('claudecode', null));
+        $this->assertArrayNotHasKey('CLAUDE_CONFIG_DIR', $overrides);
+
+        $overrides = $this->harnessOverrides($this->harnessStoreAihelper('opencode', null));
+        $this->assertArrayNotHasKey('XDG_DATA_HOME', $overrides);
     }
 }

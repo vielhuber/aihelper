@@ -1614,6 +1614,7 @@ abstract class aihelper
         usort($log_files, fn($a, $b) => $log_times[$b] <=> $log_times[$a]);
         $date_from_time = $date_from !== null ? strtotime($date_from) : false;
         $date_until_time = $date_until !== null ? strtotime($date_until) : false;
+        $source_limit = $group_by ? null : $limit;
 
         $parse_pairs = function (array $lines): array {
             $pairs = [];
@@ -2048,157 +2049,199 @@ abstract class aihelper
             return true;
         };
 
-        $claude_dirs = ['/root/.claude/projects', '/host/data/claude/projects'];
-        foreach ($claude_dirs as $claude_dir) {
-            foreach (glob($claude_dir . '/*/*.jsonl') ?: [] as $session_file) {
-                if ((filemtime($session_file) ?: 0) < $min_mtime) {
+        $claude_files = [];
+        foreach (['/root/.claude/projects', '/host/data/claude/projects'] as $claude_dir) {
+            $claude_files = array_merge($claude_files, glob($claude_dir . '/*/*.jsonl') ?: []);
+        }
+        if ($source_limit !== null) {
+            $claude_file_times = [];
+            foreach (array_unique($claude_files) as $claude_file) {
+                if (!is_file($claude_file)) {
                     continue;
                 }
-                $last_user = null;
-                $cwd = null;
-                foreach ($tail_lines($session_file) as $line) {
-                    if ($line === '' || $line[0] !== '{') {
-                        continue;
-                    }
-                    $entry = json_decode($line, true);
-                    if (!is_array($entry)) {
-                        continue;
-                    }
-                    if (($entry['cwd'] ?? '') !== '') {
-                        $cwd = (string) $entry['cwd'];
-                    }
-                    $type = $entry['type'] ?? '';
-                    if ($type === 'user') {
-                        // role "user" also covers tool_result entries, which aren't real prompts;
-                        // only keep genuine human input so the turn stays attributed to its prompt
-                        $content = $entry['message']['content'] ?? null;
-                        if (is_string($content) && trim($content) !== '') {
-                            $last_user = $content;
-                        } elseif (is_array($content)) {
-                            foreach ($content as $part) {
-                                if (
-                                    (is_string($part) && trim($part) !== '') ||
-                                    (is_array($part) && ($part['type'] ?? '') === 'text')
-                                ) {
-                                    $last_user = $content;
-                                    break;
-                                }
+                $claude_file_time = filemtime($claude_file);
+                if ($claude_file_time === false || $claude_file_time < $min_mtime) {
+                    continue;
+                }
+                $claude_file_times[$claude_file] = $claude_file_time;
+            }
+            arsort($claude_file_times);
+            $claude_files = array_keys($claude_file_times);
+        }
+        $claude_request_count = 0;
+        foreach ($claude_files as $session_file) {
+            if ($source_limit !== null && $claude_request_count >= $source_limit) {
+                break;
+            }
+            if ((filemtime($session_file) ?: 0) < $min_mtime) {
+                continue;
+            }
+            $last_user = null;
+            $cwd = null;
+            foreach ($tail_lines($session_file) as $line) {
+                if ($line === '' || $line[0] !== '{') {
+                    continue;
+                }
+                $entry = json_decode($line, true);
+                if (!is_array($entry)) {
+                    continue;
+                }
+                if (($entry['cwd'] ?? '') !== '') {
+                    $cwd = (string) $entry['cwd'];
+                }
+                $type = $entry['type'] ?? '';
+                if ($type === 'user') {
+                    // role "user" also covers tool_result entries, which aren't real prompts;
+                    // only keep genuine human input so the turn stays attributed to its prompt
+                    $content = $entry['message']['content'] ?? null;
+                    if (is_string($content) && trim($content) !== '') {
+                        $last_user = $content;
+                    } elseif (is_array($content)) {
+                        foreach ($content as $part) {
+                            if (
+                                (is_string($part) && trim($part) !== '') ||
+                                (is_array($part) && ($part['type'] ?? '') === 'text')
+                            ) {
+                                $last_user = $content;
+                                break;
                             }
                         }
-                        continue;
                     }
-                    if ($type !== 'assistant' || !is_array($entry['message']['usage'] ?? null)) {
-                        continue;
-                    }
-                    // claude code injects synthetic assistant messages (e.g. "you've hit your session
-                    // limit") with a "<synthetic>" model and zero tokens — not real api calls, skip them
-                    if (($entry['message']['model'] ?? '') === '<synthetic>') {
-                        continue;
-                    }
-                    $time = (string) ($entry['timestamp'] ?? '');
-                    if (!$in_range($to_time($time))) {
-                        continue;
-                    }
-                    $entry_usage = $entry['message']['usage'];
-                    $requests[] = $make_local(
-                        $session_file,
-                        $time,
-                        $entry['message']['model'] ?? null,
-                        [
-                            'input_tokens' => (int) ($entry_usage['input_tokens'] ?? 0),
-                            'output_tokens' => (int) ($entry_usage['output_tokens'] ?? 0),
-                            'cache_read_input_tokens' => (int) ($entry_usage['cache_read_input_tokens'] ?? 0),
-                            'cache_creation_input_tokens' => (int) ($entry_usage['cache_creation_input_tokens'] ?? 0)
-                        ],
-                        'claude-code',
-                        $last_user,
-                        $cwd
-                    );
+                    continue;
                 }
+                if ($type !== 'assistant' || !is_array($entry['message']['usage'] ?? null)) {
+                    continue;
+                }
+                // claude code injects synthetic assistant messages (e.g. "you've hit your session
+                // limit") with a "<synthetic>" model and zero tokens — not real api calls, skip them
+                if (($entry['message']['model'] ?? '') === '<synthetic>') {
+                    continue;
+                }
+                $time = (string) ($entry['timestamp'] ?? '');
+                if (!$in_range($to_time($time))) {
+                    continue;
+                }
+                $entry_usage = $entry['message']['usage'];
+                $requests[] = $make_local(
+                    $session_file,
+                    $time,
+                    $entry['message']['model'] ?? null,
+                    [
+                        'input_tokens' => (int) ($entry_usage['input_tokens'] ?? 0),
+                        'output_tokens' => (int) ($entry_usage['output_tokens'] ?? 0),
+                        'cache_read_input_tokens' => (int) ($entry_usage['cache_read_input_tokens'] ?? 0),
+                        'cache_creation_input_tokens' => (int) ($entry_usage['cache_creation_input_tokens'] ?? 0)
+                    ],
+                    'claude-code',
+                    $last_user,
+                    $cwd
+                );
+                $claude_request_count++;
             }
         }
 
-        $codex_dirs = ['/root/.codex/sessions', '/host/data/codex/sessions'];
-        foreach ($codex_dirs as $codex_dir) {
-            foreach (glob($codex_dir . '/*/*/*/rollout-*.jsonl') ?: [] as $session_file) {
-                if ((filemtime($session_file) ?: 0) < $min_mtime) {
+        $codex_files = [];
+        foreach (['/root/.codex/sessions', '/host/data/codex/sessions'] as $codex_dir) {
+            $codex_files = array_merge($codex_files, glob($codex_dir . '/*/*/*/rollout-*.jsonl') ?: []);
+        }
+        if ($source_limit !== null) {
+            $codex_file_times = [];
+            foreach (array_unique($codex_files) as $codex_file) {
+                if (!is_file($codex_file)) {
                     continue;
                 }
-                // one row per token_count event (= one API request). summing every request's
-                // last_token_usage matches the session's cumulative total_token_usage exactly,
-                // so no tokens are lost (a per-turn collapse would drop the intermediate requests).
-                $model = null;
-                $last_user = null;
-                $cwd = null;
-                // read the head for defaults: session_meta (line 1) carries the cwd, the first
-                // turn_context (a few lines in) carries the model. both can be absent from the 1MB
-                // tail, so seed them here; the tail overrides with more recent values when present.
-                $meta_handle = fopen($session_file, 'rb');
-                if ($meta_handle !== false) {
-                    for ($head_line = 0; $head_line < 200 && ($model === null || $cwd === null); $head_line++) {
-                        $raw = fgets($meta_handle);
-                        if ($raw === false) {
-                            break;
-                        }
-                        $head_entry = json_decode($raw, true);
-                        if (!is_array($head_entry)) {
-                            continue;
-                        }
-                        $head_payload = $head_entry['payload'] ?? [];
-                        if ($cwd === null && ($head_payload['cwd'] ?? '') !== '') {
-                            $cwd = (string) $head_payload['cwd'];
-                        }
-                        if (
-                            $model === null &&
-                            ($head_entry['type'] ?? '') === 'turn_context' &&
-                            ($head_payload['model'] ?? '') !== ''
-                        ) {
-                            $model = (string) $head_payload['model'];
-                        }
-                    }
-                    fclose($meta_handle);
+                $codex_file_time = filemtime($codex_file);
+                if ($codex_file_time === false || $codex_file_time < $min_mtime) {
+                    continue;
                 }
-                foreach ($tail_lines($session_file) as $line) {
-                    if ($line === '' || $line[0] !== '{') {
+                $codex_file_times[$codex_file] = $codex_file_time;
+            }
+            arsort($codex_file_times);
+            $codex_files = array_keys($codex_file_times);
+        }
+        $codex_request_count = 0;
+        foreach ($codex_files as $session_file) {
+            if ($source_limit !== null && $codex_request_count >= $source_limit) {
+                break;
+            }
+            if ((filemtime($session_file) ?: 0) < $min_mtime) {
+                continue;
+            }
+            // one row per token_count event (= one API request). summing every request's
+            // last_token_usage matches the session's cumulative total_token_usage exactly,
+            // so no tokens are lost (a per-turn collapse would drop the intermediate requests).
+            $model = null;
+            $last_user = null;
+            $cwd = null;
+            // read the head for defaults: session_meta (line 1) carries the cwd, the first
+            // turn_context (a few lines in) carries the model. both can be absent from the 1MB
+            // tail, so seed them here; the tail overrides with more recent values when present.
+            $meta_handle = fopen($session_file, 'rb');
+            if ($meta_handle !== false) {
+                for ($head_line = 0; $head_line < 200 && ($model === null || $cwd === null); $head_line++) {
+                    $raw = fgets($meta_handle);
+                    if ($raw === false) {
+                        break;
+                    }
+                    $head_entry = json_decode($raw, true);
+                    if (!is_array($head_entry)) {
                         continue;
                     }
-                    $entry = json_decode($line, true);
-                    if (!is_array($entry)) {
-                        continue;
+                    $head_payload = $head_entry['payload'] ?? [];
+                    if ($cwd === null && ($head_payload['cwd'] ?? '') !== '') {
+                        $cwd = (string) $head_payload['cwd'];
                     }
-                    $payload = $entry['payload'] ?? [];
-                    if (($payload['cwd'] ?? '') !== '') {
-                        $cwd = (string) $payload['cwd'];
+                    if (
+                        $model === null &&
+                        ($head_entry['type'] ?? '') === 'turn_context' &&
+                        ($head_payload['model'] ?? '') !== ''
+                    ) {
+                        $model = (string) $head_payload['model'];
                     }
-                    if (($entry['type'] ?? '') === 'turn_context' && isset($payload['model'])) {
-                        $model = (string) $payload['model'];
-                    }
-                    $payload_type = $payload['type'] ?? '';
-                    if ($payload_type === 'user_message' && is_string($payload['message'] ?? null)) {
-                        $last_user = $payload['message'];
-                    }
-                    if ($payload_type !== 'token_count' || !is_array($payload['info']['last_token_usage'] ?? null)) {
-                        continue;
-                    }
-                    $time = (string) ($entry['timestamp'] ?? '');
-                    if (!$in_range($to_time($time))) {
-                        continue;
-                    }
-                    $last = $payload['info']['last_token_usage'];
-                    $requests[] = $make_local(
-                        $session_file,
-                        $time,
-                        $model,
-                        [
-                            'input_tokens' => (int) ($last['input_tokens'] ?? 0),
-                            'output_tokens' => (int) ($last['output_tokens'] ?? 0),
-                            'cache_read_input_tokens' => (int) ($last['cached_input_tokens'] ?? 0)
-                        ],
-                        'codex',
-                        $last_user,
-                        $cwd
-                    );
                 }
+                fclose($meta_handle);
+            }
+            foreach ($tail_lines($session_file) as $line) {
+                if ($line === '' || $line[0] !== '{') {
+                    continue;
+                }
+                $entry = json_decode($line, true);
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $payload = $entry['payload'] ?? [];
+                if (($payload['cwd'] ?? '') !== '') {
+                    $cwd = (string) $payload['cwd'];
+                }
+                if (($entry['type'] ?? '') === 'turn_context' && isset($payload['model'])) {
+                    $model = (string) $payload['model'];
+                }
+                $payload_type = $payload['type'] ?? '';
+                if ($payload_type === 'user_message' && is_string($payload['message'] ?? null)) {
+                    $last_user = $payload['message'];
+                }
+                if ($payload_type !== 'token_count' || !is_array($payload['info']['last_token_usage'] ?? null)) {
+                    continue;
+                }
+                $time = (string) ($entry['timestamp'] ?? '');
+                if (!$in_range($to_time($time))) {
+                    continue;
+                }
+                $last = $payload['info']['last_token_usage'];
+                $requests[] = $make_local(
+                    $session_file,
+                    $time,
+                    $model,
+                    [
+                        'input_tokens' => (int) ($last['input_tokens'] ?? 0),
+                        'output_tokens' => (int) ($last['output_tokens'] ?? 0),
+                        'cache_read_input_tokens' => (int) ($last['cached_input_tokens'] ?? 0)
+                    ],
+                    'codex',
+                    $last_user,
+                    $cwd
+                );
+                $codex_request_count++;
             }
         }
 
@@ -2226,6 +2269,8 @@ abstract class aihelper
                     $where[] = 'm.time_created >= :recent_time';
                     $parameters['recent_time'] = (int) floor($min_mtime * 1000);
                 }
+                $row_limit = $source_limit !== null ? ' LIMIT ' . max(0, $source_limit) : '';
+                $row_order = $source_limit !== null ? 'DESC' : 'ASC';
                 $statement = $connection->prepare(
                     "SELECT m.id, m.session_id, m.time_created, m.data, s.directory,
                         (SELECT p.data FROM part p
@@ -2235,7 +2280,7 @@ abstract class aihelper
                      FROM message m
                      INNER JOIN session s ON s.id = m.session_id
                      WHERE " . implode(' AND ', $where) . '
-                     ORDER BY m.time_created ASC'
+                     ORDER BY m.time_created ' . $row_order . $row_limit
                 );
                 $statement->execute($parameters);
                 foreach ($statement->fetchAll(\PDO::FETCH_ASSOC) as $entry) {
@@ -10210,6 +10255,12 @@ abstract class ai_harness extends ai_anthropic
 
     public ?bool $isolate_harness_config = true;
 
+    // where the cli keeps its own state. without one every tool falls back to the
+    // native location in the user's home, which spreads one chat over several trees
+    public ?string $harness_home = null;
+
+    protected ?string $user_home = null;
+
     protected array $harness_files = [];
 
     protected ?float $harness_costs = null;
@@ -10599,6 +10650,87 @@ abstract class ai_harness extends ai_anthropic
     protected function harnessEnvironmentOverrides(): array
     {
         return [];
+    }
+
+    /**
+     * The home directory of the account the cli runs under, local or remote.
+     */
+    protected function userHome(): string
+    {
+        if ($this->user_home !== null) {
+            return $this->user_home;
+        }
+        $home = getenv('HOME') ?: '/root';
+        if ($this->isRemote()) {
+            $command = array_merge($this->sshCommand(), ['printf %s "$HOME"']);
+            $output = [];
+            $status = 1;
+            exec(implode(' ', array_map('escapeshellarg', $command)) . ' 2>/dev/null', $output, $status);
+            $home = $status === 0 ? trim(implode(PHP_EOL, $output)) : '';
+        }
+        if ($home === '') {
+            throw new \RuntimeException('harness: failed to resolve the user home.');
+        }
+        $this->user_home = $home;
+        return $home;
+    }
+
+    /**
+     * The directory this cli keeps its state in, or null without a configured home.
+     */
+    protected function harnessStore(string $tool): ?string
+    {
+        if ($this->harness_home === null || trim($this->harness_home) === '') {
+            return null;
+        }
+        return rtrim($this->harness_home, '/') . '/' . $tool;
+    }
+
+    /**
+     * Create the given directories and point the links inside them at shared files.
+     *
+     * @param array<int, string> $directories
+     * @param array<string, string> $links
+     */
+    protected function prepareHarnessStore(array $directories, array $links): void
+    {
+        if ($this->isRemote()) {
+            $commands = [
+                'umask 077 && mkdir -p ' .
+                implode(' ', array_map('escapeshellarg', $directories)) .
+                ' && chmod 700 ' .
+                implode(' ', array_map('escapeshellarg', $directories))
+            ];
+            foreach ($links as $link => $target) {
+                $commands[] =
+                    'if [ -L ' . escapeshellarg($link) . ' ]; then ln -sfn ' .
+                    escapeshellarg($target) . ' ' . escapeshellarg($link) .
+                    '; elif [ -e ' . escapeshellarg($link) . ' ]; then exit 1; else ln -s ' .
+                    escapeshellarg($target) . ' ' . escapeshellarg($link) . '; fi';
+            }
+            $this->remoteCommand(implode(' && ', $commands), '', 'prepare harness store');
+            return;
+        }
+        foreach ($directories as $directory) {
+            if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
+                throw new \RuntimeException('harness: failed to create ' . $directory);
+            }
+            chmod($directory, 0700);
+        }
+        foreach ($links as $link => $target) {
+            if (is_link($link) && readlink($link) === $target) {
+                continue;
+            }
+            if (is_link($link)) {
+                unlink($link);
+            }
+            if (file_exists($link)) {
+                throw new \RuntimeException('harness: refusing to replace ' . $link);
+            }
+            if (!symlink($target, $link)) {
+                throw new \RuntimeException('harness: failed to link ' . $link);
+            }
+        }
     }
 
     public function ask(?string $prompt = null, mixed $files = null): array
@@ -11273,6 +11405,15 @@ class ai_claudecode extends ai_harness
         if ($this->cli_native_memory === false) {
             $overrides['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1';
         }
+        $store = $this->harnessStore('claude');
+        if ($store !== null) {
+            $native = rtrim($this->userHome(), '/') . '/.claude';
+            $this->prepareHarnessStore(
+                [$native, $store],
+                [$store . '/.credentials.json' => $native . '/.credentials.json']
+            );
+            $overrides['CLAUDE_CONFIG_DIR'] = $store;
+        }
         if ($this->url !== null && trim($this->url) !== '') {
             // claude code appends "/v1" itself, while gateway urls are usually
             // configured with it — keeping both would request "/v1/v1/messages"
@@ -11385,7 +11526,7 @@ class ai_claudecode extends ai_harness
             ? 'f=$(ls -t "$d"/*.jsonl 2>/dev/null | head -1)'
             : 'f="$d"/' . escapeshellarg($this->cli_session_id . '.jsonl');
         $command =
-            'd="${HOME:-/root}/.claude/projects/' .
+            'd="${CLAUDE_CONFIG_DIR:-${HOME:-/root}/.claude}/projects/' .
             $project .
             '"; ' . $file . '; [ -f "$f" ] || exit 0; ' .
             'awk \'index($0, "<synthetic>") && index($0, "API Error") { exit } { print }\' "$f" > "$f.heal" || exit 0; ' .
@@ -11543,6 +11684,8 @@ class ai_codex extends ai_harness
 
     protected ?string $shared_codex_home = null;
 
+    protected ?string $native_codex_home = null;
+
     protected bool $native_initial_turn_completed = false;
 
     protected bool $native_goal_turn_active = false;
@@ -11688,78 +11831,22 @@ class ai_codex extends ai_harness
         $payload_home = dirname($this->payloadFile('codex/.root', ''));
         $this->placeSkills('codex/skills');
         if ($this->shared_codex_home === null) {
-            $user_home = getenv('HOME') ?: '/root';
-            if ($this->isRemote()) {
-                $remote_home_command = array_merge($this->sshCommand(), ['printf %s "$HOME"']);
-                $remote_home_output = [];
-                $remote_home_status = 1;
-                exec(
-                    implode(' ', array_map('escapeshellarg', $remote_home_command)) . ' 2>/dev/null',
-                    $remote_home_output,
-                    $remote_home_status
-                );
-                $user_home = $remote_home_status === 0 ? trim(implode(PHP_EOL, $remote_home_output)) : '';
-            }
-            if ($user_home === '') {
-                throw new \RuntimeException('harness: failed to resolve codex home.');
-            }
-            $native_home = rtrim($user_home, '/') . '/.codex';
-            $shared_codex_home =
+            $native_home = rtrim($this->userHome(), '/') . '/.codex';
+            $shared_codex_home = $this->harnessStore('codex') ??
                 $native_home .
-                '/charly/' .
-                preg_replace('/[^a-zA-Z0-9_\-]/', '_', (string) $this->session_id);
+                    '/charly/' .
+                    preg_replace('/[^a-zA-Z0-9_\-]/', '_', (string) $this->session_id);
             $links = [
                 $shared_codex_home . '/auth.json' => $native_home . '/auth.json',
                 $shared_codex_home . '/config.toml' => $payload_home . '/config.toml',
                 $shared_codex_home . '/skills' => $payload_home . '/skills'
             ];
-            if ($this->isRemote()) {
-                $commands = [
-                    'umask 077 && mkdir -p ' .
-                    escapeshellarg($native_home) .
-                    ' ' .
-                    escapeshellarg($shared_codex_home) .
-                    ' && chmod 700 ' .
-                    escapeshellarg($shared_codex_home)
-                ];
-                foreach ($links as $link => $target) {
-                    $commands[] =
-                        'if [ -L ' . escapeshellarg($link) . ' ]; then ln -sfn ' .
-                        escapeshellarg($target) . ' ' . escapeshellarg($link) .
-                        '; elif [ -e ' . escapeshellarg($link) . ' ]; then exit 1; else ln -s ' .
-                        escapeshellarg($target) . ' ' . escapeshellarg($link) . '; fi';
-                }
-                $this->remoteCommand(
-                    implode(' && ', $commands),
-                    '',
-                    'prepare shared codex home'
-                );
-            } else {
-                foreach ([$native_home, $shared_codex_home] as $directory) {
-                    if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
-                        throw new \RuntimeException('harness: failed to create ' . $directory);
-                    }
-                }
-                chmod($shared_codex_home, 0700);
-                foreach ($links as $link => $target) {
-                    if (is_link($link) && readlink($link) === $target) {
-                        continue;
-                    }
-                    if (is_link($link)) {
-                        unlink($link);
-                    }
-                    if (file_exists($link)) {
-                        throw new \RuntimeException('harness: refusing to replace ' . $link);
-                    }
-                    if (!symlink($target, $link)) {
-                        throw new \RuntimeException('harness: failed to link ' . $link);
-                    }
-                }
-            }
+            $this->prepareHarnessStore([$native_home, $shared_codex_home], $links);
+            $this->native_codex_home = $native_home;
             $this->shared_codex_home = $shared_codex_home;
         }
         $config = 'project_doc_max_bytes = 0' . PHP_EOL .
-            'sqlite_home = ' . $this->tomlString(dirname(dirname($this->shared_codex_home))) . PHP_EOL;
+            'sqlite_home = ' . $this->tomlString($this->native_codex_home) . PHP_EOL;
         if ($this->system_prompt !== null) {
             $config =
                 'instructions = ' . $this->tomlString($this->system_prompt) . PHP_EOL . $config;
@@ -12796,6 +12883,16 @@ class ai_opencode extends ai_harness
             ],
             $this->harnessMcpTokenEnvironment()
         );
+        $store = $this->harnessStore('opencode');
+        if ($store !== null) {
+            $native = rtrim($this->userHome(), '/') . '/.local/share/opencode';
+            $this->prepareHarnessStore(
+                [$native, $store . '/data/opencode', $store . '/config'],
+                [$store . '/data/opencode/auth.json' => $native . '/auth.json']
+            );
+            $overrides['XDG_DATA_HOME'] = $store . '/data';
+            $overrides['XDG_CONFIG_HOME'] = $store . '/config';
+        }
         if ($this->isolate_harness_config === true) {
             $overrides['OPENCODE_DISABLE_CLAUDE_CODE_SKILLS'] = 'true';
             $overrides['OPENCODE_DISABLE_PROJECT_CONFIG'] = 'true';
