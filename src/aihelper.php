@@ -11410,7 +11410,9 @@ class ai_claudecode extends ai_harness
             $native = rtrim($this->userHome(), '/') . '/.claude';
             $this->prepareHarnessStore(
                 [$native, $store],
-                [$store . '/.credentials.json' => $native . '/.credentials.json']
+                $this->isRemote() || is_file($native . '/.credentials.json')
+                    ? [$store . '/.credentials.json' => $native . '/.credentials.json']
+                    : []
             );
             $overrides['CLAUDE_CONFIG_DIR'] = $store;
         }
@@ -11830,29 +11832,37 @@ class ai_codex extends ai_harness
         }
         $payload_home = dirname($this->payloadFile('codex/.root', ''));
         $this->placeSkills('codex/skills');
-        if ($this->shared_codex_home === null) {
+        $prepareStore = false;
+        $native_home = $this->native_codex_home;
+        $shared_codex_home = $this->shared_codex_home;
+        if ($shared_codex_home === null) {
             $native_home = rtrim($this->userHome(), '/') . '/.codex';
             $shared_codex_home = $this->harnessStore('codex') ??
                 $native_home .
                     '/charly/' .
                     preg_replace('/[^a-zA-Z0-9_\-]/', '_', (string) $this->session_id);
-            $links = [
-                $shared_codex_home . '/auth.json' => $native_home . '/auth.json',
-                $shared_codex_home . '/config.toml' => $payload_home . '/config.toml',
-                $shared_codex_home . '/skills' => $payload_home . '/skills'
-            ];
-            $this->prepareHarnessStore([$native_home, $shared_codex_home], $links);
-            $this->native_codex_home = $native_home;
-            $this->shared_codex_home = $shared_codex_home;
+            $prepareStore = true;
         }
         $config = 'project_doc_max_bytes = 0' . PHP_EOL .
-            'sqlite_home = ' . $this->tomlString($this->native_codex_home) . PHP_EOL;
+            'sqlite_home = ' . $this->tomlString((string) $native_home) . PHP_EOL;
         if ($this->system_prompt !== null) {
             $config =
                 'instructions = ' . $this->tomlString($this->system_prompt) . PHP_EOL . $config;
         }
         $this->payloadFile('codex/config.toml', $config);
-        $overrides['CODEX_HOME'] = $this->shared_codex_home;
+        if ($prepareStore) {
+            $links = [
+                $shared_codex_home . '/config.toml' => $payload_home . '/config.toml',
+                $shared_codex_home . '/skills' => $payload_home . '/skills'
+            ];
+            if ($this->isRemote() || is_file($native_home . '/auth.json')) {
+                $links[$shared_codex_home . '/auth.json'] = $native_home . '/auth.json';
+            }
+            $this->prepareHarnessStore([$native_home, $shared_codex_home], $links);
+            $this->native_codex_home = $native_home;
+            $this->shared_codex_home = $shared_codex_home;
+        }
+        $overrides['CODEX_HOME'] = $shared_codex_home;
         return $overrides;
     }
 
@@ -12888,7 +12898,9 @@ class ai_opencode extends ai_harness
             $native = rtrim($this->userHome(), '/') . '/.local/share/opencode';
             $this->prepareHarnessStore(
                 [$native, $store . '/data/opencode', $store . '/config'],
-                [$store . '/data/opencode/auth.json' => $native . '/auth.json']
+                $this->isRemote() || is_file($native . '/auth.json')
+                    ? [$store . '/data/opencode/auth.json' => $native . '/auth.json']
+                    : []
             );
             $overrides['XDG_DATA_HOME'] = $store . '/data';
             $overrides['XDG_CONFIG_HOME'] = $store . '/config';

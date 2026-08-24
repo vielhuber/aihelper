@@ -388,6 +388,7 @@ class Test extends \PHPUnit\Framework\TestCase
             if ($originalDataHome !== false) {
                 putenv('XDG_DATA_HOME=' . $originalDataHome);
             }
+            $statement = null;
             $connection = null;
             unlink($databasePath);
             rmdir($dataDirectory);
@@ -3635,16 +3636,25 @@ class Test extends \PHPUnit\Framework\TestCase
     public function test__a_harness_home_moves_every_cli_store_below_it()
     {
         $home = sys_get_temp_dir() . '/aihelper-harness-' . getmypid();
-        $overrides = $this->harnessOverrides($this->harnessStoreAihelper('claudecode', $home));
-        $this->assertSame($home . '/claude', $overrides['CLAUDE_CONFIG_DIR'] ?? null);
+        $nativeHome = $home . '/native';
+        $previousHome = getenv('HOME');
+        putenv('HOME=' . $nativeHome);
+        try {
+            $overrides = $this->harnessOverrides($this->harnessStoreAihelper('claudecode', $home));
+            $this->assertSame($home . '/claude', $overrides['CLAUDE_CONFIG_DIR'] ?? null);
 
-        $overrides = $this->harnessOverrides($this->harnessStoreAihelper('opencode', $home));
-        $this->assertSame($home . '/opencode/data', $overrides['XDG_DATA_HOME'] ?? null);
-        $this->assertSame($home . '/opencode/config', $overrides['XDG_CONFIG_HOME'] ?? null);
+            $overrides = $this->harnessOverrides($this->harnessStoreAihelper('opencode', $home));
+            $this->assertSame($home . '/opencode/data', $overrides['XDG_DATA_HOME'] ?? null);
+            $this->assertSame($home . '/opencode/config', $overrides['XDG_CONFIG_HOME'] ?? null);
 
-        $this->assertDirectoryExists($home . '/claude');
-        $this->assertDirectoryExists($home . '/opencode/data/opencode');
-        exec('rm -rf ' . escapeshellarg($home));
+            $this->assertDirectoryExists($home . '/claude');
+            $this->assertDirectoryExists($home . '/opencode/data/opencode');
+            $this->assertFileDoesNotExist($home . '/claude/.credentials.json');
+            $this->assertFileDoesNotExist($home . '/opencode/data/opencode/auth.json');
+        } finally {
+            putenv($previousHome === false ? 'HOME' : 'HOME=' . $previousHome);
+            __::rrmdir($home);
+        }
     }
 
     public function test__without_a_harness_home_the_clis_keep_their_native_store()
