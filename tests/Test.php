@@ -1674,13 +1674,15 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__remote_harness_reuses_preflight_connection(): void
     {
         $this->skipOnCi();
-        $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_claudecode::class))->newInstanceWithoutConstructor();
+        $harness = aihelper::create(provider: 'claudecode');
+        $this->assertNotNull($harness);
         foreach (
             [
                 'ssh_host' => 'host.docker.internal',
                 'ssh_user' => 'root',
                 'ssh_port' => 22,
-                'ssh_key' => '/tmp/harness-key'
+                'ssh_key' => '/tmp/harness-key',
+                'session_id' => 'chat-a'
             ]
             as $property => $value
         ) {
@@ -1695,6 +1697,19 @@ class Test extends \PHPUnit\Framework\TestCase
         );
         $this->assertIsString($controlPath);
         $this->assertMatchesRegularExpression('#^ControlPath=/tmp/aihelper-ssh-[a-f0-9]{32}$#', $controlPath);
+        $reusedCommand = (new \ReflectionMethod($harness, 'sshCommand'))->invoke($harness);
+        $reusedControlPath = current(
+            array_filter($reusedCommand, fn(string $argument): bool => str_starts_with($argument, 'ControlPath='))
+        );
+        $this->assertSame($controlPath, $reusedControlPath);
+
+        (new \ReflectionProperty($harness, 'session_id'))->setValue($harness, 'chat-b');
+        $otherCommand = (new \ReflectionMethod($harness, 'sshCommand'))->invoke($harness);
+        $otherControlPath = current(
+            array_filter($otherCommand, fn(string $argument): bool => str_starts_with($argument, 'ControlPath='))
+        );
+        $this->assertIsString($otherControlPath);
+        $this->assertNotSame($controlPath, $otherControlPath);
     }
 
     function test__google_stream_preserves_plain_json_errors(): void

@@ -10553,7 +10553,8 @@ abstract class ai_harness extends ai_anthropic
                         (string) $this->ssh_host,
                         (string) $this->ssh_user,
                         (string) $this->ssh_port,
-                        (string) $this->ssh_key
+                        (string) $this->ssh_key,
+                        (string) $this->session_id
                     ])
                 ),
                 0,
