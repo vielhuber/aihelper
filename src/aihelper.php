@@ -31,6 +31,8 @@ abstract class aihelper
     protected ?string $cli_session_id = null;
     protected bool $cli_resume_latest = true;
     protected bool $cli_native_memory = true;
+    protected ?string $cli_session_home = null;
+    protected ?string $cli_auth_home = null;
 
     protected ?\Closure $abort_callback = null;
 
@@ -99,7 +101,9 @@ abstract class aihelper
         ?string $cli_session_id = null,
         bool $cli_resume_latest = true,
         bool $cli_native_memory = true,
-        ?callable $abort_callback = null
+        ?callable $abort_callback = null,
+        ?string $cli_session_home = null,
+        ?string $cli_auth_home = null
     ): ?self {
         if ($provider === 'openai') {
             return new ai_openai(
@@ -368,6 +372,8 @@ abstract class aihelper
                 cli_session_id: $cli_session_id,
                 cli_resume_latest: $cli_resume_latest,
                 cli_native_memory: $cli_native_memory,
+                cli_session_home: $cli_session_home,
+                cli_auth_home: $cli_auth_home,
                 system_prompt: $system_prompt,
                 cli_skills: $cli_skills,
                 abort_callback: $abort_callback
@@ -398,6 +404,8 @@ abstract class aihelper
                 cli_session_id: $cli_session_id,
                 cli_resume_latest: $cli_resume_latest,
                 cli_native_memory: $cli_native_memory,
+                cli_session_home: $cli_session_home,
+                cli_auth_home: $cli_auth_home,
                 system_prompt: $system_prompt,
                 cli_skills: $cli_skills,
                 abort_callback: $abort_callback
@@ -428,6 +436,8 @@ abstract class aihelper
                 cli_session_id: $cli_session_id,
                 cli_resume_latest: $cli_resume_latest,
                 cli_native_memory: $cli_native_memory,
+                cli_session_home: $cli_session_home,
+                cli_auth_home: $cli_auth_home,
                 system_prompt: $system_prompt,
                 cli_skills: $cli_skills,
                 abort_callback: $abort_callback
@@ -747,7 +757,9 @@ abstract class aihelper
         ?string $cli_session_id = null,
         bool $cli_resume_latest = true,
         bool $cli_native_memory = true,
-        ?callable $abort_callback = null
+        ?callable $abort_callback = null,
+        ?string $cli_session_home = null,
+        ?string $cli_auth_home = null
     ) {
         if ($cli_workdir !== null) {
             $this->workdir = $cli_workdir;
@@ -768,6 +780,7 @@ abstract class aihelper
         $this->cli_session_id = $cli_session_id !== '' ? $cli_session_id : null;
         $this->cli_resume_latest = $cli_resume_latest;
         $this->cli_native_memory = $cli_native_memory;
+        $this->setCliStorage($cli_session_home, $cli_auth_home);
         $this->abort_callback = $abort_callback !== null ? \Closure::fromCallable($abort_callback) : null;
         if ($cli_skills !== null) {
             $this->cli_skills = $cli_skills;
@@ -917,10 +930,13 @@ abstract class aihelper
 
     protected function getCodexAuthentication(): ?array
     {
+        $cliAuthHome = $this->cli_auth_home ?? '';
         $auth_files =
             $this->name === 'cliproxyapi'
                 ? (glob('/host/data/server/cliproxyapi/auth/codex*.json') ?: [])
-                : ['/root/.codex/auth.json'];
+                : [
+                    $cliAuthHome !== '' ? $cliAuthHome . '/codex/auth.json' : '/root/.codex/auth.json'
+                ];
         foreach ($auth_files as $auth_file) {
             $auth_content = $this->readCliAuthFile($auth_file);
             if ($auth_content === null) {
@@ -942,7 +958,10 @@ abstract class aihelper
 
     protected function getCliUsageCacheKey(string $tool): string
     {
-        return $tool . ($this->name === 'cliproxyapi' ? '-cliproxyapi' : '-native');
+        $cliAuthHome = $this->cli_auth_home ?? '';
+        return $tool .
+            ($this->name === 'cliproxyapi' ? '-cliproxyapi' : '-native') .
+            ($cliAuthHome !== '' ? '-' . hash('sha256', $cliAuthHome) : '');
     }
 
     protected function isCliAuthenticationExpired(array $auth): bool
@@ -1330,10 +1349,15 @@ abstract class aihelper
             return $finish($limits);
         }
 
+        $cliAuthHome = $this->cli_auth_home ?? '';
         $auth_files =
             $this->name === 'cliproxyapi'
                 ? (glob('/host/data/server/cliproxyapi/auth/claude*.json') ?: [])
-                : ['/root/.claude/.credentials.json'];
+                : [
+                    $cliAuthHome !== ''
+                        ? $cliAuthHome . '/claude/.credentials.json'
+                        : '/root/.claude/.credentials.json'
+                ];
         $access_token = null;
         foreach ($auth_files as $auth_file) {
             $auth_content = $this->readCliAuthFile($auth_file);
@@ -6117,6 +6141,18 @@ abstract class aihelper
         return $this->cli_session_id;
     }
 
+    /**
+     * Keep native CLI session state separate from shared authentication.
+     */
+    public function setCliStorage(?string $cli_session_home, ?string $cli_auth_home): static
+    {
+        $cli_session_home = trim((string) ($cli_session_home ?? ''));
+        $cli_auth_home = trim((string) ($cli_auth_home ?? ''));
+        $this->cli_session_home = $cli_session_home !== '' ? $cli_session_home : null;
+        $this->cli_auth_home = $cli_auth_home !== '' ? $cli_auth_home : null;
+        return $this;
+    }
+
     public function getSessionContent(): array
     {
         return self::$sessions[$this->session_id];
@@ -10255,10 +10291,6 @@ abstract class ai_harness extends ai_anthropic
 
     public ?bool $isolate_harness_config = true;
 
-    // where the cli keeps its own state. without one every tool falls back to the
-    // native location in the user's home, which spreads one chat over several trees
-    public ?string $harness_home = null;
-
     protected ?string $user_home = null;
 
     protected array $harness_files = [];
@@ -10680,10 +10712,21 @@ abstract class ai_harness extends ai_anthropic
      */
     protected function harnessStore(string $tool): ?string
     {
-        if ($this->harness_home === null || trim($this->harness_home) === '') {
+        if ($this->cli_session_home === null) {
             return null;
         }
-        return rtrim($this->harness_home, '/') . '/' . $tool;
+        return rtrim($this->cli_session_home, '/') . '/' . $tool;
+    }
+
+    /**
+     * Keep authentication independent from the session-specific cli state.
+     */
+    protected function harnessAuthStore(string $tool): ?string
+    {
+        if ($this->cli_auth_home === null) {
+            return null;
+        }
+        return rtrim($this->cli_auth_home, '/') . '/' . $tool;
     }
 
     /**
@@ -11407,7 +11450,7 @@ class ai_claudecode extends ai_harness
         }
         $store = $this->harnessStore('claude');
         if ($store !== null) {
-            $native = rtrim($this->userHome(), '/') . '/.claude';
+            $native = $this->harnessAuthStore('claude') ?? rtrim($this->userHome(), '/') . '/.claude';
             $this->prepareHarnessStore(
                 [$native, $store],
                 $this->isRemote() || is_file($native . '/.credentials.json')
@@ -11824,37 +11867,19 @@ class ai_codex extends ai_harness
     protected function harnessEnvironmentOverrides(): array
     {
         $overrides = $this->harnessMcpTokenEnvironment();
-        // the prompt is too large for an argument, so an isolated config.toml carries it.
-        // config and skills stay run-specific while auth, sessions and sqlite state remain
-        // in the user's native codex home, making the conversation resumable from the cli
-        if (($this->system_prompt === null && $this->cli_skills === []) || $this->isolate_harness_config !== true) {
-            return $overrides;
-        }
-        $payload_home = dirname($this->payloadFile('codex/.root', ''));
-        $this->placeSkills('codex/skills');
-        $prepareStore = false;
         $native_home = $this->native_codex_home;
         $shared_codex_home = $this->shared_codex_home;
+        $prepareStore = false;
         if ($shared_codex_home === null) {
-            $native_home = rtrim($this->userHome(), '/') . '/.codex';
+            $native_home = $this->harnessAuthStore('codex') ?? rtrim($this->userHome(), '/') . '/.codex';
             $shared_codex_home = $this->harnessStore('codex') ??
                 $native_home .
                     '/charly/' .
                     preg_replace('/[^a-zA-Z0-9_\-]/', '_', (string) $this->session_id);
             $prepareStore = true;
         }
-        $config = 'project_doc_max_bytes = 0' . PHP_EOL .
-            'sqlite_home = ' . $this->tomlString((string) $native_home) . PHP_EOL;
-        if ($this->system_prompt !== null) {
-            $config =
-                'instructions = ' . $this->tomlString($this->system_prompt) . PHP_EOL . $config;
-        }
-        $this->payloadFile('codex/config.toml', $config);
         if ($prepareStore) {
-            $links = [
-                $shared_codex_home . '/config.toml' => $payload_home . '/config.toml',
-                $shared_codex_home . '/skills' => $payload_home . '/skills'
-            ];
+            $links = [];
             if ($this->isRemote() || is_file($native_home . '/auth.json')) {
                 $links[$shared_codex_home . '/auth.json'] = $native_home . '/auth.json';
             }
@@ -11863,6 +11888,28 @@ class ai_codex extends ai_harness
             $this->shared_codex_home = $shared_codex_home;
         }
         $overrides['CODEX_HOME'] = $shared_codex_home;
+        // the prompt is too large for an argument, so an isolated config.toml carries it.
+        // config and skills stay run-specific while authentication can come from a
+        // separate profile and sessions remain in this chat's persistent store
+        if (($this->system_prompt === null && $this->cli_skills === []) || $this->isolate_harness_config !== true) {
+            return $overrides;
+        }
+        $payload_home = dirname($this->payloadFile('codex/.root', ''));
+        $this->placeSkills('codex/skills');
+        $config = 'project_doc_max_bytes = 0' . PHP_EOL .
+            'sqlite_home = ' . $this->tomlString((string) $shared_codex_home) . PHP_EOL;
+        if ($this->system_prompt !== null) {
+            $config =
+                'instructions = ' . $this->tomlString($this->system_prompt) . PHP_EOL . $config;
+        }
+        $this->payloadFile('codex/config.toml', $config);
+        $this->prepareHarnessStore(
+            [$native_home, $shared_codex_home],
+            [
+                $shared_codex_home . '/config.toml' => $payload_home . '/config.toml',
+                $shared_codex_home . '/skills' => $payload_home . '/skills'
+            ]
+        );
         return $overrides;
     }
 
@@ -12798,9 +12845,12 @@ class ai_opencode extends ai_harness
         }
 
         $key = null;
+        $cliAuthHome = $this->cli_auth_home ?? '';
+        $authBases = $cliAuthHome !== ''
+            ? [$cliAuthHome . '/opencode/data']
+            : [getenv('XDG_DATA_HOME') ?: null, (getenv('HOME') ?: '/root') . '/.local/share', '/root/.local/share'];
         foreach (
-            [getenv('XDG_DATA_HOME') ?: null, (getenv('HOME') ?: '/root') . '/.local/share', '/root/.local/share']
-            as $base
+            $authBases as $base
         ) {
             // a remote harness keeps its credentials on the other machine
             $auth = $base === null ? null : $this->readCliAuthFile(rtrim($base, '/') . '/opencode/auth.json');
@@ -12895,7 +12945,10 @@ class ai_opencode extends ai_harness
         );
         $store = $this->harnessStore('opencode');
         if ($store !== null) {
-            $native = rtrim($this->userHome(), '/') . '/.local/share/opencode';
+            $authStore = $this->harnessAuthStore('opencode');
+            $native = $authStore !== null
+                ? $authStore . '/data/opencode'
+                : rtrim($this->userHome(), '/') . '/.local/share/opencode';
             $this->prepareHarnessStore(
                 [$native, $store . '/data/opencode', $store . '/config'],
                 $this->isRemote() || is_file($native . '/auth.json')

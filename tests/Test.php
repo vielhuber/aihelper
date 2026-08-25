@@ -1544,7 +1544,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->assertStringNotContainsString('\\ud83e', $config);
             $this->assertStringContainsString(
                 'sqlite_home = ' . json_encode(
-                    dirname(dirname($environment['CODEX_HOME'])),
+                    $environment['CODEX_HOME'],
                     JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES
                 ),
                 $config
@@ -3621,11 +3621,15 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertTrue($success);
     }
 
-    private function harnessStoreAihelper(string $provider, ?string $home): object
+    private function harnessStoreAihelper(string $provider, ?string $home, ?string $authHome = null): object
     {
-        $ai = aihelper::create(provider: $provider, model: 'test', log: 'tests/aihelper.log');
-        $ai->harness_home = $home;
-        return $ai;
+        return aihelper::create(
+            provider: $provider,
+            model: 'test',
+            log: 'tests/aihelper.log',
+            cli_session_home: $home,
+            cli_auth_home: $authHome
+        );
     }
 
     private function harnessOverrides(object $ai): array
@@ -3633,7 +3637,7 @@ class Test extends \PHPUnit\Framework\TestCase
         return (new \ReflectionMethod($ai, 'harnessEnvironmentOverrides'))->invoke($ai);
     }
 
-    public function test__a_harness_home_moves_every_cli_store_below_it()
+    public function test__a_cli_session_home_moves_every_cli_store_below_it()
     {
         $home = sys_get_temp_dir() . '/aihelper-harness-' . getmypid();
         $nativeHome = $home . '/native';
@@ -3657,12 +3661,58 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    public function test__without_a_harness_home_the_clis_keep_their_native_store()
+    public function test__without_a_cli_session_home_the_clis_keep_their_native_store()
     {
         $overrides = $this->harnessOverrides($this->harnessStoreAihelper('claudecode', null));
         $this->assertArrayNotHasKey('CLAUDE_CONFIG_DIR', $overrides);
 
         $overrides = $this->harnessOverrides($this->harnessStoreAihelper('opencode', null));
         $this->assertArrayNotHasKey('XDG_DATA_HOME', $overrides);
+    }
+
+    public function test__harness_authentication_can_be_shared_by_separate_session_stores()
+    {
+        $home = sys_get_temp_dir() . '/aihelper-harness-auth-' . getmypid();
+        mkdir($home . '/auth/claude', 0700, true);
+        mkdir($home . '/auth/codex', 0700, true);
+        mkdir($home . '/auth/opencode/data/opencode', 0700, true);
+        file_put_contents($home . '/auth/claude/.credentials.json', '{}');
+        file_put_contents($home . '/auth/codex/auth.json', '{}');
+        file_put_contents($home . '/auth/opencode/data/opencode/auth.json', '{}');
+        try {
+            $this->harnessOverrides(
+                $this->harnessStoreAihelper('claudecode', $home . '/chat-a', $home . '/auth')
+            );
+            $this->harnessOverrides(
+                $this->harnessStoreAihelper('opencode', $home . '/chat-b', $home . '/auth')
+            );
+            $codex = $this->harnessStoreAihelper('codex', $home . '/chat-c', $home . '/auth');
+            $systemPrompt = new \ReflectionProperty($codex, 'system_prompt');
+            $systemPrompt->setValue($codex, 'test');
+            $this->harnessOverrides($codex);
+            $this->assertSame(
+                $home . '/auth/claude/.credentials.json',
+                readlink($home . '/chat-a/claude/.credentials.json')
+            );
+            $this->assertSame(
+                $home . '/auth/opencode/data/opencode/auth.json',
+                readlink($home . '/chat-b/opencode/data/opencode/auth.json')
+            );
+            $this->assertSame(
+                $home . '/auth/codex/auth.json',
+                readlink($home . '/chat-c/codex/auth.json')
+            );
+        } finally {
+            __::rrmdir($home);
+        }
+    }
+
+    public function test__harness_usage_cache_is_isolated_by_authentication_profile()
+    {
+        $first = $this->harnessStoreAihelper('codex', null, '/profiles/codex-primary');
+        $second = $this->harnessStoreAihelper('codex', null, '/profiles/codex-secondary');
+        $method = new \ReflectionMethod($first, 'getCliUsageCacheKey');
+
+        $this->assertNotSame($method->invoke($first, 'codex'), $method->invoke($second, 'codex'));
     }
 }

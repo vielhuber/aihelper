@@ -45,6 +45,8 @@ $ai = aihelper::create(
     cli_session_id: null, // cli harness only: resume this exact native session (get with $ai->getCliSessionId())
     cli_resume_latest: true, // cli harness only: without cli_session_id, continue the newest session in cli_workdir instead of starting fresh
     cli_native_memory: true, // cli harness only: let the harness load and maintain its own automatic long-term memory
+    cli_session_home: null, // cli harness only: persistent native history, configuration and skills for this session
+    cli_auth_home: null, // cli harness only: persistent authentication profile shared by separate session homes
     history: null, // submit messages (get with $ai->getSessionContent()),
     system_prompt: null, // works with every provider — cli harnesses receive it as a real system prompt, everyone else gets it prepended to the session (same as writing it into `history` yourself or calling $ai->setSystemPrompt() later)
     stream: false,
@@ -157,6 +159,11 @@ set `cli_resume_latest: false` for an explicitly fresh thread, then persist `$ai
 codex keeps injected config and skills isolated per aihelper session while storing its threads in the native
 `~/.codex` state. to include threads originally started by aihelper's non-interactive `codex exec`, resume from
 an interactive terminal with `codex resume --last --include-non-interactive`.
+
+pass `cli_session_home` to keep one harness session's native history, configuration and skills in a dedicated
+persistent directory. pass `cli_auth_home` separately to share one authenticated subscription across multiple
+session homes without sharing their histories or configuration. both options work for claude code, codex and
+opencode and can also be changed before the first request with `setCliStorage()`.
 
 set `cli_native_memory: false` when the caller supplies its own long-term memory. claude code then disables auto
 memory while retaining `CLAUDE.md`, plugins and skills; codex neither generates nor loads its native memories.
