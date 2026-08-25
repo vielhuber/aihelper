@@ -11895,7 +11895,7 @@ class ai_codex extends ai_harness
             return $overrides;
         }
         $payload_home = dirname($this->payloadFile('codex/.root', ''));
-        $this->placeSkills('codex/skills');
+        $skills = $this->placeSkills('codex/skills');
         $config = 'project_doc_max_bytes = 0' . PHP_EOL .
             'sqlite_home = ' . $this->tomlString((string) $shared_codex_home) . PHP_EOL;
         if ($this->system_prompt !== null) {
@@ -11903,13 +11903,11 @@ class ai_codex extends ai_harness
                 'instructions = ' . $this->tomlString($this->system_prompt) . PHP_EOL . $config;
         }
         $this->payloadFile('codex/config.toml', $config);
-        $this->prepareHarnessStore(
-            [$native_home, $shared_codex_home],
-            [
-                $shared_codex_home . '/config.toml' => $payload_home . '/config.toml',
-                $shared_codex_home . '/skills' => $payload_home . '/skills'
-            ]
-        );
+        $links = [$shared_codex_home . '/config.toml' => $payload_home . '/config.toml'];
+        if ($skills !== null) {
+            $links[$shared_codex_home . '/skills'] = $skills;
+        }
+        $this->prepareHarnessStore([$native_home, $shared_codex_home], $links);
         return $overrides;
     }
 

@@ -1538,7 +1538,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->assertStringContainsString('/.codex/charly/payload-args-test', $environment['CODEX_HOME']);
             $this->assertSame(0700, fileperms($environment['CODEX_HOME']) & 0777);
             $this->assertTrue(is_link($environment['CODEX_HOME'] . '/config.toml'));
-            $this->assertTrue(is_link($environment['CODEX_HOME'] . '/skills'));
+            $this->assertFalse(is_link($environment['CODEX_HOME'] . '/skills'));
             $config = (string) file_get_contents($environment['CODEX_HOME'] . '/config.toml');
             $this->assertStringContainsString('🤖', $config);
             $this->assertStringNotContainsString('\\ud83e', $config);
@@ -3690,6 +3690,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $systemPrompt = new \ReflectionProperty($codex, 'system_prompt');
             $systemPrompt->setValue($codex, 'test');
             $this->harnessOverrides($codex);
+            $this->assertFalse(is_link($home . '/chat-c/codex/skills'));
             $this->assertSame(
                 $home . '/auth/claude/.credentials.json',
                 readlink($home . '/chat-a/claude/.credentials.json')
