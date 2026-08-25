@@ -3679,6 +3679,7 @@ class Test extends \PHPUnit\Framework\TestCase
         file_put_contents($home . '/auth/claude/.credentials.json', '{}');
         file_put_contents($home . '/auth/codex/auth.json', '{}');
         file_put_contents($home . '/auth/opencode/data/opencode/auth.json', '{}');
+        $normalizePath = static fn(string $path): string => str_replace('\\', '/', $path);
         try {
             $this->harnessOverrides(
                 $this->harnessStoreAihelper('claudecode', $home . '/chat-a', $home . '/auth')
@@ -3692,16 +3693,16 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->harnessOverrides($codex);
             $this->assertFalse(is_link($home . '/chat-c/codex/skills'));
             $this->assertSame(
-                $home . '/auth/claude/.credentials.json',
-                readlink($home . '/chat-a/claude/.credentials.json')
+                $normalizePath($home . '/auth/claude/.credentials.json'),
+                $normalizePath((string) readlink($home . '/chat-a/claude/.credentials.json'))
             );
             $this->assertSame(
-                $home . '/auth/opencode/data/opencode/auth.json',
-                readlink($home . '/chat-b/opencode/data/opencode/auth.json')
+                $normalizePath($home . '/auth/opencode/data/opencode/auth.json'),
+                $normalizePath((string) readlink($home . '/chat-b/opencode/data/opencode/auth.json'))
             );
             $this->assertSame(
-                $home . '/auth/codex/auth.json',
-                readlink($home . '/chat-c/codex/auth.json')
+                $normalizePath($home . '/auth/codex/auth.json'),
+                $normalizePath((string) readlink($home . '/chat-c/codex/auth.json'))
             );
         } finally {
             __::rrmdir($home);
