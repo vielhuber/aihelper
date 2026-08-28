@@ -36,6 +36,8 @@ abstract class aihelper
 
     protected ?\Closure $abort_callback = null;
 
+    protected ?\Closure $input_callback = null;
+
     protected bool $aborted = false;
     protected ?string $log = null;
     protected ?int $max_tries = null;
@@ -7594,6 +7596,32 @@ abstract class aihelper
         return $this;
     }
 
+    /**
+     * Register a source of follow-up input for a turn that is already running.
+     *
+     * The callback is polled while the harness works and returns the next
+     * message to hand over, or null when there is nothing to deliver. Whether a
+     * message reaches the running turn or the next one depends on the harness.
+     */
+    public function setInputCallback(?callable $input_callback): static
+    {
+        $this->input_callback = $input_callback !== null ? \Closure::fromCallable($input_callback) : null;
+        return $this;
+    }
+
+    protected function pendingInput(): ?string
+    {
+        if ($this->input_callback === null) {
+            return null;
+        }
+        try {
+            $message = ($this->input_callback)();
+        } catch (\Throwable $exception) {
+            return null;
+        }
+        return is_string($message) && trim($message) !== '' ? $message : null;
+    }
+
     protected function shouldAbort(): bool
     {
         if ($this->abort_callback === null) {
@@ -10307,7 +10335,77 @@ abstract class ai_harness extends ai_anthropic
 
     protected array $hidden_harness_stream_tool_ids = [];
 
+    protected bool $harness_stdin_open = false;
+
+    protected bool $harness_turn_complete = false;
+
+    protected ?float $harness_turn_complete_at = null;
+
+    protected ?string $harness_steer_pending = null;
+
+    /** @var array<string, string> */
+    protected array $harness_store_links = [];
+
     abstract protected function binaryName(): string;
+
+    /**
+     * Whether stdin stays open for the whole turn so follow-up input can be
+     * written into it. Only harnesses that read a stream rather than a single
+     * prompt may say yes.
+     */
+    protected function harnessKeepsStdinOpen(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Whether this harness can take a message into the turn that is running.
+     * Only then is the input callback polled at all — a message it hands out
+     * counts as delivered, so it must not be asked for one that would be lost.
+     */
+    protected function harnessSupportsSteering(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Hand the initial prompt to the freshly spawned process.
+     */
+    protected function harnessStart(array $pipes, string $prompt): void
+    {
+        fwrite($pipes[0], $this->harnessInput($prompt));
+    }
+
+    /**
+     * Whether the process outlives the finished turn and has to be taken down.
+     * True only for a protocol server, never for a cli that ends by itself once
+     * its input stream is closed.
+     */
+    protected function harnessOutlivesTurn(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Deliver a follow-up message to the running turn. Returns false when this
+     * harness cannot take one.
+     */
+    protected function harnessSteer(array $pipes, string $message): bool
+    {
+        return false;
+    }
+
+    /**
+     * Events a harness already consumed off the stream itself — for instance
+     * during a protocol handshake — so the loop can still run them through
+     * handleEvent in order.
+     *
+     * @return array
+     */
+    protected function harnessPendingEvents(): array
+    {
+        return [];
+    }
 
     /**
      * Build the process arguments for a single turn.
@@ -10737,6 +10835,7 @@ abstract class ai_harness extends ai_anthropic
      */
     protected function prepareHarnessStore(array $directories, array $links): void
     {
+        $this->harness_store_links = array_merge($this->harness_store_links, $links);
         if ($this->isRemote()) {
             $commands = [
                 'umask 077 && mkdir -p ' .
@@ -10773,6 +10872,45 @@ abstract class ai_harness extends ai_anthropic
             if (!symlink($target, $link)) {
                 throw new \RuntimeException('harness: failed to link ' . $link);
             }
+        }
+    }
+
+    /**
+     * A cli that refreshes its token writes the new file atomically, and the
+     * rename replaces the link instead of following it. Without writing it back
+     * the refreshed credentials would stay in this run's store while the shared
+     * profile keeps the token the server has already rotated away.
+     */
+    protected function persistHarnessStoreLinks(): void
+    {
+        if ($this->harness_store_links === []) {
+            return;
+        }
+        if ($this->isRemote()) {
+            $commands = [];
+            foreach ($this->harness_store_links as $link => $target) {
+                $commands[] =
+                    'if [ -f ' . escapeshellarg($link) . ' ] && [ ! -L ' . escapeshellarg($link) . ' ]; then ' .
+                    'cat ' . escapeshellarg($link) . ' > ' . escapeshellarg($target) . ' && rm -f ' .
+                    escapeshellarg($link) . ' && ln -s ' . escapeshellarg($target) . ' ' . escapeshellarg($link) . '; fi';
+            }
+            $this->remoteCommand(implode(' && ', $commands), '', 'persist harness store');
+            return;
+        }
+        foreach ($this->harness_store_links as $link => $target) {
+            if (is_link($link) || !is_file($link)) {
+                continue;
+            }
+            $contents = file_get_contents($link);
+            if ($contents === false || trim($contents) === '') {
+                continue;
+            }
+            if (file_put_contents($target, $contents) === false) {
+                continue;
+            }
+            chmod($target, 0600);
+            unlink($link);
+            symlink($target, $link);
         }
     }
 
@@ -11032,10 +11170,17 @@ abstract class ai_harness extends ai_anthropic
         }
         $pid = (int) (proc_get_status($process)['pid'] ?? 0);
 
-        fwrite($pipes[0], $this->harnessInput($prompt));
-        fclose($pipes[0]);
+        $this->harness_turn_complete = false;
+        $this->harness_turn_complete_at = null;
+        $this->harness_steer_pending = null;
+        $this->harness_stdin_open = true;
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
+        $this->harnessStart($pipes, $prompt);
+        if (!$this->harnessKeepsStdinOpen()) {
+            fclose($pipes[0]);
+            $this->harness_stdin_open = false;
+        }
 
         $this->harness_costs = null;
         $emit = $this->getStreamCallback();
@@ -11110,6 +11255,37 @@ abstract class ai_harness extends ai_anthropic
                 usleep(500000);
                 $this->terminateProcess($process, $pid);
                 break;
+            }
+            if ($this->harness_stdin_open === true && $this->harness_turn_complete === true) {
+                // the turn is done; the stream ends here so the cli can exit
+                if (is_resource($pipes[0])) {
+                    fclose($pipes[0]);
+                }
+                $this->harness_stdin_open = false;
+                $this->harness_turn_complete_at = microtime(true);
+            }
+            if ($this->harness_turn_complete !== true && $this->harnessSupportsSteering()) {
+                if ($this->harness_steer_pending === null) {
+                    $this->harness_steer_pending = $this->pendingInput();
+                }
+                if ($this->harness_steer_pending !== null && $this->harnessSteer($pipes, $this->harness_steer_pending)) {
+                    $this->log($this->harness_steer_pending, 'harness steer');
+                    $this->harness_steer_pending = null;
+                }
+            }
+            if (
+                $this->harnessOutlivesTurn() &&
+                $this->harness_turn_complete === true &&
+                $this->harness_turn_complete_at !== null &&
+                microtime(true) - $this->harness_turn_complete_at > 20
+            ) {
+                // a protocol server keeps running after a finished turn; once the
+                // result is in and closing stdin did not end it, it is taken down
+                $this->terminateProcess($process, $pid);
+                break;
+            }
+            foreach ($this->harnessPendingEvents() as $pendingEvent) {
+                $this->handleEvent($pendingEvent, $result, $emit);
             }
             if (!$nativeEventAttempted && !is_resource($nativeEventProcess)) {
                 $nativeEventCommand = $this->nativeEventCommand();
@@ -11226,14 +11402,31 @@ abstract class ai_harness extends ai_anthropic
             if (time() - $last_activity_at >= (int) $this->timeout) {
                 $this->closeNativeEventProcess($nativeEventProcess, $nativeEventPipes);
                 $this->terminateProcess($process, $pid);
+                $this->persistHarnessStoreLinks();
                 throw new \RuntimeException('harness: inactivity timeout after ' . $this->timeout . ' seconds.');
             }
         }
 
         $this->closeNativeEventProcess($nativeEventProcess, $nativeEventPipes);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
+        if ($this->harness_stdin_open === true) {
+            if (is_resource($pipes[0])) {
+                fclose($pipes[0]);
+            }
+            $this->harness_stdin_open = false;
+        }
+        if ($this->harness_steer_pending !== null) {
+            // the turn ended before it could be handed over — say so rather than
+            // let it disappear between two runs
+            $this->log($this->harness_steer_pending, 'harness steer undelivered');
+            $this->harness_steer_pending = null;
+        }
+        foreach ([1, 2] as $descriptor) {
+            if (is_resource($pipes[$descriptor])) {
+                fclose($pipes[$descriptor]);
+            }
+        }
         $closed = proc_close($process);
+        $this->persistHarnessStoreLinks();
         if ($exit_code === null) {
             $exit_code = $closed;
         }
@@ -11584,6 +11777,27 @@ class ai_claudecode extends ai_harness
         exec('sh -c ' . escapeshellarg($command) . ' 2>/dev/null');
     }
 
+    protected function harnessKeepsStdinOpen(): bool
+    {
+        // the turn is fed through --input-format stream-json, so another user
+        // line can follow while the run is still going
+        return $this->input_callback !== null;
+    }
+
+    protected function harnessSupportsSteering(): bool
+    {
+        return $this->input_callback !== null;
+    }
+
+    protected function harnessSteer(array $pipes, string $message): bool
+    {
+        if (!is_resource($pipes[0])) {
+            return false;
+        }
+        fwrite($pipes[0], $this->harnessInput($message));
+        return true;
+    }
+
     protected function harnessInput(string $prompt): string
     {
         // claude code has no attachment flag, but it can read any path itself —
@@ -11696,6 +11910,9 @@ class ai_claudecode extends ai_harness
             $this->emitHarnessLifecycleEvent($event);
             return;
         }
+        // the turn is over: with stdin still open the cli would wait for the next
+        // one, so the loop closes it once this is set
+        $this->harness_turn_complete = true;
         $this->emitHarnessLifecycleEvent($event);
         $result->result->stop_reason = $event['stop_reason'] ?? 'end_turn';
         $result->result->usage = (object) [
@@ -11781,6 +11998,43 @@ class ai_codex extends ai_harness
         return $this->harnessFilePaths('other');
     }
 
+    protected ?string $app_server_thread_id = null;
+
+    protected ?string $app_server_turn_id = null;
+
+    protected int $app_server_request_id = 0;
+
+    protected string $app_server_buffer = '';
+
+    protected array $app_server_replay = [];
+
+    protected array $app_server_usage = [];
+
+    /**
+     * `codex exec` reads one prompt and is done, so a message can only ever
+     * reach the next turn. The app server keeps the thread open and offers
+     * turn/steer, which lands in the turn that is already running.
+     */
+    protected function usesAppServer(): bool
+    {
+        return $this->input_callback !== null;
+    }
+
+    protected function harnessKeepsStdinOpen(): bool
+    {
+        return $this->usesAppServer();
+    }
+
+    protected function harnessSupportsSteering(): bool
+    {
+        return $this->usesAppServer();
+    }
+
+    protected function harnessOutlivesTurn(): bool
+    {
+        return $this->usesAppServer();
+    }
+
     protected function buildArgs(): array
     {
         /**
@@ -11850,6 +12104,28 @@ class ai_codex extends ai_harness
             $options[] =
                 $key . '.bearer_token_env_var=' . json_encode($this->harnessMcpTokenVariable($name), JSON_UNESCAPED_SLASHES);
         }
+        if ($this->usesAppServer()) {
+            // model, sandbox, approval and the prompt travel as protocol
+            // parameters instead of flags; only the config overrides remain
+            $carry = [];
+            for ($index = 0; $index < count($options); $index++) {
+                if ($options[$index] === '-c' && isset($options[$index + 1])) {
+                    $carry[] = '-c';
+                    $carry[] = $options[$index + 1];
+                    $index++;
+                    continue;
+                }
+                if (in_array($options[$index], ['--enable', '--disable'], true) && isset($options[$index + 1])) {
+                    $carry[] = '-c';
+                    $carry[] = 'features.' . $options[$index + 1] . '=' . ($options[$index] === '--enable' ? 'true' : 'false');
+                    $index++;
+                    continue;
+                }
+                // app-server rejects --ignore-user-config; project_doc_max_bytes
+                // above already keeps the AGENTS.md files out
+            }
+            return array_merge(['app-server'], $carry);
+        }
         if ($this->cli_session_id !== null) {
             return array_merge(['exec', 'resume', $this->cli_session_id], $options);
         }
@@ -11857,6 +12133,258 @@ class ai_codex extends ai_harness
             return array_merge(['exec'], $options);
         }
         return array_merge(['exec', 'resume', '--last'], $options);
+    }
+
+    /**
+     * One json-rpc request on the app server's stdin.
+     */
+    private function appServerSend(array $pipes, string $method, array $params): int
+    {
+        $id = ++$this->app_server_request_id;
+        fwrite(
+            $pipes[0],
+            json_encode(['id' => $id, 'method' => $method, 'params' => $params], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) .
+                "\n"
+        );
+        return $id;
+    }
+
+    /**
+     * Read until the response with this id arrives; everything else is kept for
+     * the main loop so no event of the transcript is lost.
+     */
+    private function appServerAwait(array $pipes, int $id, float $timeout = 60.0): ?array
+    {
+        $deadline = microtime(true) + $timeout;
+        while (microtime(true) < $deadline) {
+            $chunk = fread($pipes[1], 65536);
+            if ($chunk === false || $chunk === '') {
+                usleep(20000);
+                continue;
+            }
+            $this->app_server_buffer .= $chunk;
+            while (($position = strpos($this->app_server_buffer, "\n")) !== false) {
+                $line = trim(substr($this->app_server_buffer, 0, $position));
+                $this->app_server_buffer = substr($this->app_server_buffer, $position + 1);
+                if ($line === '') {
+                    continue;
+                }
+                $decoded = json_decode($line, true);
+                if (!is_array($decoded)) {
+                    continue;
+                }
+                if (($decoded['id'] ?? null) === $id) {
+                    return $decoded;
+                }
+                if (isset($decoded['method'])) {
+                    $this->app_server_replay[] = $decoded;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Hand the stream back to the main loop on a line boundary: whatever the
+     * handshake read past its last response would otherwise be lost, because
+     * the loop reads into a buffer of its own.
+     */
+    private function appServerHandOver(array $pipes): void
+    {
+        $deadline = microtime(true) + 5;
+        while (true) {
+            while (($position = strpos($this->app_server_buffer, "\n")) !== false) {
+                $line = trim(substr($this->app_server_buffer, 0, $position));
+                $this->app_server_buffer = substr($this->app_server_buffer, $position + 1);
+                $decoded = $line !== '' ? json_decode($line, true) : null;
+                if (is_array($decoded) && isset($decoded['method'])) {
+                    $this->app_server_replay[] = $decoded;
+                }
+            }
+            if ($this->app_server_buffer === '' || microtime(true) >= $deadline) {
+                return;
+            }
+            $chunk = fread($pipes[1], 65536);
+            if ($chunk === false || $chunk === '') {
+                usleep(20000);
+                continue;
+            }
+            $this->app_server_buffer .= $chunk;
+        }
+    }
+
+    protected function harnessStart(array $pipes, string $prompt): void
+    {
+        if (!$this->usesAppServer()) {
+            parent::harnessStart($pipes, $prompt);
+            return;
+        }
+        $this->app_server_thread_id = null;
+        $this->app_server_turn_id = null;
+        $this->app_server_buffer = '';
+        $this->app_server_replay = [];
+        $this->app_server_usage = [];
+
+        $id = $this->appServerSend($pipes, 'initialize', [
+            'clientInfo' => ['name' => 'aihelper', 'version' => '1.0.0']
+        ]);
+        if ($this->appServerAwait($pipes, $id, 30.0) === null) {
+            throw new \RuntimeException('harness: codex app server did not answer initialize');
+        }
+
+        $threadParams = [
+            'cwd' => $this->workspace(),
+            'sandbox' => 'danger-full-access',
+            'approvalPolicy' => 'never'
+        ];
+        if ($this->model !== null) {
+            $threadParams['model'] = $this->model;
+        }
+        if ($this->cli_session_id !== null) {
+            $threadParams['threadId'] = $this->cli_session_id;
+            $id = $this->appServerSend($pipes, 'thread/resume', $threadParams);
+        } else {
+            $id = $this->appServerSend($pipes, 'thread/start', $threadParams);
+        }
+        $response = $this->appServerAwait($pipes, $id, 60.0);
+        $threadId = $response['result']['thread']['id'] ?? null;
+        if ($threadId === null && $this->cli_session_id !== null) {
+            // a session that cannot be resumed must not take the turn with it
+            unset($threadParams['threadId']);
+            $id = $this->appServerSend($pipes, 'thread/start', $threadParams);
+            $response = $this->appServerAwait($pipes, $id, 60.0);
+            $threadId = $response['result']['thread']['id'] ?? null;
+        }
+        if ($threadId === null) {
+            throw new \RuntimeException(
+                'harness: codex app server did not open a thread' .
+                    (isset($response['error']['message']) ? ': ' . $response['error']['message'] : '')
+            );
+        }
+        $this->app_server_thread_id = (string) $threadId;
+
+        $input = [['type' => 'text', 'text' => $this->harnessInput($prompt)]];
+        foreach ($this->harnessFilePaths('image') as $path) {
+            $input[] = ['type' => 'image', 'url' => $path];
+        }
+        $turnParams = ['threadId' => $this->app_server_thread_id, 'input' => $input];
+        if (in_array($this->effort, ['minimal', 'low', 'medium', 'high', 'xhigh'], true)) {
+            $turnParams['effort'] = $this->effort;
+        }
+        $id = $this->appServerSend($pipes, 'turn/start', $turnParams);
+        $response = $this->appServerAwait($pipes, $id, 60.0);
+        $turnId = $response['result']['turn']['id'] ?? null;
+        if ($turnId === null) {
+            throw new \RuntimeException(
+                'harness: codex app server did not start a turn' .
+                    (isset($response['error']['message']) ? ': ' . $response['error']['message'] : '')
+            );
+        }
+        $this->app_server_turn_id = (string) $turnId;
+        $this->appServerHandOver($pipes);
+    }
+
+    protected function harnessSteer(array $pipes, string $message): bool
+    {
+        if (!$this->usesAppServer() || $this->app_server_thread_id === null || $this->app_server_turn_id === null) {
+            return false;
+        }
+        if (!is_resource($pipes[0])) {
+            return false;
+        }
+        $this->appServerSend($pipes, 'turn/steer', [
+            'threadId' => $this->app_server_thread_id,
+            'expectedTurnId' => $this->app_server_turn_id,
+            'input' => [['type' => 'text', 'text' => $message]]
+        ]);
+        return true;
+    }
+
+    protected function harnessPendingEvents(): array
+    {
+        $pending = $this->app_server_replay;
+        $this->app_server_replay = [];
+        return $pending;
+    }
+
+    /**
+     * The app server names item types and their fields in camel case where the
+     * exec transport uses snake case. Only the known keys are renamed — the
+     * payload of an mcp call must keep its own spelling.
+     */
+    private function normalizeAppServerItem(array $item): array
+    {
+        $types = [
+            'agentMessage' => 'agent_message',
+            'commandExecution' => 'command_execution',
+            'mcpToolCall' => 'mcp_tool_call',
+            'fileChange' => 'file_change',
+            'webSearch' => 'web_search',
+            'todoList' => 'todo_list',
+            'userMessage' => 'user_message'
+        ];
+        $type = (string) ($item['type'] ?? '');
+        if (isset($types[$type])) {
+            $item['type'] = $types[$type];
+        }
+        foreach (['aggregatedOutput' => 'aggregated_output', 'exitCode' => 'exit_code'] as $from => $to) {
+            if (array_key_exists($from, $item) && !array_key_exists($to, $item)) {
+                $item[$to] = $item[$from];
+            }
+        }
+        return $item;
+    }
+
+    /**
+     * Translate an app server notification into the event shape the exec
+     * transport produces, so both paths share one handler.
+     */
+    private function normalizeAppServerEvent(array $event): ?array
+    {
+        $method = (string) ($event['method'] ?? '');
+        $params = is_array($event['params'] ?? null) ? $event['params'] : [];
+        if ($method === 'thread/started') {
+            return ['type' => 'thread.started', 'thread_id' => $params['thread']['id'] ?? null];
+        }
+        if ($method === 'item/started' || $method === 'item/completed') {
+            return [
+                'type' => str_replace('/', '.', $method),
+                'item' => $this->normalizeAppServerItem(is_array($params['item'] ?? null) ? $params['item'] : [])
+            ];
+        }
+        if ($method === 'thread/tokenUsage/updated') {
+            $total = $params['tokenUsage']['total'] ?? [];
+            $this->app_server_usage = [
+                'input_tokens' => (int) ($total['inputTokens'] ?? 0),
+                'cache_write_input_tokens' => (int) ($total['cacheWriteInputTokens'] ?? 0),
+                'cached_input_tokens' => (int) ($total['cachedInputTokens'] ?? 0),
+                'output_tokens' => (int) ($total['outputTokens'] ?? 0)
+            ];
+            return null;
+        }
+        if ($method === 'turn/completed') {
+            $this->harness_turn_complete = true;
+            return ['type' => 'turn.completed', 'usage' => $this->app_server_usage];
+        }
+        if ($method === 'turn/failed') {
+            $this->harness_turn_complete = true;
+            return [
+                'type' => 'turn.failed',
+                'error' => [
+                    // the raw payload goes along: a bare label would hide why
+                    'message' => (string) ($params['error']['message'] ??
+                        json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE))
+                ]
+            ];
+        }
+        if ($method === 'error') {
+            return [
+                'type' => 'error',
+                'message' => (string) ($params['message'] ??
+                    json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE))
+            ];
+        }
+        return null;
     }
 
     private function tomlString(string $value): string
@@ -12146,6 +12674,13 @@ class ai_codex extends ai_harness
 
     protected function handleEvent(array $event, object $result, ?\Closure $emit): void
     {
+        if (isset($event['method'])) {
+            $normalized = $this->normalizeAppServerEvent($event);
+            if ($normalized === null) {
+                return;
+            }
+            $event = $normalized;
+        }
         $type = $event['type'] ?? null;
 
         if ($type === 'thread.started' && !empty($event['thread_id'])) {
