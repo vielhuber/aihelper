@@ -2792,7 +2792,10 @@ abstract class aihelper
                 'temporary failure in name resolution',
                 'could not resolve host',
                 'no such host',
-                'name or service not known'
+                'name or service not known',
+                'codex app server did not answer initialize',
+                'codex app server did not open a thread',
+                'codex app server did not start a turn'
             ]
             as $needle
         ) {
@@ -3287,7 +3290,14 @@ abstract class aihelper
                 if ($input_file instanceof \CURLFile) {
                     $curl_file = $input_file;
                 } elseif (is_string($input_file) && is_file($input_file)) {
-                    $curl_file = new \CURLFile($input_file);
+                    $input_mime = mime_content_type($input_file);
+                    $curl_file = new \CURLFile(
+                        $input_file,
+                        is_string($input_mime) && str_starts_with($input_mime, 'image/')
+                            ? $input_mime
+                            : 'image/png',
+                        basename($input_file)
+                    );
                 } else {
                     $tmp_input = tempnam(sys_get_temp_dir(), 'aih_');
                     if (
@@ -12047,7 +12057,13 @@ class ai_codex extends ai_harness
             '--skip-git-repo-check',
             '--dangerously-bypass-approvals-and-sandbox',
             '--disable',
-            'shell_snapshot'
+            'shell_snapshot',
+            '--disable',
+            'apps',
+            '--disable',
+            'plugins',
+            '--disable',
+            'skill_mcp_dependency_install'
         ];
         if ($this->cli_native_memory === false) {
             $options[] = '-c';

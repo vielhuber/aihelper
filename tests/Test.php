@@ -1585,7 +1585,16 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $this->assertContains('mcp_servers.github.startup_timeout_sec=300', $args);
         $this->assertContains('mcp_servers.github.required=true', $args);
-        $this->assertSame('shell_snapshot', $args[array_search('--disable', $args, true) + 1]);
+        foreach (['shell_snapshot', 'apps', 'plugins', 'skill_mcp_dependency_install'] as $feature) {
+            $this->assertContains($feature, $args);
+        }
+
+        $appServerCodex = aihelper::create(provider: 'codex');
+        $appServerCodex->setInputCallback(static fn(): ?string => null);
+        $appServerArgs = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'buildArgs'))->invoke($appServerCodex);
+        foreach (['shell_snapshot', 'apps', 'plugins', 'skill_mcp_dependency_install'] as $feature) {
+            $this->assertContains('features.' . $feature . '=false', $appServerArgs);
+        }
     }
 
     /**
@@ -3716,5 +3725,15 @@ class Test extends \PHPUnit\Framework\TestCase
         $method = new \ReflectionMethod($first, 'getCliUsageCacheKey');
 
         $this->assertNotSame($method->invoke($first, 'codex'), $method->invoke($second, 'codex'));
+    }
+
+    public function test__codex_app_server_startup_failures_are_transient(): void
+    {
+        $codex = $this->harnessStoreAihelper('codex', null);
+        $method = new \ReflectionMethod($codex, 'isTransientRequestError');
+
+        $this->assertTrue($method->invoke($codex, 'harness: codex app server did not answer initialize'));
+        $this->assertTrue($method->invoke($codex, 'harness: codex app server did not open a thread'));
+        $this->assertTrue($method->invoke($codex, 'harness: codex app server did not start a turn'));
     }
 }
