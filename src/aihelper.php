@@ -12281,7 +12281,7 @@ class ai_codex extends ai_harness
 
         $input = [['type' => 'text', 'text' => $this->harnessInput($prompt)]];
         foreach ($this->harnessFilePaths('image') as $path) {
-            $input[] = ['type' => 'image', 'url' => $path];
+            $input[] = ['type' => 'localImage', 'path' => $path];
         }
         $turnParams = ['threadId' => $this->app_server_thread_id, 'input' => $input];
         if (in_array($this->effort, ['minimal', 'low', 'medium', 'high', 'xhigh'], true)) {

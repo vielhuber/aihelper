@@ -3736,4 +3736,58 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertTrue($method->invoke($codex, 'harness: codex app server did not open a thread'));
         $this->assertTrue($method->invoke($codex, 'harness: codex app server did not start a turn'));
     }
+
+    public function test__codex_app_server_sends_local_images_as_paths(): void
+    {
+        $directory = sys_get_temp_dir() . '/aihelper-codex-image-' . getmypid();
+        mkdir($directory, 0700, true);
+        $image = $directory . '/input.png';
+        $requestFile = $directory . '/request.json';
+        file_put_contents($image, 'image');
+        $server = <<<'PHP'
+$requestFile = $argv[1];
+while (($line = fgets(STDIN)) !== false) {
+    $request = json_decode($line, true);
+    $result = [];
+    if (($request['method'] ?? '') === 'thread/start') {
+        $result = ['thread' => ['id' => 'thread-test']];
+    }
+    if (($request['method'] ?? '') === 'turn/start') {
+        file_put_contents($requestFile, json_encode($request['params']));
+        $result = ['turn' => ['id' => 'turn-test']];
+    }
+    echo json_encode(['id' => $request['id'], 'result' => $result]) . "\n";
+    flush();
+}
+PHP;
+        $process = proc_open(
+            [PHP_BINARY, '-r', $server, $requestFile],
+            [
+                0 => ['pipe', 'r'],
+                1 => ['pipe', 'w'],
+                2 => ['pipe', 'w']
+            ],
+            $pipes
+        );
+        $this->assertIsResource($process);
+        try {
+            $codex = $this->harnessStoreAihelper('codex', null);
+            (new \ReflectionProperty($codex, 'input_callback'))->setValue($codex, static fn(): null => null);
+            (new \ReflectionProperty($codex, 'harness_files'))->setValue($codex, [$image]);
+            (new \ReflectionMethod($codex, 'harnessStart'))->invoke($codex, $pipes, 'Inspect the image.');
+            $request = json_decode((string) file_get_contents($requestFile), true, flags: JSON_THROW_ON_ERROR);
+            $this->assertSame(
+                ['type' => 'localImage', 'path' => $image],
+                $request['input'][1] ?? null
+            );
+        } finally {
+            foreach ($pipes as $pipe) {
+                if (is_resource($pipe)) {
+                    fclose($pipe);
+                }
+            }
+            proc_close($process);
+            __::rrmdir($directory);
+        }
+    }
 }
