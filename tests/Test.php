@@ -1603,7 +1603,10 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__harness_models_define_supported_efforts(): void
     {
         $expectedEfforts = [
-            'codex' => ['minimal', 'low', 'medium', 'high', 'xhigh'],
+            'codex' => [
+                'gpt-5.6-sol' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+                'gpt-5.5-codex' => ['minimal', 'low', 'medium', 'high', 'xhigh']
+            ],
             'claudecode' => ['low', 'medium', 'high', 'xhigh', 'max'],
             'opencode' => ['minimal', 'low', 'medium', 'high', 'max']
         ];
@@ -1612,9 +1615,19 @@ class Test extends \PHPUnit\Framework\TestCase
             $harness = aihelper::create(provider: $provider);
             foreach ($harness->models as $model) {
                 $this->assertTrue($model['supports_effort'] ?? false, (string) ($model['name'] ?? 'unknown'));
-                $this->assertSame($efforts, $model['efforts'] ?? [], (string) ($model['name'] ?? 'unknown'));
+                $modelEfforts = $provider === 'codex' ? ($efforts[$model['name']] ?? null) : $efforts;
+                $this->assertNotNull($modelEfforts, (string) ($model['name'] ?? 'unknown'));
+                $this->assertSame($modelEfforts, $model['efforts'] ?? [], (string) ($model['name'] ?? 'unknown'));
             }
         }
+
+        $codex = aihelper::create(provider: 'codex', model: 'gpt-5.6-sol', effort: 'max');
+        $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'buildArgs'))->invoke($codex);
+        $this->assertContains('model_reasoning_effort="max"', $args);
+
+        $codex = aihelper::create(provider: 'codex', model: 'gpt-5.6-sol', effort: 'ultra');
+        $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'buildArgs'))->invoke($codex);
+        $this->assertContains('model_reasoning_effort="ultra"', $args);
     }
 
     function test__harness_logs_redact_mcp_tokens(): void

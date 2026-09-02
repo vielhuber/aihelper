@@ -800,7 +800,7 @@ abstract class aihelper
         if ($url !== null) {
             $this->url = $url;
         }
-        if ($effort !== null && in_array($effort, ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], true)) {
+        if ($effort !== null && in_array($effort, $this->getEffortValues(), true)) {
             $this->effort = $effort;
         }
         if ($enable_thinking !== null) {
@@ -5353,7 +5353,7 @@ abstract class aihelper
 
     protected function getEffortValues(): array
     {
-        return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+        return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
     }
 
     protected function getEffortForRequest(): ?string
@@ -11977,7 +11977,7 @@ class ai_codex extends ai_harness
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
             'supports_effort' => true,
-            'efforts' => ['minimal', 'low', 'medium', 'high', 'xhigh'],
+            'efforts' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
             'default' => true
         ],
         [
@@ -12075,9 +12075,10 @@ class ai_codex extends ai_harness
             $options[] = '--model';
             $options[] = $this->model;
         }
-        if (in_array($this->effort, ['minimal', 'low', 'medium', 'high', 'xhigh'], true)) {
+        $effort = $this->getEffortForRequest();
+        if ($effort !== null) {
             $options[] = '-c';
-            $options[] = 'model_reasoning_effort="' . $this->effort . '"';
+            $options[] = 'model_reasoning_effort="' . $effort . '"';
         }
         // with a system prompt the run gets its own config and skill scope (see the
         // environment overrides), which already carries these keys
@@ -12284,8 +12285,9 @@ class ai_codex extends ai_harness
             $input[] = ['type' => 'localImage', 'path' => $path];
         }
         $turnParams = ['threadId' => $this->app_server_thread_id, 'input' => $input];
-        if (in_array($this->effort, ['minimal', 'low', 'medium', 'high', 'xhigh'], true)) {
-            $turnParams['effort'] = $this->effort;
+        $effort = $this->getEffortForRequest();
+        if ($effort !== null) {
+            $turnParams['effort'] = $effort;
         }
         $id = $this->appServerSend($pipes, 'turn/start', $turnParams);
         $response = $this->appServerAwait($pipes, $id, 60.0);

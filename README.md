@@ -24,7 +24,7 @@ use vielhuber\aihelper\aihelper;
 $ai = aihelper::create(
     provider: 'anthropic', // anthropic|google|openai|xai|deepseek|openrouter|cliproxyapi|elevenlabs|nvidia|llamacpp|lmstudio|claudecode|codex|opencode
     model: 'claude-opus-4-1', // claude-opus-4-1|gemini-2.5-pro|gpt-5|grok-4|deepseek-chat|qwen/qwen3-coder-next|...
-    effort: null, // null|none|minimal|low|medium|high|xhigh|max — reasoning effort, ignored when the provider/model has no supported reasoning control
+    effort: null, // null|none|minimal|low|medium|high|xhigh|max|ultra — reasoning effort, ignored when the provider/model has no supported reasoning control
     temperature: 1.0, // controls the randomness of the text generated
     api_key: '**API Key**',
     log: 'output.log',
