@@ -1630,6 +1630,49 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertContains('model_reasoning_effort="ultra"', $args);
     }
 
+    function test__anthropic_uses_model_compatible_thinking_configuration(): void
+    {
+        $aihelperReflection = new \ReflectionClass(aihelper::class);
+        foreach (
+            ['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5', 'claude-fable-5-1', 'claude-mythos-5']
+            as $model
+        ) {
+            $anthropic = (new \ReflectionClass(\vielhuber\aihelper\ai_anthropic::class))->newInstanceWithoutConstructor();
+            $aihelperReflection->getProperty('model')->setValue($anthropic, $model);
+            $aihelperReflection->getProperty('models')->setValue($anthropic, [
+                [
+                    'name' => $model,
+                    'supports_effort' => true,
+                    'efforts' => ['low', 'medium', 'high']
+                ]
+            ]);
+            $aihelperReflection->getProperty('effort')->setValue($anthropic, 'high');
+            $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_anthropic::class, 'modifyArgs'))->invoke($anthropic, [
+                'output_config' => ['format' => ['type' => 'json_schema']]
+            ]);
+
+            $this->assertSame(['type' => 'adaptive'], $args['thinking']);
+            $this->assertSame('high', $args['output_config']['effort']);
+            $this->assertSame(['type' => 'json_schema'], $args['output_config']['format']);
+        }
+
+        $anthropic = (new \ReflectionClass(\vielhuber\aihelper\ai_anthropic::class))->newInstanceWithoutConstructor();
+        $aihelperReflection->getProperty('model')->setValue($anthropic, 'claude-sonnet-4-5');
+        $aihelperReflection->getProperty('models')->setValue($anthropic, [
+            [
+                'name' => 'claude-sonnet-4-5',
+                'supports_effort' => true,
+                'efforts' => ['low', 'medium', 'high']
+            ]
+        ]);
+        $aihelperReflection->getProperty('effort')->setValue($anthropic, 'high');
+        $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_anthropic::class, 'modifyArgs'))->invoke($anthropic, []);
+
+        $this->assertSame('enabled', $args['thinking']['type']);
+        $this->assertSame(10000, $args['thinking']['budget_tokens']);
+        $this->assertArrayNotHasKey('output_config', $args);
+    }
+
     function test__harness_logs_redact_mcp_tokens(): void
     {
         $log = tempnam(sys_get_temp_dir(), 'aihelper-log-');

@@ -8548,7 +8548,9 @@ class ai_anthropic extends aihelper
             str_contains($model_name, 'opus') ||
             (preg_match('/haiku-(\d+)/', $model_name, $_hm) === 1 && (int) $_hm[1] >= 4);
         $adaptive_thinking_models = ['claude-opus-4-7', 'claude-opus-4-8'];
-        $adaptive_thinking = in_array($model_name, $adaptive_thinking_models, true);
+        $adaptive_thinking =
+            in_array($model_name, $adaptive_thinking_models, true) ||
+            preg_match('/^claude-[a-z0-9]+-5(?:-|$)/', $model_name) === 1;
         // explicit enable_thinking=false overrides the default-on behavior for
         // sonnet/opus models; null keeps the existing default (thinking on where
         // supported); true enables it even if a future model doesn't default to it.
@@ -8561,7 +8563,7 @@ class ai_anthropic extends aihelper
             if ($adaptive_thinking) {
                 // new API: use adaptive thinking + effort level instead of enabled/budget_tokens
                 $args['thinking'] = ['type' => 'adaptive'];
-                $args['output_config'] = ['effort' => $this->getEffortLevel($configured_effort)];
+                $args['output_config']['effort'] = $this->getEffortLevel($configured_effort);
             } else {
                 $args['thinking'] = [
                     'type' => 'enabled',
