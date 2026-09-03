@@ -13312,6 +13312,20 @@ class ai_opencode extends ai_harness
     }
 
     /**
+     * Identify direct requests without exposing caller-owned conversation IDs.
+     *
+     * @return string[]
+     */
+    private function openCodeRequestHeaders(string $userAgent): array
+    {
+        return [
+            'x-opencode-session: aih_' . substr(hash('sha256', (string) $this->session_id), 0, 32),
+            'x-opencode-client: aihelper',
+            'User-Agent: ' . $userAgent
+        ];
+    }
+
+    /**
      * Read exact dashboard limits when configured, otherwise ask the gateway whether a window is spent.
      *
      * There is no usage endpoint — the reset time exists only in the "Retry-After" header of the
@@ -13358,7 +13372,7 @@ class ai_opencode extends ai_harness
                 CURLOPT_HTTPHEADER => [
                     'Accept: text/html',
                     'Cookie: auth=' . $authCookie,
-                    'User-Agent: Mozilla/5.0'
+                    ...$this->openCodeRequestHeaders('Mozilla/5.0')
                 ]
             ]);
             $workspaceHtml = curl_exec($curl);
@@ -13378,7 +13392,7 @@ class ai_opencode extends ai_harness
                 CURLOPT_HTTPHEADER => [
                     'Accept: text/html',
                     'Cookie: auth=' . $authCookie,
-                    'User-Agent: Mozilla/5.0'
+                    ...$this->openCodeRequestHeaders('Mozilla/5.0')
                 ]
             ]);
             $html = curl_exec($curl);
@@ -13426,7 +13440,11 @@ class ai_opencode extends ai_harness
             CURLOPT_POST => true,
             CURLOPT_CONNECTTIMEOUT => 10,
             CURLOPT_TIMEOUT => 20,
-            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $key, 'Content-Type: application/json'],
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $key,
+                'Content-Type: application/json',
+                ...$this->openCodeRequestHeaders('aihelper')
+            ],
             // the models carry an "opencode-go/" prefix internally, the gateway rejects it
             CURLOPT_POSTFIELDS => json_encode([
                 'model' => basename($this->model ?? '') ?: 'glm-5.2',

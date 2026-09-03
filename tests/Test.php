@@ -2102,6 +2102,22 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertMatchesRegularExpression('/T/', $limits['monthly']['resets_at']);
     }
 
+    function test__opencode_direct_requests_identify_their_session(): void
+    {
+        $first = aihelper::create(provider: 'opencode', session_id: 'conversation-1');
+        $second = aihelper::create(provider: 'opencode', session_id: 'conversation-1');
+        $other = aihelper::create(provider: 'opencode', session_id: 'conversation-2');
+        $method = new \ReflectionMethod($first, 'openCodeRequestHeaders');
+        $firstHeaders = $method->invoke($first, 'aihelper');
+
+        $this->assertSame($firstHeaders, $method->invoke($second, 'aihelper'));
+        $this->assertNotSame($firstHeaders, $method->invoke($other, 'aihelper'));
+        $this->assertMatchesRegularExpression('/^x-opencode-session: aih_[a-f0-9]{32}$/', $firstHeaders[0]);
+        $this->assertSame('x-opencode-client: aihelper', $firstHeaders[1]);
+        $this->assertSame('User-Agent: aihelper', $firstHeaders[2]);
+        $this->assertStringNotContainsString('conversation-1', implode("\n", $firstHeaders));
+    }
+
     function test__ai_all(): void
     {
         $stats = [];
