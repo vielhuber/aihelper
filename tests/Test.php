@@ -571,6 +571,21 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame([true, false, false], $ai->promptAdditions);
     }
 
+    function test__transient_codex_backend_not_found_errors_are_retried(): void
+    {
+        $ai = $this->retryAihelper([
+            'AI Request fehlgeschlagen: unexpected status 404 Not Found: Unknown error, ' .
+            'url: https://chatgpt.com/backend-api/codex/responses'
+        ]);
+
+        $result = $ai->ask('test');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('ok', $result['response']);
+        $this->assertSame(2, $ai->attempts);
+        $this->assertSame([true, false], $ai->promptAdditions);
+    }
+
     function test__harness_mcp_startup_errors_are_retried_once(): void
     {
         $error =
@@ -2610,11 +2625,12 @@ class Test extends \PHPUnit\Framework\TestCase
             'nvidia'
         ]);
         if ($supported === true) {
+            $expectedSessionCount = count($ai->getSessionContent()) + 2;
             $return = $ai->ask('Wer wurde 2018 Fußball-Weltmeister? Antworte bitte kurz.');
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 2 &&
+                count($ai->getSessionContent()) === $expectedSessionCount &&
                 (stripos($return['response'], 'Frankreich') !== false ||
                     stripos($return['response'], 'französisch') !== false);
             if ($success_this) {
@@ -2641,11 +2657,12 @@ class Test extends \PHPUnit\Framework\TestCase
             'nvidia'
         ]);
         if ($supported === true) {
+            $expectedSessionCount = count($ai->getSessionContent()) + 2;
             $return = $ai->ask('Was habe ich vorher gefragt?');
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 4 &&
+                count($ai->getSessionContent()) === $expectedSessionCount &&
                 (stripos($return['response'], 'Wer wurde 2018 Fußball-Weltmeister?') !== false ||
                     stripos($return['response'], 'Frankreich') !== false ||
                     stripos($return['response'], 'französisch') !== false ||
@@ -2674,11 +2691,12 @@ class Test extends \PHPUnit\Framework\TestCase
             'nvidia'
         ]);
         if ($supported === true) {
+            $expectedSessionCount = count($ai->getSessionContent()) + 2;
             $return = $ai->ask('Welchen Satz hast Du exakt zuvor geschrieben?');
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 6 &&
+                count($ai->getSessionContent()) === $expectedSessionCount &&
                 (stripos($return['response'], 'Wer wurde 2018 Fußball-Weltmeister?') !== false ||
                     stripos($return['response'], 'Frankreich') !== false ||
                     stripos($return['response'], 'französisch') !== false ||
@@ -2707,6 +2725,7 @@ class Test extends \PHPUnit\Framework\TestCase
             'nvidia'
         ]);
         if ($supported === true) {
+            $expectedSessionCount = count($ai->getSessionContent()) + 4;
             $return = $ai->ask('Ich heiße David mit Vornamen. Bitte merk Dir das!');
             //$this->log($return);
             $ai = aihelper::create(
@@ -2723,7 +2742,7 @@ class Test extends \PHPUnit\Framework\TestCase
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 10 &&
+                count($ai->getSessionContent()) === $expectedSessionCount &&
                 stripos($return['response'], 'David') !== false;
             if ($success_this) {
                 $success_count++;
@@ -2759,11 +2778,12 @@ class Test extends \PHPUnit\Framework\TestCase
                 log: 'tests/aihelper.log',
                 url: $url
             );
+            $expectedSessionCount = count($ai->getSessionContent()) + 2;
             $return = $ai->ask('Wie heiße ich mit Vornamen?');
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 12 &&
+                count($ai->getSessionContent()) === $expectedSessionCount &&
                 stripos($return['response'], 'David') !== false;
             if ($success_this) {
                 $success_count++;
@@ -2779,11 +2799,12 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'openrouter']);
         if ($supported === true) {
+            $expectedSessionCount = count($ai->getSessionContent()) + 2;
             $return = $ai->ask('Was ist auf dem Bild zu sehen?', 'tests/assets/iptc_write.jpg');
 
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 14 &&
+                count($ai->getSessionContent()) === $expectedSessionCount &&
                 (stripos($return['response'], 'Tulpe') !== false ||
                     stripos($return['response'], 'Tulpen') !== false ||
                     stripos($return['response'], 'Tulip') !== false ||
@@ -2803,11 +2824,12 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $supported = in_array($provider, ['anthropic', 'google', 'openai', 'xai', 'openrouter']);
         if ($supported === true) {
+            $expectedSessionCount = count($ai->getSessionContent()) + 2;
             $return = $ai->ask('Welches Bild habe ich im Gesprächsverlauf hochgeladen?');
 
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 16 &&
+                count($ai->getSessionContent()) === $expectedSessionCount &&
                 (stripos($return['response'], 'Tulpe') !== false ||
                     stripos($return['response'], 'Tulpen') !== false ||
                     stripos($return['response'], 'Tulip') !== false ||
@@ -2827,6 +2849,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $supported = in_array($provider, ['anthropic', 'google', 'openai', 'openrouter']);
         if ($supported === true) {
+            $expectedSessionCount = count($ai->getSessionContent()) + 2;
             $return = $ai->ask(
                 'Wie lautet die Kundennummer (Key: customer_nr)? Wann wurde der Brief verfasst (Key: date)? Von wem wurde der Brief verfasst (Key: author)? Bitte antworte nur im JSON-Format. Wenn Du unsicher bist, gib den wahrscheinlichsten Wert zurück. Wenn Du einen Wert gar nicht findest, gib einen leeren String zurück.',
                 'tests/assets/lorem.pdf'
@@ -2834,7 +2857,7 @@ class Test extends \PHPUnit\Framework\TestCase
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 18 &&
+                count($ai->getSessionContent()) === $expectedSessionCount &&
                 in_array($return['response']->customer_nr ?? '', ['F123465789']) &&
                 !empty(
                     array_filter(['31.10.2018', '31. Oktober 2018', 'Oktober 2018', '2018-10-31'], function (
@@ -2858,6 +2881,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $supported = in_array($provider, ['anthropic', 'google', 'openai', 'openrouter']);
         if ($supported === true) {
+            $expectedSessionCount = count($ai->getSessionContent()) + 2;
             $return = $ai->ask(
                 'Wie lautet die Kundennummer (Key: customer_nr)? Wie lautet die Zählernummer (Key: meter_number)? Welche Blume ist auf dem Bild zu sehen (Key: flower)? Bitte antworte nur im JSON-Format. Wenn Du unsicher bist, gib den wahrscheinlichsten Wert zurück. Wenn Du einen Wert gar nicht findest, gib einen leeren String zurück.',
                 [
@@ -2870,7 +2894,7 @@ class Test extends \PHPUnit\Framework\TestCase
             //$this->log($return);
             $success_this =
                 $return['success'] &&
-                count($ai->getSessionContent()) === 20 &&
+                count($ai->getSessionContent()) === $expectedSessionCount &&
                 in_array($return['response']->customer_nr ?? '', ['F123465789']) &&
                 in_array($return['response']->meter_number ?? '', ['123456789']) &&
                 in_array($return['response']->flower ?? '', [

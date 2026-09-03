@@ -2763,6 +2763,12 @@ abstract class aihelper
         if ($this->isHarnessMcpStartupError($message)) {
             return $this->stream_text_emitted_since_tool !== true;
         }
+        if (
+            str_contains($message, 'unexpected status 404 not found') &&
+            str_contains($message, 'chatgpt.com/backend-api/codex/responses')
+        ) {
+            return $this->stream_text_emitted_since_tool !== true;
+        }
         if (preg_match('/\b(?:http\s*)?(?:408|500|502|503|504|520)\b/', $message) === 1) {
             return true;
         }
