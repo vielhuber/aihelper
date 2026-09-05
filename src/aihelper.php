@@ -10283,6 +10283,15 @@ class ai_cliproxyapi extends ai_openrouter
                 $models[$model_key]['supports_text_to_image'] = true;
                 $models[$model_key]['supports_tools'] = false;
             }
+            if ($model['name'] === 'gpt-6-astra') {
+                $models[$model_key]['context_length'] = 1050000;
+                $models[$model_key]['max_output_tokens'] = 128000;
+                $models[$model_key]['costs'] = ['input' => 0.00001, 'input_cached' => 0.000001, 'output' => 0.00005];
+                $models[$model_key]['supports_image_to_text'] = true;
+                $models[$model_key]['supports_temperature'] = false;
+                $models[$model_key]['supports_effort'] = true;
+                $models[$model_key]['efforts'] = ['low', 'medium', 'high', 'xhigh', 'max'];
+            }
             if (!str_starts_with((string) $model['name'], 'gpt-5')) {
                 continue;
             }
@@ -11974,6 +11983,21 @@ class ai_codex extends ai_harness
 
     public array $models = [
         [
+            'name' => 'gpt-6-astra',
+            'context_length' => 272000,
+            'max_output_tokens' => 128000,
+            'costs' => ['input' => 0.00001, 'input_cached' => 0.000001, 'output' => 0.00005],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
+            'supports_effort' => true,
+            'efforts' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+            'default' => true
+        ],
+        [
             'name' => 'gpt-5.6-sol',
             'context_length' => 400000,
             'max_output_tokens' => 128000,
@@ -11986,7 +12010,7 @@ class ai_codex extends ai_harness
             'supports_audio_to_text' => false,
             'supports_effort' => true,
             'efforts' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
-            'default' => true
+            'default' => false
         ],
         [
             'name' => 'gpt-5.5-codex',

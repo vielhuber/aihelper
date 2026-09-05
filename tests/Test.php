@@ -1646,6 +1646,7 @@ class Test extends \PHPUnit\Framework\TestCase
     {
         $expectedEfforts = [
             'codex' => [
+                'gpt-6-astra' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
                 'gpt-5.6-sol' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
                 'gpt-5.5-codex' => ['minimal', 'low', 'medium', 'high', 'xhigh']
             ],
@@ -1670,6 +1671,46 @@ class Test extends \PHPUnit\Framework\TestCase
         $codex = aihelper::create(provider: 'codex', model: 'gpt-5.6-sol', effort: 'ultra');
         $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'buildArgs'))->invoke($codex);
         $this->assertContains('model_reasoning_effort="ultra"', $args);
+    }
+
+    function test__codex_exposes_astra_as_default_with_vision(): void
+    {
+        $codex = aihelper::create(provider: 'codex');
+        $models = array_column($codex->models, null, 'name');
+        $this->assertArrayHasKey('gpt-6-astra', $models);
+        $this->assertTrue($models['gpt-6-astra']['supports_image_to_text']);
+        $this->assertTrue($models['gpt-6-astra']['default']);
+        $this->assertFalse($models['gpt-5.6-sol']['default']);
+        $this->assertCount(1, array_filter($models, fn(array $model): bool => $model['default']));
+    }
+
+    function test__cliproxyapi_exposes_astra_vision_and_effort(): void
+    {
+        $directory = sys_get_temp_dir() . '/aihelper-astra-' . bin2hex(random_bytes(8));
+        mkdir($directory, 0700);
+        file_put_contents($directory . '/models', json_encode(['data' => [['id' => 'gpt-6-astra']]]));
+        try {
+            $proxy = new class ($directory) extends \vielhuber\aihelper\ai_cliproxyapi {
+                public function __construct(string $directory)
+                {
+                    $this->url = 'file:///' . ltrim(str_replace('\\', '/', $directory), '/');
+                }
+
+                protected function fetchModelsDevApi(): ?object
+                {
+                    return null;
+                }
+            };
+            $models = array_column($proxy->fetchModelsFromProvider(), null, 'name');
+            $this->assertArrayHasKey('gpt-6-astra', $models);
+            $this->assertTrue($models['gpt-6-astra']['supports_image_to_text'] ?? false);
+            $this->assertFalse($models['gpt-6-astra']['supports_temperature']);
+            $this->assertTrue($models['gpt-6-astra']['supports_effort']);
+            $this->assertSame(['low', 'medium', 'high', 'xhigh', 'max'], $models['gpt-6-astra']['efforts']);
+        } finally {
+            unlink($directory . '/models');
+            rmdir($directory);
+        }
     }
 
     function test__anthropic_uses_model_compatible_thinking_configuration(): void
