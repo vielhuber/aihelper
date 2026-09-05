@@ -12786,7 +12786,12 @@ class ai_codex extends ai_harness
                     }
                     $transcriptOutput = $outputParts !== []
                         ? implode(PHP_EOL, $outputParts)
-                        : (string) ($item['error'] ?? '');
+                        : (is_array($item['error'] ?? null)
+                            ? (json_encode(
+                                $item['error'],
+                                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+                            ) ?: '')
+                            : (string) ($item['error'] ?? ''));
                     $additionalResultData = array_diff_key(
                         $mcpResult,
                         ['content' => true, 'structuredContent' => true, 'structured_content' => true]

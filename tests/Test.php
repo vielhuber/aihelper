@@ -1168,6 +1168,33 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame('end_turn', $result->result->stop_reason);
     }
 
+    function test__codex_preserves_structured_mcp_errors(): void
+    {
+        $codex = aihelper::create(provider: 'codex');
+        $handler = new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'handleEvent');
+        foreach (['Connection closed', ['message' => 'Connection closed', 'code' => -32603]] as $error) {
+            $result = (object) ['result' => (object) ['content' => []]];
+            $handler->invoke($codex, [
+                'type' => 'item.completed',
+                'item' => [
+                    'id' => 'failed-tool',
+                    'type' => 'mcp_tool_call',
+                    'server' => 'trello',
+                    'tool' => 'list_boards',
+                    'arguments' => [],
+                    'status' => 'failed',
+                    'error' => $error
+                ]
+            ], $result, null);
+            $toolResult = $result->result->content[1];
+            $this->assertTrue($toolResult->is_error);
+            $this->assertStringContainsString('Connection closed', $toolResult->content);
+            if (is_array($error)) {
+                $this->assertSame($error, json_decode($toolResult->content, true, 512, JSON_THROW_ON_ERROR));
+            }
+        }
+    }
+
     function test__tool_activity_is_streamed_as_a_reasoning_transcript(): void
     {
         $mcpResponse = [
