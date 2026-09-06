@@ -11203,7 +11203,18 @@ abstract class ai_harness extends ai_anthropic
         $this->harness_stdin_open = true;
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
-        $this->harnessStart($pipes, $prompt);
+        try {
+            $this->harnessStart($pipes, $prompt);
+        } catch (\RuntimeException $exception) {
+            foreach ($pipes as $pipe) {
+                if (is_resource($pipe)) {
+                    fclose($pipe);
+                }
+            }
+            $this->harness_stdin_open = false;
+            $this->terminateProcess($process, $pid);
+            throw $exception;
+        }
         if (!$this->harnessKeepsStdinOpen()) {
             fclose($pipes[0]);
             $this->harness_stdin_open = false;
@@ -12291,23 +12302,31 @@ class ai_codex extends ai_harness
         }
         if ($this->cli_session_id !== null) {
             $threadParams['threadId'] = $this->cli_session_id;
+            $threadParams['excludeTurns'] = true;
             $id = $this->appServerSend($pipes, 'thread/resume', $threadParams);
         } else {
             $id = $this->appServerSend($pipes, 'thread/start', $threadParams);
         }
-        $response = $this->appServerAwait($pipes, $id, 60.0);
+        $response = $this->appServerAwait($pipes, $id, 300.0);
         $threadId = $response['result']['thread']['id'] ?? null;
-        if ($threadId === null && $this->cli_session_id !== null) {
-            // a session that cannot be resumed must not take the turn with it
-            unset($threadParams['threadId']);
-            $id = $this->appServerSend($pipes, 'thread/start', $threadParams);
-            $response = $this->appServerAwait($pipes, $id, 60.0);
-            $threadId = $response['result']['thread']['id'] ?? null;
-        }
         if ($threadId === null) {
             throw new \RuntimeException(
                 'harness: codex app server did not open a thread' .
-                    (isset($response['error']['message']) ? ': ' . $response['error']['message'] : '')
+                    ($this->cli_session_id !== null ? ' (resume ' . $this->cli_session_id . ')' : '') .
+                    (isset($response['error']['message'])
+                        ? ': ' . $response['error']['message']
+                        : ($response === null
+                            ? ': timed out after 300 seconds'
+                            : ': missing thread ID'))
+            );
+        }
+        if ($this->cli_session_id !== null && $this->cli_session_id !== (string) $threadId) {
+            throw new \RuntimeException(
+                'harness: codex app server resumed a different thread (requested ' .
+                    $this->cli_session_id .
+                    ', returned ' .
+                    (string) $threadId .
+                    ')'
             );
         }
         $this->app_server_thread_id = (string) $threadId;

@@ -3901,6 +3901,75 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertTrue($method->invoke($codex, 'harness: codex app server did not start a turn'));
     }
 
+    public function test__codex_app_server_preserves_requested_session(): void
+    {
+        foreach (['error', 'missing', 'different', 'success'] as $scenario) {
+            $requestFile = tempnam(sys_get_temp_dir(), 'aihelper-resume-');
+            $server = <<<'PHP'
+            while (($line = fgets(STDIN)) !== false) {
+                $request = json_decode($line, true);
+                file_put_contents($argv[1], $line, FILE_APPEND);
+                $response = ['id' => $request['id'], 'result' => []];
+                if ($request['method'] === 'thread/resume') {
+                    if ($argv[2] === 'error') {
+                        $response = ['id' => $request['id'], 'error' => ['message' => 'resume unavailable']];
+                    } elseif ($argv[2] !== 'missing') {
+                        $response['result'] = ['thread' => ['id' => $argv[2] === 'different' ? 'other-thread' : 'saved-thread']];
+                    }
+                }
+                if ($request['method'] === 'thread/start') {
+                    $response['result'] = ['thread' => ['id' => 'new-thread']];
+                }
+                if ($request['method'] === 'turn/start') {
+                    $response['result'] = ['turn' => ['id' => 'turn-test']];
+                }
+                echo json_encode($response) . "\n";
+                flush();
+            }
+            PHP;
+            $process = proc_open(
+                [PHP_BINARY, '-r', $server, $requestFile, $scenario],
+                [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+                $pipes
+            );
+            $this->assertIsResource($process);
+            try {
+                $codex = $this->harnessStoreAihelper('codex', null);
+                (new \ReflectionProperty($codex, 'input_callback'))->setValue($codex, static fn(): null => null);
+                (new \ReflectionProperty($codex, 'cli_session_id'))->setValue($codex, 'saved-thread');
+                $error = null;
+                try {
+                    (new \ReflectionMethod($codex, 'harnessStart'))->invoke($codex, $pipes, 'Continue.');
+                } catch (\RuntimeException $exception) {
+                    $error = $exception->getMessage();
+                }
+                $requests = array_map(
+                    static fn(string $line): array => json_decode($line, true, flags: JSON_THROW_ON_ERROR),
+                    file($requestFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)
+                );
+                $this->assertNotContains('thread/start', array_column($requests, 'method'), $scenario);
+                $this->assertSame('saved-thread', $requests[1]['params']['threadId']);
+                $this->assertTrue($requests[1]['params']['excludeTurns'] ?? false);
+                if ($scenario === 'success') {
+                    $this->assertNull($error);
+                    $this->assertSame('saved-thread', $requests[2]['params']['threadId']);
+                } else {
+                    $this->assertNotNull($error);
+                    $this->assertNotContains('turn/start', array_column($requests, 'method'), $scenario);
+                    if ($scenario === 'error') {
+                        $this->assertStringContainsString('resume unavailable', $error);
+                    }
+                }
+            } finally {
+                foreach ($pipes as $pipe) {
+                    fclose($pipe);
+                }
+                proc_close($process);
+                unlink($requestFile);
+            }
+        }
+    }
+
     public function test__codex_app_server_sends_local_images_as_paths(): void
     {
         $directory = sys_get_temp_dir() . '/aihelper-codex-image-' . getmypid();
