@@ -43,7 +43,8 @@ jobs:
                   	   sudo apt-get update
                        sudo apt-get install -y coreutils
                   elif [ "$RUNNER_OS" == "macOS" ]; then
-                       brew install coreutils
+                       brew install coreutils util-linux
+                       echo "$(brew --prefix util-linux)/bin" >> "$GITHUB_PATH"
                   elif [ "$RUNNER_OS" == "Windows" ]; then
                        choco install busybox -y
                   fi
