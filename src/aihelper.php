@@ -8441,6 +8441,11 @@ class ai_anthropic extends aihelper
         $this->log($response?->result ?? null, 'response');
         $this->addCosts($response, $return);
 
+        if (($response?->result?->error ?? null) !== null) {
+            $return['response'] = $this->extractErrorMessage($response) ?? 'Provider request failed.';
+            return $return;
+        }
+
         $output_text = $prev_output_text !== null ? $prev_output_text : '';
         if (
             __::x($response ?? null) &&
@@ -11492,7 +11497,7 @@ abstract class ai_harness extends ai_anthropic
             if ($result->result->stop_reason !== null) {
                 $this->stream_response->result->stop_reason = $result->result->stop_reason;
             }
-            if (($result->result->error ?? null) !== null && empty($this->stream_response->result->content)) {
+            if (($result->result->error ?? null) !== null) {
                 $this->stream_response->result->error = $result->result->error;
             }
             // the streamed response is what the caller keeps, and it carries no tool results at

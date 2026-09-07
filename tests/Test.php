@@ -1713,6 +1713,158 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
+    function test__anthropic_error_overrides_text_content(): void
+    {
+        class_exists(aihelper::class);
+        foreach ([false, true] as $stream) {
+            foreach (
+                [
+                    'Failed to authenticate: OAuth session expired and could not be refreshed',
+                    'Usage limit reached',
+                    null
+                ]
+                as $error
+            ) {
+                foreach (['stop_sequence', 'pause_turn', 'tool_use'] as $stopReason) {
+                    if ($error === null && $stopReason !== 'stop_sequence') {
+                        continue;
+                    }
+                    $ai = new class ($stream, $error, $stopReason) extends \vielhuber\aihelper\ai_anthropic {
+                        public int $calls = 0;
+
+                        public function __construct(bool $stream, private ?string $error, private string $stopReason)
+                        {
+                            $this->name = 'anthropic';
+                            $this->model = 'test';
+                            $this->session_id = 'error-title-' . bin2hex(random_bytes(8));
+                            $this->stream = $stream;
+                            $this->mcp_servers_call_type = 'local';
+                            $this->enable_thinking = false;
+                        }
+
+                        public function request(): array
+                        {
+                            return $this->askThis('Generate a title.');
+                        }
+
+                        public function session(): array
+                        {
+                            return self::$sessions[$this->session_id];
+                        }
+
+                        protected function makeApiCall(?array $args = null): mixed
+                        {
+                            if (++$this->calls > 1) {
+                                throw new \RuntimeException('An error must not trigger continuation.');
+                            }
+                            $response = (object) [
+                                'result' => (object) [
+                                    'content' => [
+                                        (object) ['type' => 'text', 'text' => $this->error ?? 'Valid chat title']
+                                    ],
+                                    'stop_reason' => $this->stopReason,
+                                    'error' => $this->error === null ? null : (object) ['message' => $this->error]
+                                ]
+                            ];
+                            $this->stream_response = $response;
+                            return $response;
+                        }
+                    };
+                    $result = $ai->request();
+                    $this->assertSame($error === null, $result['success']);
+                    $this->assertSame($error ?? 'Valid chat title', $result['response']);
+                    $this->assertSame($error === null ? 2 : 1, count($ai->session()));
+                    $this->assertSame(1, $ai->calls);
+                }
+            }
+        }
+    }
+
+    function test__harness_stream_keeps_errors_after_partial_output(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('The harness process runner requires setsid.');
+        }
+        class_exists(aihelper::class);
+        $ai = new class extends \vielhuber\aihelper\ai_claudecode {
+            public function __construct()
+            {
+                $this->name = 'claudecode';
+                $this->model = 'test';
+                $this->session_id = 'stream-error-' . bin2hex(random_bytes(8));
+                $this->workdir = sys_get_temp_dir();
+                $this->timeout = 5;
+                $this->stream = true;
+                $this->enable_thinking = false;
+            }
+
+            protected function resolveBinary(): ?string
+            {
+                return PHP_BINARY;
+            }
+
+            protected function harnessEnvironmentOverrides(): array
+            {
+                return [];
+            }
+
+            protected function harnessKeepsStdinOpen(): bool
+            {
+                return false;
+            }
+
+            protected function buildArgs(): array
+            {
+                $events = [
+                    [
+                        'type' => 'stream_event',
+                        'event' => [
+                            'type' => 'content_block_start',
+                            'index' => 0,
+                            'content_block' => ['type' => 'text', 'text' => '']
+                        ]
+                    ],
+                    [
+                        'type' => 'stream_event',
+                        'event' => [
+                            'type' => 'content_block_delta',
+                            'index' => 0,
+                            'delta' => ['type' => 'text_delta', 'text' => 'Partial output']
+                        ]
+                    ],
+                    [
+                        'type' => 'assistant',
+                        'message' => [
+                            'content' => [['type' => 'text', 'text' => 'Partial output']]
+                        ]
+                    ],
+                    ['type' => 'result', 'is_error' => true, 'result' => 'Usage limit reached']
+                ];
+                $output = implode("\n", array_map(fn(array $event): string => json_encode($event), $events)) . "\n";
+                return ['-r', 'stream_get_contents(STDIN); echo ' . var_export($output, true) . ';'];
+            }
+
+            public function request(): array
+            {
+                return $this->askThis('Generate a title.');
+            }
+
+            public function streamedText(): string
+            {
+                return $this->stream_response->result->content[0]->text;
+            }
+        };
+        ob_start(static fn(string $output): string => '');
+        try {
+            $result = $ai->request();
+        } finally {
+            ob_end_clean();
+        }
+        $this->assertSame('Partial output', $ai->streamedText());
+        $this->assertFalse($result['success']);
+        $this->assertSame('Usage limit reached', $result['response']);
+    }
+
     function test__anthropic_uses_model_compatible_thinking_configuration(): void
     {
         $aihelperReflection = new \ReflectionClass(aihelper::class);
