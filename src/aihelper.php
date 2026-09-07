@@ -11605,6 +11605,21 @@ class ai_claudecode extends ai_harness
 
     public array $models = [
         [
+            'name' => 'claude-fable-5-1',
+            'context_length' => 1000000,
+            'max_output_tokens' => 128000,
+            'costs' => ['input' => 0.00001, 'input_cached' => 0.00000025, 'output' => 0.00005],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
+            'supports_effort' => true,
+            'efforts' => ['low', 'medium', 'high', 'xhigh', 'max'],
+            'default' => false
+        ],
+        [
             'name' => 'claude-opus-5',
             'context_length' => 200000,
             'max_output_tokens' => 64000,
