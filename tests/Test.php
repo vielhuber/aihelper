@@ -1195,7 +1195,7 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function test__tool_activity_is_streamed_as_a_reasoning_transcript(): void
+    function test__tool_activity_is_streamed_as_structured_reasoning_events(): void
     {
         $mcpResponse = [
             'result' => [
@@ -1211,7 +1211,7 @@ class Test extends \PHPUnit\Framework\TestCase
         ob_end_flush();
         $providerOutput = (string) ob_get_clean();
         $this->assertStringContainsString('event: reasoning', $providerOutput);
-        $this->assertStringContainsString('"kind":"transcript"', $providerOutput);
+        $this->assertStringContainsString('"type":"activity.upsert"', $providerOutput);
         $this->assertStringContainsString('Used Render image', $providerOutput);
         $this->assertStringContainsString('ok', $providerOutput);
 
@@ -1334,7 +1334,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $codexOutput = (string) ob_get_clean();
         $this->assertStringContainsString('Used Trello · get card', $codexOutput);
         $this->assertStringContainsString('Ran false', $codexOutput);
-        $this->assertStringContainsString('Failed.', $codexOutput);
+        $this->assertStringContainsString('"status":"error"', $codexOutput);
         $this->assertStringContainsString('Changed /tmp/example.php', $codexOutput);
         $this->assertStringContainsString('Searched current documentation', $codexOutput);
         $this->assertStringContainsString('Updated plan', $codexOutput);
@@ -1455,13 +1455,13 @@ class Test extends \PHPUnit\Framework\TestCase
         $claudeOutput = (string) ob_get_clean();
         $this->assertStringContainsString('Used Trello · get card', $claudeOutput);
         $this->assertStringContainsString('ok', $claudeOutput);
-        $this->assertStringContainsString('System init · Mcp servers', $claudeOutput);
-        $this->assertStringContainsString('connected', $claudeOutput);
-        $this->assertStringContainsString('System hook started', $claudeOutput);
-        $this->assertStringContainsString('System status', $claudeOutput);
+        $this->assertStringContainsString('Session started', $claudeOutput);
+        $this->assertStringNotContainsString('mcp_servers', $claudeOutput);
+        $this->assertStringContainsString('SessionStart:startup', $claudeOutput);
+        $this->assertStringContainsString('Session status', $claudeOutput);
         $this->assertStringContainsString('requesting', $claudeOutput);
-        $this->assertStringContainsString('├', $claudeOutput);
-        $this->assertStringContainsString('Result success', $claudeOutput);
+        $this->assertStringNotContainsString('├', $claudeOutput);
+        $this->assertStringContainsString('Turn completed', $claudeOutput);
         $this->assertStringContainsString('"captures_content":false', $claudeOutput);
 
         $opencode = aihelper::create(provider: 'opencode');
@@ -1527,8 +1527,8 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertStringContainsString('Used Trello get card', $opencodeOutput);
         $this->assertStringContainsString('failed', $opencodeOutput);
         $this->assertStringContainsString('Loaded skill filesystem', $opencodeOutput);
-        $this->assertStringContainsString('Step start', $opencodeOutput);
-        $this->assertStringContainsString('session-1', $opencodeOutput);
+        $this->assertStringContainsString('Turn started', $opencodeOutput);
+        $this->assertStringNotContainsString('session-1', $opencodeOutput);
         $this->assertStringNotContainsString('internal', $opencodeOutput);
         $opencodeResult = array_values(
             array_filter(
@@ -4330,6 +4330,515 @@ PHP;
             }
             proc_close($process);
             __::rrmdir($directory);
+        }
+    }
+
+    private function streamEventProvider(string $name): aihelper
+    {
+        $provider = aihelper::create(provider: $name, stream: true);
+        (new ReflectionProperty($provider, 'stream'))->setValue($provider, true);
+        return $provider;
+    }
+
+    private function captureStreamEvents(callable $callback): array
+    {
+        ob_start();
+        ob_start();
+        try {
+            $callback();
+            ob_end_flush();
+            $output = (string) ob_get_clean();
+        } catch (Throwable $exception) {
+            ob_end_clean();
+            ob_end_clean();
+            throw $exception;
+        }
+        preg_match_all('/event: reasoning\ndata: ([^\n]+)/', $output, $matches);
+        return array_map(fn(string $json): array => json_decode($json, true, 512, JSON_THROW_ON_ERROR), $matches[1]);
+    }
+
+    public function test__stream_events_activity_updates_keep_structure_and_stable_ids(): void
+    {
+        $provider = $this->streamEventProvider('openai');
+        $emit = new ReflectionMethod($provider, 'emitTranscript');
+        $events = $this->captureStreamEvents(function () use ($provider, $emit): void {
+            $emit->invoke($provider, 'tool-1', 'Tool', 'running', ['progress' => 1, 'options' => (object) []]);
+            $emit->invoke($provider, 'tool-1', 'Tool', 'running', ['progress' => 2]);
+            $emit->invoke($provider, 'tool-1', 'Tool', 'running', ['progress' => 2]);
+            $emit->invoke($provider, 'tool-1', '', 'completed', ['success' => true, 'count' => 3]);
+        });
+        $this->assertCount(3, $events);
+        $this->assertSame(['activity.upsert'], array_values(array_unique(array_column($events, 'type'))));
+        $this->assertSame(['tool-1', 'tool-1', 'tool-1'], array_column($events, 'id'));
+        $this->assertSame([1, 2, 3], array_column($events, 'seq'));
+        $this->assertSame(2, $events[1]['detail']['progress']);
+        $this->assertTrue($events[2]['detail']['success']);
+        $this->assertSame('Tool', $events[2]['label']);
+        $this->assertArrayNotHasKey('delta', $events[0]);
+    }
+
+    public function test__stream_events_claude_telemetry_is_not_reasoning_and_progress_is_one_task(): void
+    {
+        $provider = $this->streamEventProvider('claudecode');
+        $handle = new ReflectionMethod($provider, 'handleEvent');
+        $result = (object) ['result' => (object) ['content' => []]];
+        $events = $this->captureStreamEvents(function () use ($provider, $handle, $result): void {
+            $handle->invoke(
+                $provider,
+                ['type' => 'system', 'subtype' => 'thinking_tokens', 'estimated_tokens' => 48],
+                $result,
+                null
+            );
+            foreach ([1, 2] as $count) {
+                $handle->invoke(
+                    $provider,
+                    [
+                        'type' => 'system',
+                        'subtype' => 'task_progress',
+                        'task_id' => 'task-1',
+                        'description' => 'Inspect files',
+                        'usage' => ['tool_uses' => $count],
+                        'uuid' => 'uuid-' . $count
+                    ],
+                    $result,
+                    null
+                );
+            }
+        });
+        $this->assertCount(2, $events);
+        $this->assertSame($events[0]['id'], $events[1]['id']);
+        $this->assertSame('task', $events[1]['kind']);
+        $this->assertSame(2, $events[1]['detail']['usage']['tool_uses']);
+        $this->assertStringNotContainsString('uuid-', json_encode($events));
+    }
+
+    public function test__stream_events_native_reasoning_streams_incrementally_for_api_and_harness_providers(): void
+    {
+        foreach (['anthropic', 'claudecode', 'codex', 'opencode'] as $name) {
+            $provider = $this->streamEventProvider($name);
+            $events = $this->captureStreamEvents(function () use ($provider): void {
+                $callback = (new ReflectionMethod($provider, 'getStreamCallback'))->invoke($provider);
+                foreach (
+                    [
+                        [
+                            'type' => 'content_block_start',
+                            'index' => 0,
+                            'content_block' => ['type' => 'thinking', 'thinking' => '']
+                        ],
+                        [
+                            'type' => 'content_block_delta',
+                            'index' => 0,
+                            'delta' => ['type' => 'thinking_delta', 'thinking' => 'First ']
+                        ],
+                        [
+                            'type' => 'content_block_delta',
+                            'index' => 0,
+                            'delta' => ['type' => 'thinking_delta', 'thinking' => 'second']
+                        ]
+                    ]
+                    as $event
+                ) {
+                    $callback('event: ' . $event['type'] . "\n" . 'data: ' . json_encode($event) . "\n\n");
+                }
+            });
+            $this->assertCount(2, $events, $name);
+            $this->assertSame('reasoning.delta', $events[0]['type']);
+            $this->assertSame($events[0]['id'], $events[1]['id']);
+            $this->assertSame(['First ', 'second'], array_column($events, 'delta'));
+        }
+    }
+
+    public function test__stream_events_api_reasoning_formats_share_the_same_event_contract(): void
+    {
+        $cases = [
+            'openai' => ['type' => 'response.reasoning_summary_text.delta', 'delta' => 'Thinking'],
+            'openrouter' => ['choices' => [['delta' => ['reasoning' => 'Thinking']]]],
+            'nvidia' => ['choices' => [['delta' => ['reasoning_content' => 'Thinking']]]],
+            'google' => ['candidates' => [['content' => ['parts' => [['thought' => true, 'text' => 'Thinking']]]]]]
+        ];
+        foreach ($cases as $name => $payload) {
+            $provider = $this->streamEventProvider($name);
+            $events = $this->captureStreamEvents(function () use ($provider, $payload): void {
+                $callback = (new ReflectionMethod($provider, 'getStreamCallback'))->invoke($provider);
+                $frame = 'event: ' . ($payload['type'] ?? 'message') . "\n" . 'data: ' . json_encode($payload) . "\n\n";
+                $callback(substr($frame, 0, 19));
+                $callback(substr($frame, 19));
+            });
+            $this->assertCount(1, $events, $name);
+            $this->assertSame('reasoning.delta', $events[0]['type']);
+            $this->assertSame('Thinking', $events[0]['delta']);
+        }
+    }
+
+    public function test__stream_events_activity_payloads_redact_secrets_without_flattening_json(): void
+    {
+        $provider = $this->streamEventProvider('claudecode');
+        $events = $this->captureStreamEvents(function () use ($provider): void {
+            (new ReflectionMethod($provider, 'emitTranscript'))->invoke($provider, 'secure', 'Tool', 'completed', [
+                'nested' => (object) ['password' => 'fixture-secret', 'enabled' => true, 'count' => 3],
+                'image' => ['data' => str_repeat('A', 1000)],
+                'output' => str_repeat('x', 8000)
+            ]);
+        });
+        $this->assertSame('***', $events[0]['detail']['nested']['password']);
+        $this->assertTrue($events[0]['detail']['nested']['enabled']);
+        $this->assertSame(3, $events[0]['detail']['nested']['count']);
+        $this->assertSame('[binary data omitted]', $events[0]['detail']['image']['data']);
+        $this->assertLessThan(6000, strlen($events[0]['detail']['output']));
+    }
+
+    public function test__stream_events_unknown_events_do_not_become_reasoning_but_errors_remain_visible(): void
+    {
+        foreach (['claudecode', 'codex', 'opencode'] as $name) {
+            $provider = $this->streamEventProvider($name);
+            $events = $this->captureStreamEvents(function () use ($provider): void {
+                $handle = new ReflectionMethod($provider, 'handleEvent');
+                $result = (object) ['result' => (object) ['content' => []]];
+                $handle->invoke($provider, ['type' => 'unknown', 'debug' => ['opaque' => 42]], $result, null);
+                $handle->invoke(
+                    $provider,
+                    ['type' => 'error', 'message' => 'Unavailable', 'error' => ['message' => 'Unavailable']],
+                    $result,
+                    null
+                );
+            });
+            $this->assertCount(1, $events, $name);
+            $this->assertSame('error', $events[0]['kind']);
+            $this->assertSame('error', $events[0]['status']);
+            $this->assertStringContainsString('Unavailable', json_encode($events));
+        }
+    }
+
+    public function test__stream_events_codex_app_server_streams_before_completion_without_duplicates(): void
+    {
+        $provider = $this->streamEventProvider('codex');
+        $handle = new ReflectionMethod($provider, 'handleEvent');
+        $result = (object) ['result' => (object) ['content' => []]];
+        $frames = [];
+        $emit = function (string $frame) use (&$frames): void {
+            $frames[] = $frame;
+        };
+        foreach (['First ', 'second'] as $delta) {
+            $handle->invoke(
+                $provider,
+                [
+                    'method' => 'item/agentMessage/delta',
+                    'params' => [
+                        'itemId' => 'message-1',
+                        'delta' => $delta
+                    ]
+                ],
+                $result,
+                $emit
+            );
+        }
+        $this->assertCount(3, $frames);
+        $handle->invoke(
+            $provider,
+            [
+                'method' => 'item/completed',
+                'params' => [
+                    'item' => [
+                        'id' => 'message-1',
+                        'type' => 'agentMessage',
+                        'text' => 'First second!'
+                    ]
+                ]
+            ],
+            $result,
+            $emit
+        );
+        $deltas = [];
+        foreach ($frames as $frame) {
+            preg_match('/data: ([^\n]+)/', $frame, $match);
+            $event = json_decode($match[1], true, 512, JSON_THROW_ON_ERROR);
+            if (isset($event['delta']['text'])) {
+                $deltas[] = $event['delta']['text'];
+            }
+        }
+        $this->assertSame(['First ', 'second', '!'], $deltas);
+        $this->assertSame('First second!', $result->result->content[0]->text);
+    }
+
+    public function test__stream_events_codex_reasoning_and_multiple_answers_keep_separate_stream_blocks(): void
+    {
+        $provider = $this->streamEventProvider('codex');
+        $result = (object) ['result' => (object) ['content' => []]];
+        $events = $this->captureStreamEvents(function () use ($provider, $result): void {
+            $callback = (new ReflectionMethod($provider, 'getStreamCallback'))->invoke($provider);
+            $handle = new ReflectionMethod($provider, 'handleEvent');
+            foreach (['First', 'Second'] as $index => $answer) {
+                foreach (['Inspect ', 'files'] as $delta) {
+                    $handle->invoke(
+                        $provider,
+                        [
+                            'method' => 'item/reasoning/summaryTextDelta',
+                            'params' => [
+                                'itemId' => 'reason-' . $index,
+                                'summaryIndex' => 0,
+                                'delta' => $delta
+                            ]
+                        ],
+                        $result,
+                        $callback
+                    );
+                }
+                $handle->invoke(
+                    $provider,
+                    [
+                        'method' => 'item/completed',
+                        'params' => [
+                            'item' => [
+                                'id' => 'reason-' . $index,
+                                'type' => 'reasoning',
+                                'summary' => ['Inspect files'],
+                                'content' => []
+                            ]
+                        ]
+                    ],
+                    $result,
+                    $callback
+                );
+                $handle->invoke(
+                    $provider,
+                    [
+                        'method' => 'item/agentMessage/delta',
+                        'params' => [
+                            'itemId' => 'answer-' . $index,
+                            'delta' => $answer
+                        ]
+                    ],
+                    $result,
+                    $callback
+                );
+                $handle->invoke(
+                    $provider,
+                    [
+                        'method' => 'item/completed',
+                        'params' => [
+                            'item' => [
+                                'id' => 'answer-' . $index,
+                                'type' => 'agentMessage',
+                                'text' => $answer
+                            ]
+                        ]
+                    ],
+                    $result,
+                    $callback
+                );
+            }
+        });
+        $this->assertCount(4, $events);
+        $this->assertSame(['Inspect ', 'files', 'Inspect ', 'files'], array_column($events, 'delta'));
+        $this->assertSame($events[0]['id'], $events[1]['id']);
+        $this->assertNotSame($events[0]['id'], $events[2]['id']);
+        $this->assertSame(['First', 'Second'], array_column($result->result->content, 'text'));
+        $stream = (new ReflectionProperty($provider, 'stream_response'))->getValue($provider);
+        $this->assertSame('Inspect files', $stream->result->content[0]->thinking);
+        $this->assertSame('First', trim($stream->result->content[1]->text));
+        $this->assertSame('Inspect files', $stream->result->content[2]->thinking);
+        $this->assertSame('Second', $stream->result->content[3]->text);
+    }
+
+    public function test__stream_events_large_structured_activity_is_bounded_without_changing_the_source(): void
+    {
+        $provider = $this->streamEventProvider('codex');
+        $source = ['rows' => array_fill(0, 1000, ['value' => str_repeat('x', 100)])];
+        $events = $this->captureStreamEvents(function () use ($provider, $source): void {
+            (new ReflectionMethod($provider, 'emitTranscript'))->invoke(
+                $provider,
+                'large',
+                'Tool',
+                'completed',
+                $source
+            );
+        });
+        $this->assertIsArray($events[0]['detail']['rows']);
+        $this->assertLessThan(8000, strlen(json_encode($events[0]['detail'])));
+        $this->assertStringContainsString('omitted', json_encode($events[0]['detail']));
+        $this->assertCount(1000, $source['rows']);
+    }
+
+    public function test__stream_events_non_streaming_calls_emit_no_display_events(): void
+    {
+        $provider = $this->streamEventProvider('codex');
+        (new ReflectionProperty($provider, 'stream'))->setValue($provider, false);
+        $events = $this->captureStreamEvents(function () use ($provider): void {
+            (new ReflectionMethod($provider, 'emitReasoningDelta'))->invoke($provider, 'Thinking');
+            (new ReflectionMethod($provider, 'emitTranscript'))->invoke($provider, 'tool', 'Tool', 'running');
+        });
+        $this->assertSame([], $events);
+    }
+
+    public function test__stream_events_codex_turn_notifications_update_the_same_activity(): void
+    {
+        $provider = $this->streamEventProvider('codex');
+        $events = $this->captureStreamEvents(function () use ($provider): void {
+            $handle = new ReflectionMethod($provider, 'handleEvent');
+            $result = (object) ['result' => (object) ['content' => []]];
+            foreach (['started', 'completed'] as $status) {
+                $handle->invoke(
+                    $provider,
+                    [
+                        'method' => 'turn/' . $status,
+                        'params' => ['turn' => ['id' => 'turn-1', 'status' => $status]]
+                    ],
+                    $result,
+                    null
+                );
+            }
+        });
+        $this->assertSame($events[0]['id'], $events[1]['id']);
+        $this->assertSame('running', $events[0]['status']);
+        $this->assertSame('completed', $events[1]['status']);
+    }
+
+    public function test__stream_events_claude_hook_exit_failure_is_not_reported_as_success(): void
+    {
+        $provider = $this->streamEventProvider('claudecode');
+        $events = $this->captureStreamEvents(function () use ($provider): void {
+            (new ReflectionMethod($provider, 'handleEvent'))->invoke(
+                $provider,
+                [
+                    'type' => 'system',
+                    'subtype' => 'hook_response',
+                    'hook_id' => 'hook-1',
+                    'hook_name' => 'Validation',
+                    'exit_code' => 1,
+                    'stderr' => 'Check failed'
+                ],
+                (object) ['result' => (object) ['content' => []]],
+                null
+            );
+        });
+        $this->assertSame('error', $events[0]['status']);
+        $this->assertSame(1, $events[0]['detail']['exit_code']);
+    }
+
+    public function test__stream_events_codex_failure_closes_the_started_turn_and_preserves_diagnostics(): void
+    {
+        foreach (['error', 'turn/failed', 'turn/completed'] as $method) {
+            $provider = $this->streamEventProvider('codex');
+            $result = (object) ['result' => (object) ['content' => []]];
+            $error = [
+                'message' => 'Request failed',
+                'additionalDetails' => 'upstream connection refused',
+                'codexErrorInfo' => 'connection'
+            ];
+            $events = $this->captureStreamEvents(function () use ($provider, $result, $error, $method): void {
+                $handle = new ReflectionMethod($provider, 'handleEvent');
+                $handle->invoke(
+                    $provider,
+                    ['method' => 'turn/started', 'params' => ['turn' => ['id' => 'turn-1']]],
+                    $result,
+                    null
+                );
+                $params =
+                    $method === 'turn/completed'
+                        ? ['turn' => ['id' => 'turn-1', 'status' => 'failed', 'error' => $error]]
+                        : ['turnId' => 'turn-1', 'error' => $error, 'willRetry' => false];
+                $handle->invoke($provider, ['method' => $method, 'params' => $params], $result, null);
+            });
+            $this->assertSame($events[0]['id'], $events[1]['id'], $method);
+            $this->assertSame('error', $events[1]['status']);
+            $this->assertSame($error, $events[1]['detail']);
+            $this->assertStringContainsString('upstream connection refused', $result->result->error->message);
+        }
+    }
+
+    public function test__stream_events_codex_completed_transport_does_not_hide_an_mcp_tool_error(): void
+    {
+        $provider = $this->streamEventProvider('codex');
+        $result = (object) ['result' => (object) ['content' => []]];
+        $events = $this->captureStreamEvents(function () use ($provider, $result): void {
+            (new ReflectionMethod($provider, 'handleEvent'))->invoke(
+                $provider,
+                [
+                    'type' => 'item.completed',
+                    'item' => [
+                        'id' => 'tool-error',
+                        'type' => 'mcp_tool_call',
+                        'server' => 'test',
+                        'tool' => 'check',
+                        'status' => 'completed',
+                        'result' => [
+                            'isError' => true,
+                            'content' => [['type' => 'text', 'text' => 'Permission denied']]
+                        ]
+                    ]
+                ],
+                $result,
+                null
+            );
+        });
+        $this->assertSame('error', $events[0]['status']);
+        $this->assertTrue($result->result->content[1]->is_error);
+    }
+
+    public function test__stream_events_codex_reasoning_preserves_zero_text(): void
+    {
+        $provider = $this->streamEventProvider('codex');
+        $events = $this->captureStreamEvents(function () use ($provider): void {
+            $callback = (new ReflectionMethod($provider, 'getStreamCallback'))->invoke($provider);
+            (new ReflectionMethod($provider, 'handleEvent'))->invoke(
+                $provider,
+                [
+                    'method' => 'item/completed',
+                    'params' => ['item' => ['id' => 'reason-0', 'type' => 'reasoning', 'summary' => ['0']]]
+                ],
+                (object) ['result' => (object) ['content' => []]],
+                $callback
+            );
+        });
+        $this->assertCount(1, $events);
+        $this->assertSame('0', $events[0]['delta']);
+    }
+
+    public function test__stream_events_opencode_error_closes_its_running_turn(): void
+    {
+        $provider = $this->streamEventProvider('opencode');
+        $events = $this->captureStreamEvents(function () use ($provider): void {
+            $handle = new ReflectionMethod($provider, 'handleEvent');
+            $result = (object) ['result' => (object) ['content' => []]];
+            $handle->invoke($provider, ['type' => 'step_start'], $result, null);
+            $handle->invoke($provider, ['type' => 'error', 'error' => ['message' => 'Failed']], $result, null);
+        });
+        $this->assertSame($events[0]['id'], $events[1]['id']);
+        $this->assertSame('error', $events[1]['status']);
+    }
+
+    public function test__stream_events_harness_done_follows_all_activity_events_and_resets_each_request(): void
+    {
+        $this->streamEventProvider('codex');
+        $provider = new class (stream: true) extends \vielhuber\aihelper\ai_codex {
+            protected function askThis(
+                ?string $prompt = null,
+                mixed $files = null,
+                bool $add_prompt_to_session = true,
+                ?string $prev_output_text = null,
+                float $prev_costs = 0.0,
+                int $length_continuation_count = 0
+            ): array {
+                $callback = $this->getStreamCallback();
+                $result = (object) ['result' => (object) ['content' => []]];
+                $this->handleEvent(['type' => 'turn.completed'], $result, $callback);
+                $this->emitTranscript('process', 'Process exited', 'completed', null, false, 'status');
+                return ['success' => true, 'response' => 'Done', 'costs' => 0.0];
+            }
+        };
+        foreach ([1, 2] as $request) {
+            ob_start();
+            ob_start();
+            try {
+                $provider->ask('Test');
+            } finally {
+                ob_end_flush();
+                $output = (string) ob_get_clean();
+            }
+            $this->assertSame(1, substr_count($output, 'data: [DONE]'));
+            $this->assertStringEndsWith("data: [DONE]\n\n", $output);
+            $this->assertStringContainsString('"seq":1', $output);
+            $this->assertStringContainsString('Process exited', $output);
         }
     }
 }

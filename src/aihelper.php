@@ -64,6 +64,8 @@ abstract class aihelper
     protected ?\Closure $stream_callback = null;
     protected array $transcript_states = [];
     protected array $transcript_labels = [];
+    protected int $stream_event_sequence = 0;
+    protected ?string $stream_reasoning_id = null;
 
     protected ?string $session_id = null;
     protected static array $sessions = [];
@@ -2624,6 +2626,10 @@ abstract class aihelper
 
     public function ask(?string $prompt = null, mixed $files = null): array
     {
+        $this->stream_event_sequence = 0;
+        $this->stream_reasoning_id = null;
+        $this->transcript_states = [];
+        $this->transcript_labels = [];
         $this->autoCompactSession();
         $this->stubOversizedFileBlocks();
         $this->stream_text_emitted_since_tool = false;
@@ -2751,6 +2757,13 @@ abstract class aihelper
         }
         // a stopped request has no answer, but nothing went wrong either
         $return['aborted'] = $this->aborted;
+        if ($this->is_harness === true && $this->stream === true) {
+            echo "data: [DONE]\n\n";
+            if (ob_get_level() > 0) {
+                ob_flush();
+            }
+            flush();
+        }
         return $return;
     }
 
@@ -6103,6 +6116,7 @@ abstract class aihelper
             return '';
         }
 
+        $this->stream_reasoning_id = null;
         $existing_newline_count = 0;
         if ($existing_text !== '' && preg_match('/\n+$/', $existing_text, $existing_matches) === 1) {
             $existing_newline_count = strlen($existing_matches[0]);
@@ -6537,6 +6551,7 @@ abstract class aihelper
         $this->stream_buffer_in = '';
         $this->stream_buffer_data = '';
         $this->stream_current_block_type = null;
+        $this->stream_reasoning_id = null;
         $this->stream_block_offset = 0;
         $this->stream_first_text_sent = false;
         $this->stream_running = false;
@@ -6637,6 +6652,7 @@ abstract class aihelper
 
                             // add new content block
                             if (isset($parsed['type']) && $parsed['type'] === 'content_block_start') {
+                                $this->stream_reasoning_id = null;
                                 $initial_block_type = $parsed['content_block']['type'] ?? null;
                                 $initial_thinking = $parsed['content_block']['thinking'] ?? '';
                                 if (
@@ -6644,17 +6660,7 @@ abstract class aihelper
                                     is_string($initial_thinking) &&
                                     $initial_thinking !== ''
                                 ) {
-                                    echo "event: reasoning\n";
-                                    echo 'data: ' .
-                                        json_encode(
-                                            ['delta' => $initial_thinking],
-                                            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-                                        ) .
-                                        "\n\n";
-                                    if (ob_get_level() > 0) {
-                                        ob_flush();
-                                    }
-                                    flush();
+                                    $this->emitReasoningDelta($initial_thinking);
                                 }
                                 // if this is not the first block and previous was text, add separator
                                 if (
@@ -6749,17 +6755,7 @@ abstract class aihelper
                                                 $block->thinking = '';
                                             }
                                             $block->thinking .= $thinking_chunk;
-                                            echo "event: reasoning\n";
-                                            echo 'data: ' .
-                                                json_encode(
-                                                    ['delta' => $thinking_chunk],
-                                                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-                                                ) .
-                                                "\n\n";
-                                            if (ob_get_level() > 0) {
-                                                ob_flush();
-                                            }
-                                            flush();
+                                            $this->emitReasoningDelta($thinking_chunk);
                                             $this->stream_running = false;
                                         }
                                     }
@@ -6850,8 +6846,11 @@ abstract class aihelper
                             }
 
                             if (isset($parsed['type']) && $parsed['type'] === 'message_stop') {
-                                // only send [DONE] if not pause_turn (because stream continues)
-                                if ($this->stream_response->result->stop_reason !== 'pause_turn') {
+                                // harnesses can emit more turns and exit events; ask() ends their stream
+                                if (
+                                    $this->is_harness !== true &&
+                                    $this->stream_response->result->stop_reason !== 'pause_turn'
+                                ) {
                                     // finally sleep to ensure all chunks arrive
                                     sleep(2);
                                     echo "data: [DONE]\n\n";
@@ -6977,12 +6976,7 @@ abstract class aihelper
                                     $parsed['type'] === 'response.reasoning_text.delta')
                             ) {
                                 if (isset($parsed['delta']) && $parsed['delta'] !== '') {
-                                    echo "event: reasoning\n";
-                                    echo 'data: ' . json_encode(['delta' => $parsed['delta']]) . "\n\n";
-                                    if (ob_get_level() > 0) {
-                                        ob_flush();
-                                    }
-                                    flush();
+                                    $this->emitReasoningDelta($parsed['delta']);
                                     $this->stream_running = false;
                                 }
                             }
@@ -7035,12 +7029,7 @@ abstract class aihelper
                                     }
 
                                     if ($reasoning_text !== '') {
-                                        echo "event: reasoning\n";
-                                        echo 'data: ' . json_encode(['delta' => $reasoning_text]) . "\n\n";
-                                        if (ob_get_level() > 0) {
-                                            ob_flush();
-                                        }
-                                        flush();
+                                        $this->emitReasoningDelta($reasoning_text);
                                         $this->stream_running = false;
                                     }
 
@@ -7291,12 +7280,7 @@ abstract class aihelper
                             $reasoning_visible = $this->stripToolCallBlocks($reasoning);
                             if ($reasoning_visible !== '') {
                                 $this->stream_running = true;
-                                echo "event: reasoning\n";
-                                echo 'data: ' . json_encode(['delta' => $reasoning_visible]) . "\n\n";
-                                if (ob_get_level() > 0) {
-                                    ob_flush();
-                                }
-                                flush();
+                                $this->emitReasoningDelta($reasoning_visible);
                             }
                         }
 
@@ -7354,12 +7338,7 @@ abstract class aihelper
                         // strip tool_call XML from user-visible reasoning stream
                         $reasoning_visible = $reasoning_text !== '' ? $this->stripToolCallBlocks($reasoning_text) : '';
                         if ($reasoning_visible !== '') {
-                            echo "event: reasoning\n";
-                            echo 'data: ' . json_encode(['delta' => $reasoning_visible]) . "\n\n";
-                            if (ob_get_level() > 0) {
-                                ob_flush();
-                            }
-                            flush();
+                            $this->emitReasoningDelta($reasoning_visible);
                         }
 
                         if ($normal_text !== '') {
@@ -7469,12 +7448,7 @@ abstract class aihelper
                                 if (isset($part['text']) && !empty($part['thought'])) {
                                     // thinking/reasoning — send as separate event, don't accumulate
                                     $this->stream_running = true;
-                                    echo "event: reasoning\n";
-                                    echo 'data: ' . json_encode(['delta' => $part['text']]) . "\n\n";
-                                    if (ob_get_level() > 0) {
-                                        ob_flush();
-                                    }
-                                    flush();
+                                    $this->emitReasoningDelta($part['text']);
                                 } elseif (isset($part['text'])) {
                                     $text = $part['text'];
                                     // accumulate (raw, before normalization)
@@ -7651,113 +7625,155 @@ abstract class aihelper
     }
 
     /**
-     * Stream one provider-independent process entry while keeping complete payloads in structured content.
+     * Emit a typed SSE payload without flattening its fields into display text.
+     */
+    protected function emitReasoningEvent(array $event): void
+    {
+        if ($this->stream !== true) {
+            return;
+        }
+        $event['seq'] = ++$this->stream_event_sequence;
+        echo "event: reasoning\n";
+        echo 'data: ' .
+            json_encode($event, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) .
+            "\n\n";
+        if (ob_get_level() > 0) {
+            ob_flush();
+        }
+        flush();
+    }
+
+    /**
+     * Append native reasoning to the current text block as soon as it arrives.
+     */
+    protected function emitReasoningDelta(string $delta): void
+    {
+        if ($delta === '') {
+            return;
+        }
+        $this->stream_reasoning_id ??= 'reasoning-' . bin2hex(random_bytes(8));
+        $this->emitReasoningEvent(['type' => 'reasoning.delta', 'id' => $this->stream_reasoning_id, 'delta' => $delta]);
+    }
+
+    /**
+     * Redact display payloads recursively without changing their JSON structure.
+     */
+    protected function sanitizeStreamValue(mixed $value, int &$budget = 6000): mixed
+    {
+        if (is_array($value) || is_object($value)) {
+            $object = is_object($value);
+            $values = [];
+            foreach ((array) $value as $key => $item) {
+                $budget -= mb_strlen((string) $key) + 8;
+                if ($budget <= 0) {
+                    $values[$key] = '[remaining entries omitted]';
+                    break;
+                }
+                if (
+                    preg_match(
+                        '/^(?:authorization|authorization_token|access_token|refresh_token|id_token|client_secret|token|secret|password|passwd|passphrase|api[_-]?key|private[_-]?key|access[_-]?key|cookie)$/i',
+                        (string) $key
+                    ) === 1
+                ) {
+                    $values[$key] = '***';
+                    continue;
+                }
+                if (
+                    in_array($key, ['data', 'content_base64'], true) &&
+                    is_string($item) &&
+                    preg_match('/^[A-Za-z0-9+\\/=\\-_]{256,}$/D', $item) === 1
+                ) {
+                    $values[$key] = '[binary data omitted]';
+                    continue;
+                }
+                $values[$key] = $this->sanitizeStreamValue($item, $budget);
+            }
+            return $object ? (object) $values : $values;
+        }
+        if (!is_string($value)) {
+            return $value;
+        }
+        foreach ($this->mcp_servers ?? [] as $mcpServer) {
+            $token = $mcpServer['authorization_token'] ?? null;
+            if (is_string($token) && $token !== '') {
+                $value = str_replace($token, '***', $value);
+            }
+        }
+        $value = preg_replace('/(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,\'"}]+/', '$1***', $value) ?? $value;
+        $value =
+            preg_replace(
+                '/(?i)("?(?:access_token|refresh_token|id_token|client_secret|token|secret|password|passwd|passphrase|api[_-]?key|private[_-]?key|access[_-]?key|cookie)"?\s*[:=]\s*)(?:"[^"]*"|\'[^\']*\'|[^\s,;}]+)/',
+                '$1***',
+                $value
+            ) ?? $value;
+        $value =
+            preg_replace(
+                '/(?i)(\bAIHELPER_MCP_TOKEN_[A-Z0-9_]+\s*=\s*)(?:"(?:\\.|[^"])*"|\'(?:\\.|[^\'])*\'|[^\s,;]+)/',
+                '$1***',
+                $value
+            ) ?? $value;
+        $value =
+            preg_replace('/("data"\s*:\s*")[A-Za-z0-9+\/=\-_]{256,}"/', '$1[binary data omitted]"', $value) ?? $value;
+        $value =
+            preg_replace(
+                '/data:[A-Za-z0-9.+-]+\/[A-Za-z0-9.+-]+(?:;[^,\s]*)?;base64,[A-Za-z0-9+\/=\-_]+/i',
+                '[binary data omitted]',
+                $value
+            ) ?? $value;
+        $value = trim(str_replace(["\r\n", "\r"], "\n", $value));
+        $length = mb_strlen($value);
+        if ($length > $budget) {
+            $retained = max(0, $budget - 1000);
+            $head = (int) floor($retained * 0.8);
+            $tail = $retained - $head;
+            $omitted = $length - $retained;
+            $value =
+                mb_substr($value, 0, $head) .
+                "\n… " .
+                $omitted .
+                " characters omitted …\n" .
+                ($tail > 0 ? mb_substr($value, -$tail) : '');
+        }
+        $budget -= $length;
+        return $value;
+    }
+
+    /**
+     * Upsert one activity by identity; only identical snapshots are suppressed.
      */
     protected function emitTranscript(
         ?string $id,
         string $label,
         string $status,
         mixed $detail = null,
-        bool $capturesContent = true
-    ): string
-    {
+        bool $capturesContent = true,
+        string $kind = 'tool'
+    ): string {
         $id = trim((string) $id);
         if ($id === '') {
-            $id = 'transcript-' . md5(uniqid('', true));
+            $id = 'activity-' . bin2hex(random_bytes(8));
         }
-        $label = trim($label) !== '' ? trim($label) : ($this->transcript_labels[$id] ?? 'Activity');
+        $label = trim($label) !== '' ? trim($label) : $this->transcript_labels[$id] ?? 'Activity';
         $this->transcript_labels[$id] = $label;
-        $previousStatus = $this->transcript_states[$id] ?? null;
-        if ($previousStatus === $status) {
-            return $id;
-        }
-        $this->transcript_states[$id] = $status;
         if ($this->stream !== true) {
             return $id;
         }
-
-        if (
-            (is_array($detail) && $detail === []) ||
-            (is_object($detail) && get_object_vars($detail) === [])
-        ) {
-            $detail = null;
-        }
-        $detailText = '';
-        if ($detail !== null) {
-            $detailText = is_string($detail)
-                ? $detail
-                : (json_encode($detail, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '');
-            foreach ($this->mcp_servers ?? [] as $mcpServer) {
-                $token = $mcpServer['authorization_token'] ?? null;
-                if (is_string($token) && $token !== '') {
-                    $detailText = str_replace($token, '***', $detailText);
-                }
-            }
-            $detailText = preg_replace(
-                '/(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,\'"}]+/',
-                '$1***',
-                $detailText
-            ) ?? $detailText;
-            $detailText = preg_replace(
-                '/(?i)("?(?:access_token|refresh_token|id_token|client_secret|token|secret|password|passwd|passphrase|api[_-]?key|private[_-]?key|access[_-]?key|cookie)"?\s*[:=]\s*)(?:"[^"]*"|\'[^\']*\'|[^\s,;}]+)/',
-                '$1***',
-                $detailText
-            ) ?? $detailText;
-            $detailText = preg_replace(
-                '/(?i)(\bAIHELPER_MCP_TOKEN_[A-Z0-9_]+\s*=\s*)(?:"(?:\\.|[^"])*"|\'(?:\\.|[^\'])*\'|[^\s,;]+)/',
-                '$1***',
-                $detailText
-            ) ?? $detailText;
-            $detailText = preg_replace(
-                '/("data"\s*:\s*")[A-Za-z0-9+\/=\-_]{256,}"/',
-                '$1[binary data omitted]"',
-                $detailText
-            ) ?? $detailText;
-            $detailText = preg_replace(
-                '/data:[A-Za-z0-9.+-]+\/[A-Za-z0-9.+-]+(?:;[^,\s]*)?;base64,[A-Za-z0-9+\/=\-_]+/i',
-                '[binary data omitted]',
-                $detailText
-            ) ?? $detailText;
-            $detailText = trim(str_replace(["\r\n", "\r"], "\n", $detailText));
-            if (mb_strlen($detailText) > 6000) {
-                $omitted = mb_strlen($detailText) - 5000;
-                $detailText =
-                    mb_substr($detailText, 0, 4000) .
-                    "\n… " .
-                    $omitted .
-                    " characters omitted …\n" .
-                    mb_substr($detailText, -1000);
-            }
-        }
-
-        $started = $previousStatus === null;
-        $delta = $started ? "\n\n• " . $label : '';
-        if ($detailText !== '') {
-            $prefix = $status === 'running' ? '  ├ ' : '  └ ';
-            $delta .= "\n" . $prefix . str_replace("\n", "\n    ", $detailText);
-        } elseif ($status === 'error') {
-            $delta .= "\n  └ Failed.";
-        }
-        if ($delta === '') {
+        $event = [
+            'type' => 'activity.upsert',
+            'id' => $id,
+            'kind' => $kind,
+            'label' => $this->sanitizeStreamValue($label),
+            'status' => $status,
+            'detail' => $this->sanitizeStreamValue($detail),
+            'captures_content' => $capturesContent
+        ];
+        $fingerprint = hash('sha256', json_encode($event, JSON_INVALID_UTF8_SUBSTITUTE));
+        if (($this->transcript_states[$id] ?? null) === $fingerprint) {
             return $id;
         }
-
-        echo "event: reasoning\n";
-        echo 'data: ' .
-            json_encode(
-                [
-                    'delta' => $delta,
-                    'kind' => 'transcript',
-                    'boundary' => $started,
-                    'captures_content' => $capturesContent
-                ],
-                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-            ) .
-            "\n\n";
-        if (ob_get_level() > 0) {
-            ob_flush();
-        }
-        flush();
+        $this->transcript_states[$id] = $fingerprint;
+        $this->stream_reasoning_id = null;
+        $this->emitReasoningEvent($event);
         return $id;
     }
 
@@ -10498,65 +10514,9 @@ abstract class ai_harness extends ai_anthropic
     }
 
     /**
-     * Preserve native lifecycle data without interpreting provider-specific fields.
+     * Map native lifecycle events in the provider that owns their protocol.
      */
-    protected function emitHarnessLifecycleEvent(array $event): void
-    {
-        $type = trim((string) ($event['type'] ?? ''));
-        if ($type === '') {
-            return;
-        }
-        $subtype = trim((string) ($event['subtype'] ?? ''));
-        $eventName = trim($type . ($subtype === '' ? '' : ' ' . $subtype));
-        $label = ucfirst(str_replace(['_', '.'], ' ', $eventName));
-        $normalizedEventName = strtolower($eventName);
-        $eventStatusValue = $event['status'] ?? ($event['outcome'] ?? '');
-        $eventStatus = is_scalar($eventStatusValue) ? strtolower(trim((string) $eventStatusValue)) : '';
-        $status = 'completed';
-        if (
-            preg_match('/(?:^|[._ ])(?:start|started|starting)$/', $normalizedEventName) === 1 ||
-            in_array($eventStatus, ['pending', 'running', 'requesting', 'start', 'started', 'starting'], true)
-        ) {
-            $status = 'running';
-        }
-        if (
-            ($event['is_error'] ?? false) === true ||
-            preg_match('/(?:^|[._ ])(?:error|failed|failure)$/', $normalizedEventName) === 1 ||
-            in_array($eventStatus, ['error', 'failed', 'failure'], true)
-        ) {
-            $status = 'error';
-        }
-        $encodedEvent = json_encode(
-            $event,
-            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
-        ) ?: $eventName;
-        $eventId = 'harness-event-' . hash('sha256', $encodedEvent);
-        $scalarDetails = [];
-        foreach ($event as $key => $value) {
-            if (in_array($key, ['type', 'subtype'], true)) {
-                continue;
-            }
-            if (is_array($value) || is_object($value)) {
-                $fieldLabel = ucfirst(str_replace(['_', '.'], ' ', (string) $key));
-                $this->emitTranscript(
-                    id: $eventId . '-' . (string) $key,
-                    label: $label . ' · ' . $fieldLabel,
-                    status: $status,
-                    detail: $value,
-                    capturesContent: false
-                );
-                continue;
-            }
-            $scalarDetails[$key] = $value;
-        }
-        $this->emitTranscript(
-            id: $eventId,
-            label: $label,
-            status: $status,
-            detail: $scalarDetails,
-            capturesContent: false
-        );
-    }
+    abstract protected function emitHarnessLifecycleEvent(array $event): void;
 
     public function fetchModelsFromProvider(): array
     {
@@ -11286,7 +11246,8 @@ abstract class ai_harness extends ai_anthropic
             id: $harnessTranscriptId,
             label: $harnessLabel,
             status: 'running',
-            capturesContent: false
+            capturesContent: false,
+            kind: 'status'
         );
         while (true) {
             if ($this->shouldAbort()) {
@@ -11410,7 +11371,8 @@ abstract class ai_harness extends ai_anthropic
                                 label: $harnessLabel . ' output',
                                 status: 'completed',
                                 detail: $nativeOutput,
-                                capturesContent: false
+                                capturesContent: false,
+                                kind: 'diagnostic'
                             );
                         }
                     }
@@ -11477,8 +11439,9 @@ abstract class ai_harness extends ai_anthropic
             id: $harnessTranscriptId,
             label: '',
             status: $exit_code === 0 ? 'completed' : 'error',
-            detail: 'Exit code: ' . $exit_code,
-            capturesContent: false
+            detail: ['exit_code' => $exit_code],
+            capturesContent: false,
+            kind: 'status'
         );
 
         if (
@@ -11596,6 +11559,146 @@ abstract class ai_harness extends ai_anthropic
 
 class ai_claudecode extends ai_harness
 {
+    /**
+     * Map Claude tasks and lifecycle updates while excluding token telemetry.
+     */
+    protected function emitHarnessLifecycleEvent(array $event): void
+    {
+        $this->log($event, 'harness event');
+        $name = ($event['type'] ?? '') === 'system' ? $event['subtype'] ?? '' : $event['type'] ?? '';
+        if ($name === 'thinking_tokens') {
+            return;
+        }
+        if ($name === 'init') {
+            $this->emitTranscript('session', 'Session started', 'completed', null, false, 'status');
+            return;
+        }
+        if (in_array($name, ['status', 'api_retry', 'compact_boundary'], true)) {
+            $label = match ($name) {
+                'api_retry' => 'Reconnecting',
+                'compact_boundary' => 'Context compacted',
+                default => ($event['status'] ?? '') === 'compacting' ? 'Compacting context' : 'Session status'
+            };
+            $completed = $name === 'compact_boundary' || ($name === 'status' && empty($event['status']));
+            $this->emitTranscript(
+                'session-status',
+                $label,
+                $completed ? 'completed' : 'running',
+                array_intersect_key($event, array_flip(['status', 'attempt', 'max_retries', 'retry_delay_ms'])),
+                false,
+                'status'
+            );
+            return;
+        }
+        if (
+            in_array(
+                $name,
+                [
+                    'task_started',
+                    'task_progress',
+                    'task_notification',
+                    'hook_started',
+                    'hook_progress',
+                    'hook_response',
+                    'tool_progress'
+                ],
+                true
+            )
+        ) {
+            $hook = str_starts_with($name, 'hook_');
+            $tool = $name === 'tool_progress';
+            $id =
+                (string) ($event[$hook ? 'hook_id' : ($tool ? 'tool_use_id' : 'task_id')] ??
+                    ($event['hook_name'] ?? ''));
+            if ($id === '') {
+                return;
+            }
+            $status = match ($event['status'] ?? '') {
+                'failed', 'error', 'stopped' => 'error',
+                'completed' => 'completed',
+                default => in_array($name, ['task_notification', 'hook_response'], true) ? 'completed' : 'running'
+            };
+            if ((int) ($event['exit_code'] ?? 0) !== 0 || ($event['is_error'] ?? false) === true) {
+                $status = 'error';
+            }
+            $detail = array_intersect_key(
+                $event,
+                array_flip([
+                    'description',
+                    'summary',
+                    'usage',
+                    'elapsed_time_seconds',
+                    'last_tool_name',
+                    'output',
+                    'output_file',
+                    'exit_code',
+                    'stdout',
+                    'stderr',
+                    'parent_tool_use_id',
+                    'tool_use_id'
+                ])
+            );
+            $this->emitTranscript(
+                ($hook ? 'hook-' : ($tool ? '' : 'task-')) . $id,
+                $tool
+                    ? $this->transcript_labels[$id] ?? (string) ($event['tool_name'] ?? 'Tool')
+                    : (string) ($event['description'] ?? ($event['hook_name'] ?? 'Task')),
+                $status,
+                $detail,
+                $tool,
+                $hook ? 'status' : ($tool ? 'tool' : 'task')
+            );
+            return;
+        }
+        if ($name === 'rate_limit_event') {
+            $this->emitTranscript(
+                'rate-limit',
+                'Usage limits',
+                'completed',
+                $event['rate_limit_info'] ?? null,
+                false,
+                'usage'
+            );
+            return;
+        }
+        if ($name === 'result') {
+            $failed = ($event['is_error'] ?? false) === true;
+            $this->emitTranscript(
+                'turn',
+                $failed ? 'Turn failed' : 'Turn completed',
+                $failed ? 'error' : 'completed',
+                $failed ? $event['result'] ?? ($event['errors'] ?? 'Harness run failed') : null,
+                false,
+                'status'
+            );
+            $this->emitTranscript(
+                'usage',
+                'Token usage',
+                'completed',
+                [
+                    'input_tokens' => $event['usage']['input_tokens'] ?? 0,
+                    'output_tokens' => $event['usage']['output_tokens'] ?? 0,
+                    'cache_read_input_tokens' => $event['usage']['cache_read_input_tokens'] ?? 0,
+                    'cache_creation_input_tokens' => $event['usage']['cache_creation_input_tokens'] ?? 0,
+                    'cost' => $event['total_cost_usd'] ?? null
+                ],
+                false,
+                'usage'
+            );
+            return;
+        }
+        if ($name === 'error' || ($event['is_error'] ?? false) === true) {
+            $this->emitTranscript(
+                null,
+                'Error',
+                'error',
+                $event['error'] ?? ($event['message'] ?? ($event['errors'] ?? 'Harness error')),
+                false,
+                'error'
+            );
+        }
+    }
+
     public ?string $provider = 'Anthropic';
 
     public ?string $title = 'Claude Code';
@@ -11990,6 +12093,75 @@ class ai_claudecode extends ai_harness
 
 class ai_codex extends ai_harness
 {
+    /**
+     * Map Codex lifecycle notifications without displaying transport metadata.
+     */
+    protected function emitHarnessLifecycleEvent(array $event): void
+    {
+        $this->log($event, 'harness event');
+        $type = (string) ($event['type'] ?? '');
+        if ($type === 'thread.started') {
+            $this->emitTranscript('session', 'Session started', 'completed', null, false, 'status');
+            return;
+        }
+        if (in_array($type, ['turn.started', 'turn.completed', 'turn.failed'], true)) {
+            $this->emitTranscript(
+                'turn-' . (string) ($event['turn_id'] ?? ($this->app_server_turn_id ?? '')),
+                match ($type) {
+                    'turn.started' => 'Turn started',
+                    'turn.failed' => 'Turn failed',
+                    default => 'Turn completed'
+                },
+                match ($type) {
+                    'turn.started' => 'running',
+                    'turn.failed' => 'error',
+                    default => 'completed'
+                },
+                $event['error'] ?? null,
+                false,
+                'status'
+            );
+            if (isset($event['usage'])) {
+                $this->emitTranscript(
+                    'usage',
+                    'Token usage',
+                    'completed',
+                    [
+                        'input_tokens' => (int) ($event['usage']['input_tokens'] ?? 0),
+                        'output_tokens' => (int) ($event['usage']['output_tokens'] ?? 0),
+                        'cache_read_input_tokens' => (int) ($event['usage']['cached_input_tokens'] ?? 0),
+                        'cache_creation_input_tokens' => (int) ($event['usage']['cache_write_input_tokens'] ?? 0)
+                    ],
+                    false,
+                    'usage'
+                );
+            }
+            return;
+        }
+        if (in_array($type, ['error', 'warning'], true)) {
+            $turnId = $event['turn_id'] ?? $this->app_server_turn_id;
+            $this->emitTranscript(
+                $type === 'error' && $turnId !== null ? 'turn-' . $turnId : null,
+                $type === 'warning' ? 'Warning' : 'Error',
+                $type === 'warning' ? 'completed' : 'error',
+                $event['error'] ?? ($event['message'] ?? 'Harness error'),
+                false,
+                $type === 'warning' ? 'warning' : ($turnId !== null ? 'status' : 'error')
+            );
+            return;
+        }
+        if (($event['item']['type'] ?? '') === 'error') {
+            $this->emitTranscript(
+                (string) ($event['item']['id'] ?? ''),
+                'Error',
+                'error',
+                $event['item']['message'] ?? 'Harness error',
+                false,
+                'error'
+            );
+        }
+    }
+
     public ?string $provider = 'OpenAI';
 
     public ?string $title = 'Codex';
@@ -12082,6 +12254,8 @@ class ai_codex extends ai_harness
     protected array $app_server_replay = [];
 
     protected array $app_server_usage = [];
+
+    protected array $streamed_items = [];
 
     /**
      * `codex exec` reads one prompt and is done, so a message can only ever
@@ -12295,6 +12469,7 @@ class ai_codex extends ai_harness
 
     protected function harnessStart(array $pipes, string $prompt): void
     {
+        $this->streamed_items = [];
         if (!$this->usesAppServer()) {
             parent::harnessStart($pipes, $prompt);
             return;
@@ -12435,6 +12610,26 @@ class ai_codex extends ai_harness
         if ($method === 'thread/started') {
             return ['type' => 'thread.started', 'thread_id' => $params['thread']['id'] ?? null];
         }
+        if ($method === 'turn/started') {
+            return ['type' => 'turn.started', 'turn_id' => $params['turn']['id'] ?? null];
+        }
+        if (
+            in_array(
+                $method,
+                ['item/agentMessage/delta', 'item/reasoning/textDelta', 'item/reasoning/summaryTextDelta'],
+                true
+            )
+        ) {
+            return [
+                'type' => 'item.delta',
+                'item' => [
+                    'id' => (string) ($params['itemId'] ?? ''),
+                    'type' => $method === 'item/agentMessage/delta' ? 'agent_message' : 'reasoning',
+                    'part' => $method . ':' . (string) ($params['summaryIndex'] ?? ($params['contentIndex'] ?? 0)),
+                    'text' => (string) ($params['delta'] ?? '')
+                ]
+            ];
+        }
         if ($method === 'item/started' || $method === 'item/completed') {
             return [
                 'type' => str_replace('/', '.', $method),
@@ -12457,28 +12652,33 @@ class ai_codex extends ai_harness
             if (in_array($status, ['failed', 'interrupted'], true)) {
                 return [
                     'type' => 'turn.failed',
+                    'turn_id' => $params['turn']['id'] ?? null,
                     'error' => $params['turn']['error'] ?? ['message' => 'codex turn ' . $status]
                 ];
             }
-            return ['type' => 'turn.completed', 'usage' => $this->app_server_usage];
+            return [
+                'type' => 'turn.completed',
+                'turn_id' => $params['turn']['id'] ?? null,
+                'usage' => $this->app_server_usage
+            ];
         }
         if ($method === 'turn/failed') {
             $this->harness_turn_complete = true;
             return [
                 'type' => 'turn.failed',
-                'error' => [
-                    // the raw payload goes along: a bare label would hide why
-                    'message' => (string) ($params['error']['message'] ??
-                        json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE))
-                ]
+                'turn_id' => $params['turnId'] ?? null,
+                'error' => $params['error'] ?? ['message' => $params['message'] ?? 'codex turn failed']
             ];
         }
         if ($method === 'error') {
             return [
                 'type' => 'error',
+                'turn_id' => $params['turnId'] ?? null,
                 'willRetry' => ($params['willRetry'] ?? false) === true,
-                'message' => (string) ($params['message'] ??
-                    json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE))
+                'error' => $params['error'] ?? ['message' => $params['message'] ?? 'Harness error'],
+                'message' =>
+                    (string) ($params['message'] ??
+                        json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE))
             ];
         }
         return null;
@@ -12585,7 +12785,8 @@ class ai_codex extends ai_harness
                 id: 'codex-native-turn-' . (string) ($payload['turn_id'] ?? ''),
                 label: 'Turn completed',
                 status: 'completed',
-                capturesContent: false
+                capturesContent: false,
+                kind: 'status'
             );
             return;
         }
@@ -12598,7 +12799,8 @@ class ai_codex extends ai_harness
                 id: 'codex-native-turn-' . (string) ($payload['turn_id'] ?? ''),
                 label: 'Goal continuation started',
                 status: 'running',
-                capturesContent: false
+                capturesContent: false,
+                kind: 'status'
             );
             return;
         }
@@ -12764,7 +12966,8 @@ class ai_codex extends ai_harness
                 id: 'codex-compaction-' . hash('sha256', (string) ($event['timestamp'] ?? uniqid('', true))),
                 label: 'Context compacted',
                 status: 'completed',
-                capturesContent: false
+                capturesContent: false,
+                kind: 'status'
             );
         }
     }
@@ -12799,7 +13002,7 @@ class ai_codex extends ai_harness
             return;
         }
 
-        if (in_array($type, ['item.started', 'item.completed'], true)) {
+        if (in_array($type, ['item.started', 'item.updated', 'item.completed'], true)) {
             $item = is_array($event['item'] ?? null) ? $event['item'] : [];
             $item_type = (string) ($item['type'] ?? '');
             $supportedItemTypes = ['mcp_tool_call', 'command_execution', 'file_change', 'web_search', 'todo_list'];
@@ -12807,7 +13010,9 @@ class ai_codex extends ai_harness
                 $isMcp = $item_type === 'mcp_tool_call';
                 $tool_name = $isMcp
                     ? (string) (($item['server'] ?? '') . '__' . ($item['tool'] ?? ''))
-                    : ($item_type === 'command_execution' ? 'shell' : $item_type);
+                    : ($item_type === 'command_execution'
+                        ? 'shell'
+                        : $item_type);
                 $tool_input = match ($item_type) {
                     'mcp_tool_call' => $item['arguments'] ?? [],
                     'command_execution' => ['command' => $item['command'] ?? ''],
@@ -12833,9 +13038,10 @@ class ai_codex extends ai_harness
                     $label = $paths === [] ? 'Changed files' : 'Changed ' . implode(', ', $paths);
                 }
                 if ($item_type === 'web_search') {
-                    $label = trim((string) ($item['query'] ?? '')) === ''
-                        ? 'Searched the web'
-                        : 'Searched ' . trim((string) $item['query']);
+                    $label =
+                        trim((string) ($item['query'] ?? '')) === ''
+                            ? 'Searched the web'
+                            : 'Searched ' . trim((string) $item['query']);
                 }
                 if ($item_type === 'todo_list') {
                     $label = 'Updated plan';
@@ -12855,45 +13061,54 @@ class ai_codex extends ai_harness
                             $hasNonTextContent = true;
                         }
                     }
-                    $transcriptOutput = $outputParts !== []
-                        ? implode(PHP_EOL, $outputParts)
-                        : (is_array($item['error'] ?? null)
+                    $transcriptOutput =
+                        $outputParts !== []
+                            ? implode(PHP_EOL, $outputParts)
+                            : (is_array($item['error'] ?? null)
+                                ? (json_encode(
+                                    $item['error'],
+                                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+                                ) ?:
+                                '')
+                                : (string) ($item['error'] ?? ''));
+                    $additionalResultData = array_diff_key($mcpResult, [
+                        'content' => true,
+                        'structuredContent' => true,
+                        'structured_content' => true
+                    ]);
+                    $hasStructuredContent =
+                        ($mcpResult['structuredContent'] ?? ($mcpResult['structured_content'] ?? null)) !== null;
+                    $toolOutput =
+                        $hasNonTextContent || $hasStructuredContent || $additionalResultData !== []
                             ? (json_encode(
-                                $item['error'],
+                                $mcpResult,
                                 JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
-                            ) ?: '')
-                            : (string) ($item['error'] ?? ''));
-                    $additionalResultData = array_diff_key(
-                        $mcpResult,
-                        ['content' => true, 'structuredContent' => true, 'structured_content' => true]
-                    );
-                    $hasStructuredContent = ($mcpResult['structuredContent'] ?? $mcpResult['structured_content'] ?? null) !== null;
-                    $toolOutput = $hasNonTextContent || $hasStructuredContent || $additionalResultData !== []
-                        ? (json_encode(
-                            $mcpResult,
-                            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
-                        ) ?: $transcriptOutput)
-                        : $transcriptOutput;
+                            ) ?:
+                            $transcriptOutput)
+                            : $transcriptOutput;
                 }
                 if ($item_type === 'command_execution') {
                     $toolOutput = (string) ($item['aggregated_output'] ?? '');
-                    $transcriptOutput = $toolOutput;
+                    $transcriptOutput = ['output' => $toolOutput, 'exit_code' => $item['exit_code'] ?? null];
                 }
                 if (in_array($item_type, ['file_change', 'web_search', 'todo_list'], true)) {
                     $toolOutput = json_encode($item, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
-                    $transcriptOutput = $toolOutput;
+                    $transcriptOutput = $item;
                 }
                 $toolFailed =
                     ($item['status'] ?? 'completed') !== 'completed' ||
+                    ($isMcp && ($item['result']['isError'] ?? false) === true) ||
                     ($item_type === 'command_execution' && (int) ($item['exit_code'] ?? 0) !== 0);
-                if ($type === 'item.started') {
+                if ($type !== 'item.completed') {
                     $ready = $item_type !== 'command_execution' || trim((string) ($item['command'] ?? '')) !== '';
                     if ($ready) {
                         $this->emitTranscript(
                             (string) ($item['id'] ?? ''),
                             $label,
                             'running',
-                            $isMcp ? $tool_input : null
+                            $type === 'item.updated' ? $item : $tool_input,
+                            true,
+                            $item_type === 'todo_list' ? 'plan' : 'tool'
                         );
                     }
                     return;
@@ -12913,7 +13128,9 @@ class ai_codex extends ai_harness
                         (string) ($item['id'] ?? ''),
                         $label,
                         $toolFailed ? 'error' : 'completed',
-                        $transcriptOutput
+                        $isMcp ? $item['result'] ?? ($item['error'] ?? null) : $transcriptOutput,
+                        true,
+                        $item_type === 'todo_list' ? 'plan' : 'tool'
                     );
                 }
 
@@ -12938,31 +13155,79 @@ class ai_codex extends ai_harness
             }
         }
 
-        // codex reports whole completed items instead of token deltas, so one
-        // item becomes one closed content block
-        if ($type === 'item.completed') {
+        if ($type === 'item.delta' || $type === 'item.completed') {
             $item_type = $event['item']['type'] ?? null;
             $text = (string) ($event['item']['text'] ?? '');
-            if ($text === '' || !in_array($item_type, ['agent_message', 'reasoning'], true)) {
+            if (!in_array($item_type, ['agent_message', 'reasoning'], true)) {
                 $this->emitHarnessLifecycleEvent($event);
                 return;
             }
             $thinking = $item_type === 'reasoning';
-            $this->emitAnthropicEvent($emit, [
-                'type' => 'content_block_start',
-                'index' => 0,
-                'content_block' => $thinking ? ['type' => 'thinking', 'thinking' => ''] : ['type' => 'text', 'text' => '']
-            ]);
-            $this->emitAnthropicEvent($emit, [
-                'type' => 'content_block_delta',
-                'index' => 0,
-                'delta' => $thinking
-                    ? ['type' => 'thinking_delta', 'thinking' => $text]
-                    : ['type' => 'text_delta', 'text' => $text]
-            ]);
-            $this->emitAnthropicEvent($emit, ['type' => 'content_block_stop', 'index' => 0]);
-            if (!$thinking) {
-                $result->result->content[] = (object) ['type' => 'text', 'text' => $text];
+            $id = (string) ($event['item']['id'] ?? 'item-' . count($this->streamed_items));
+            $existing = $this->streamed_items[$id]['text'] ?? '';
+            if (
+                $type === 'item.delta' &&
+                $existing !== '' &&
+                ($event['item']['part'] ?? null) !== ($this->streamed_items[$id]['part'] ?? null)
+            ) {
+                $text = "\n\n" . $text;
+            }
+            if ($type === 'item.completed' && $text === '' && $thinking) {
+                $text = implode(
+                    "\n\n",
+                    array_filter(
+                        array_map(
+                            fn(mixed $part): string => is_array($part)
+                                ? (string) ($part['text'] ?? '')
+                                : (string) $part,
+                            ($event['item']['summary'] ?? []) !== []
+                                ? $event['item']['summary']
+                                : $event['item']['content'] ?? []
+                        ),
+                        fn(string $part): bool => $part !== ''
+                    )
+                );
+            }
+            $delta =
+                $type === 'item.delta'
+                    ? $text
+                    : (str_starts_with($text, $existing)
+                        ? substr($text, strlen($existing))
+                        : '');
+            if ($delta !== '' && !isset($this->streamed_items[$id])) {
+                $this->streamed_items[$id] = ['text' => '', 'index' => count($this->streamed_items)];
+                $this->emitAnthropicEvent($emit, [
+                    'type' => 'content_block_start',
+                    'index' => $this->streamed_items[$id]['index'],
+                    'content_block' => $thinking
+                        ? ['type' => 'thinking', 'thinking' => '']
+                        : ['type' => 'text', 'text' => '']
+                ]);
+            }
+            if ($delta !== '') {
+                $this->streamed_items[$id]['text'] .= $delta;
+                $this->streamed_items[$id]['part'] = $event['item']['part'] ?? null;
+                $this->emitAnthropicEvent($emit, [
+                    'type' => 'content_block_delta',
+                    'index' => $this->streamed_items[$id]['index'],
+                    'delta' => $thinking
+                        ? ['type' => 'thinking_delta', 'thinking' => $delta]
+                        : ['type' => 'text_delta', 'text' => $delta]
+                ]);
+            }
+            if ($type === 'item.completed') {
+                if (isset($this->streamed_items[$id])) {
+                    $this->emitAnthropicEvent($emit, [
+                        'type' => 'content_block_stop',
+                        'index' => $this->streamed_items[$id]['index']
+                    ]);
+                }
+                if (!$thinking && ($text !== '' || $existing !== '')) {
+                    $result->result->content[] = (object) [
+                        'type' => 'text',
+                        'text' => $text !== '' ? $text : $existing
+                    ];
+                }
             }
             return;
         }
@@ -12991,7 +13256,11 @@ class ai_codex extends ai_harness
 
         if ($type === 'turn.failed' || $type === 'error') {
             $result->result->error = (object) [
-                'message' => (string) ($event['error']['message'] ?? ($event['message'] ?? 'codex turn failed'))
+                'message' =>
+                    (string) ($event['message'] ??
+                        (is_array($event['error'] ?? null)
+                            ? json_encode($event['error'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                            : $event['error'] ?? 'codex turn failed'))
             ];
             if ($type === 'error' && ($event['willRetry'] ?? false) === true) {
                 // Keep the failure pending until an explicit successful completion, even if partial text arrives.
@@ -13005,6 +13274,51 @@ class ai_codex extends ai_harness
 
 class ai_opencode extends ai_harness
 {
+    /**
+     * Map OpenCode step and usage events without exposing session metadata.
+     */
+    protected function emitHarnessLifecycleEvent(array $event): void
+    {
+        $this->log($event, 'harness event');
+        $type = (string) ($event['type'] ?? '');
+        if ($type === 'step_start') {
+            $this->emitTranscript('turn', 'Turn started', 'running', null, false, 'status');
+            return;
+        }
+        if ($type === 'step_finish') {
+            $tokens = $event['part']['tokens'] ?? [];
+            $this->emitTranscript(
+                'usage',
+                'Token usage',
+                'completed',
+                [
+                    'input_tokens' => $tokens['input'] ?? 0,
+                    'output_tokens' => $tokens['output'] ?? 0,
+                    'cache_read_input_tokens' => $tokens['cache']['read'] ?? 0,
+                    'cache_creation_input_tokens' => $tokens['cache']['write'] ?? 0,
+                    'cost' => $event['part']['cost'] ?? null
+                ],
+                false,
+                'usage'
+            );
+            if (($event['part']['reason'] ?? '') === 'stop') {
+                $this->emitTranscript('turn', 'Turn completed', 'completed', null, false, 'status');
+            }
+            return;
+        }
+        if ($type === 'error') {
+            $turnStarted = isset($this->transcript_labels['turn']);
+            $this->emitTranscript(
+                $turnStarted ? 'turn' : null,
+                'Error',
+                'error',
+                $event['error'] ?? 'Harness error',
+                false,
+                $turnStarted ? 'status' : 'error'
+            );
+        }
+    }
+
     public ?string $provider = 'OpenCode';
 
     public ?string $title = 'OpenCode';

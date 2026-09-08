@@ -39,7 +39,7 @@
                                 $container.getAttribute('data-log'),
                             source = new EventSource(url),
                             textMain = '',
-                            textReasoning = '',
+                            blocks = new Map(),
                             isLoaded = false,
                             isRendered = false,
                             typing = ($el, getContent, onDone) => {
@@ -100,15 +100,30 @@
                         };
                         source.addEventListener('reasoning', event => {
                             let data = JSON.parse(event.data);
-                            if (data.delta) {
-                                if (textReasoning === '') {
-                                    let $reasoning = document.createElement('div');
-                                    $reasoning.classList.add('reasoning');
-                                    $container.insertBefore($reasoning, $content);
-                                    typing($reasoning, () => textReasoning, null)();
-                                }
-                                textReasoning += data.delta;
+                            if (!['reasoning.delta', 'activity.upsert'].includes(data.type)) {
+                                return;
                             }
+                            let $block = blocks.get(data.id);
+                            if (!$block) {
+                                $block = document.createElement(data.type === 'reasoning.delta' ? 'div' : 'details');
+                                $block.classList.add('reasoning');
+                                if (data.type === 'activity.upsert') {
+                                    $block.append(document.createElement('summary'), document.createElement('pre'));
+                                }
+                                blocks.set(data.id, $block);
+                                $container.insertBefore($block, $content);
+                            }
+                            if (data.type === 'reasoning.delta') {
+                                $block.textContent += data.delta;
+                                return;
+                            }
+                            $block.querySelector('summary').textContent = data.label + ' [' + data.status + ']';
+                            $block.querySelector('pre').textContent =
+                                data.detail === null
+                                    ? ''
+                                    : typeof data.detail === 'string'
+                                      ? data.detail
+                                      : JSON.stringify(data.detail, null, 2);
                         });
                         source.onerror = error => {
                             console.error('Error:', error);

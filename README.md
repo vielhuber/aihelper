@@ -1,10 +1,10 @@
 [![build status](https://github.com/vielhuber/aihelper/actions/workflows/ci.yml/badge.svg)](https://github.com/vielhuber/aihelper/actions)
-[![GitHub Tag](https://img.shields.io/github/v/tag/vielhuber/aihelper)](https://github.com/vielhuber/aihelper/tags)
-[![Code Style](https://img.shields.io/badge/code_style-psr--12-ff69b4.svg)](https://www.php-fig.org/psr/psr-12/)
-[![License](https://img.shields.io/github/license/vielhuber/aihelper)](https://github.com/vielhuber/aihelper/blob/main/LICENSE.md)
-[![Last Commit](https://img.shields.io/github/last-commit/vielhuber/aihelper)](https://github.com/vielhuber/aihelper/commits)
-[![PHP Version Support](https://img.shields.io/packagist/php-v/vielhuber/aihelper)](https://packagist.org/packages/vielhuber/aihelper)
-[![Packagist Downloads](https://img.shields.io/packagist/dt/vielhuber/aihelper)](https://packagist.org/packages/vielhuber/aihelper)
+[![github tag](https://img.shields.io/github/v/tag/vielhuber/aihelper)](https://github.com/vielhuber/aihelper/tags)
+[![code style](https://img.shields.io/badge/code_style-psr--12-ff69b4.svg)](https://www.php-fig.org/psr/psr-12/)
+[![license](https://img.shields.io/github/license/vielhuber/aihelper)](https://github.com/vielhuber/aihelper/blob/main/LICENSE.md)
+[![last commit](https://img.shields.io/github/last-commit/vielhuber/aihelper)](https://github.com/vielhuber/aihelper/commits)
+[![php version support](https://img.shields.io/packagist/php-v/vielhuber/aihelper)](https://packagist.org/packages/vielhuber/aihelper)
+[![packagist downloads](https://img.shields.io/packagist/dt/vielhuber/aihelper)](https://packagist.org/packages/vielhuber/aihelper)
 
 # 🤖 aihelper 🤖
 
@@ -224,7 +224,7 @@ aihelper::purgeCliApiRequestLogs(
 
 ### streaming
 
-aihelper can stream model output to a browser using server‑sent events (see). in this mode the php backend connects to the model provider with http streaming and forwards chunks to the client as sse events in real time. see an example implementation at [/tests/stream/index.html](tests/stream/index.html).
+aihelper streams model output as server-sent events (sse). see [/tests/stream/index.html](tests/stream/index.html) for an example.
 
 ```php
 $ai = aihelper::create(
@@ -240,7 +240,27 @@ $result = $ai->ask('Wer wurde 2018 Fußball-Weltmeister?');
 // $result = ['response' => 'Frankreich.', 'success' => true, 'costs' => 0.001]
 ```
 
-`event: reasoning` contains native model reasoning and a provider-independent, redacted process transcript for tool, shell, file, search, plan and skill activity. Large details are shortened only in this visible stream; `getSessionContent()` retains the complete structured tool history. if streaming stutters on apache2 with php‑fpm, be sure that gzip is disabled for the streaming route and also adjust your virtualhost so fastcgi forwards packets immediately (no buffering):
+`event: reasoning` carries json objects with the same format for native api reasoning, claude code, codex and opencode:
+
+```text
+event: reasoning
+data: {"type":"reasoning.delta","id":"reasoning-a1","delta":"Inspecting the files...","seq":1}
+
+event: reasoning
+data: {"type":"activity.upsert","id":"tool-1","kind":"tool","label":"Read README.md","status":"running","detail":{"path":"README.md"},"captures_content":true,"seq":2}
+
+event: reasoning
+data: {"type":"activity.upsert","id":"tool-1","kind":"tool","label":"Read README.md","status":"completed","detail":{"output":"..."},"captures_content":true,"seq":3}
+```
+
+- for `reasoning.delta`, append `delta` to the text block identified by `id`. for `activity.upsert`, insert the block once and update it in place. `detail` is its current snapshot: an object, array, string or `null`.
+- activity `kind`: `tool`, `plan`, `task`, `status`, `usage`, `warning`, `error` or `diagnostic` (stderr). `status`: `running`, `completed` or `error`. `captures_content` distinguishes tool activity from standalone lifecycle notifications.
+- `id` identifies a display block; `seq` orders events within one `ask()`, not schema versions. scope both to the current response. unchanged snapshots and internal token telemetry are omitted; progress updates and errors remain visible.
+- events are flushed immediately. codex app-server streams text deltas without repeating completed items; opencode's json cli retains its native completed-block granularity. activity details redact secrets and binary data and mark shortened strings or collections. native reasoning and the complete tool history in `getSessionContent()` are not shortened.
+
+this replaces the previous formatted transcript (`kind: transcript`, `boundary`, display text in `delta`); consumers must handle the new event types. regular answer chunks and session notifications remain unchanged. harnesses send `[DONE]` once, after the complete `ask()` including goal continuations and exit events, not after individual native turns.
+
+if streaming stutters on apache2 with php-fpm, disable gzip for the streaming route and configure fastcgi to forward packets without buffering:
 
 **before**
 
