@@ -12453,6 +12453,13 @@ class ai_codex extends ai_harness
         }
         if ($method === 'turn/completed') {
             $this->harness_turn_complete = true;
+            $status = $params['turn']['status'] ?? 'completed';
+            if (in_array($status, ['failed', 'interrupted'], true)) {
+                return [
+                    'type' => 'turn.failed',
+                    'error' => $params['turn']['error'] ?? ['message' => 'codex turn ' . $status]
+                ];
+            }
             return ['type' => 'turn.completed', 'usage' => $this->app_server_usage];
         }
         if ($method === 'turn/failed') {
@@ -12469,6 +12476,7 @@ class ai_codex extends ai_harness
         if ($method === 'error') {
             return [
                 'type' => 'error',
+                'willRetry' => ($params['willRetry'] ?? false) === true,
                 'message' => (string) ($params['message'] ??
                     json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE))
             ];
@@ -12961,6 +12969,9 @@ class ai_codex extends ai_harness
 
         if ($type === 'turn.completed') {
             $this->native_initial_turn_completed = true;
+            if (($result->result->error->willRetry ?? false) === true) {
+                unset($result->result->error);
+            }
             $this->emitHarnessLifecycleEvent($event);
             $result->result->stop_reason = 'end_turn';
             $result->result->usage = (object) [
@@ -12982,6 +12993,11 @@ class ai_codex extends ai_harness
             $result->result->error = (object) [
                 'message' => (string) ($event['error']['message'] ?? ($event['message'] ?? 'codex turn failed'))
             ];
+            if ($type === 'error' && ($event['willRetry'] ?? false) === true) {
+                // Keep the failure pending until an explicit successful completion, even if partial text arrives.
+                $result->result->error->willRetry = true;
+                $event['type'] = 'warning';
+            }
         }
         $this->emitHarnessLifecycleEvent($event);
     }

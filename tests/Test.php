@@ -4053,6 +4053,163 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertTrue($method->invoke($codex, 'harness: codex app server did not start a turn'));
     }
 
+    public function test__codex_app_server_recovers_from_retryable_stream_errors(): void
+    {
+        $codex = $this->harnessStoreAihelper('codex', null);
+        $handle = new \ReflectionMethod($codex, 'handleEvent');
+        $result = (object) ['result' => (object) ['content' => [], 'stop_reason' => null]];
+        $chunks = [];
+        $emit = static function (string $chunk) use (&$chunks): void {
+            $chunks[] = $chunk;
+        };
+        foreach ([1, 2] as $attempt) {
+            $handle->invoke($codex, [
+                'method' => 'error',
+                'params' => [
+                    'error' => [
+                        'message' => 'Reconnecting... ' . $attempt . '/2',
+                        'codexErrorInfo' => ['responseStreamDisconnected' => ['httpStatusCode' => null]],
+                        'additionalDetails' => 'stream disconnected before completion: idle timeout waiting for websocket'
+                    ],
+                    'willRetry' => true,
+                    'threadId' => 'thread-test',
+                    'turnId' => 'turn-test'
+                ]
+            ], $result, $emit);
+        }
+        $this->assertFalse((new \ReflectionProperty($codex, 'harness_turn_complete'))->getValue($codex));
+        $this->assertNotNull($result->result->error ?? null, 'A retry without a terminal success must still fail.');
+        $handle->invoke($codex, [
+            'method' => 'item/completed',
+            'params' => ['item' => ['type' => 'agentMessage', 'text' => 'Completed report.']]
+        ], $result, $emit);
+        $handle->invoke($codex, [
+            'method' => 'turn/completed',
+            'params' => ['turn' => ['id' => 'turn-test', 'status' => 'completed', 'error' => null]]
+        ], $result, $emit);
+        $this->assertNull($result->result->error ?? null);
+        $this->assertSame('end_turn', $result->result->stop_reason);
+        $this->assertSame('Completed report.', $result->result->content[0]->text);
+        $this->assertTrue((new \ReflectionProperty($codex, 'harness_turn_complete'))->getValue($codex));
+        $this->assertStringContainsString('Completed report.', implode('', $chunks));
+        $this->assertStringContainsString('message_stop', implode('', $chunks));
+        $this->assertContains('Warning', (new \ReflectionProperty($codex, 'transcript_labels'))->getValue($codex));
+    }
+
+    public function test__codex_app_server_preserves_terminal_failures_after_partial_output(): void
+    {
+        foreach (['failed', 'interrupted', 'error', 'legacy'] as $scenario) {
+            $codex = $this->harnessStoreAihelper('codex', null);
+            $handle = new \ReflectionMethod($codex, 'handleEvent');
+            $result = (object) ['result' => (object) ['content' => [], 'stop_reason' => null]];
+            $handle->invoke($codex, [
+                'method' => 'item/completed',
+                'params' => ['item' => ['type' => 'agentMessage', 'text' => 'Partial report.']]
+            ], $result, null);
+            $handle->invoke($codex, [
+                'method' => 'error',
+                'params' => ['error' => ['message' => 'Reconnecting...'], 'willRetry' => true]
+            ], $result, null);
+            $error = ['message' => 'Stream retries exhausted'];
+            $event = match ($scenario) {
+                'error' => ['method' => 'error', 'params' => ['error' => $error, 'willRetry' => false]],
+                'legacy' => ['type' => 'turn.failed', 'error' => $error],
+                default => [
+                    'method' => 'turn/completed',
+                    'params' => ['turn' => ['status' => $scenario, 'error' => $scenario === 'failed' ? $error : null]]
+                ]
+            };
+            $handle->invoke($codex, $event, $result, null);
+            $this->assertNotNull($result->result->error ?? null, $scenario);
+            $this->assertFalse($result->result->error->willRetry ?? false, $scenario);
+            $this->assertNull($result->result->stop_reason, $scenario);
+            $this->assertSame('Partial report.', $result->result->content[0]->text, $scenario);
+            $this->assertStringContainsString(
+                $scenario === 'interrupted' ? 'interrupted' : 'Stream retries exhausted',
+                $result->result->error->message,
+                $scenario
+            );
+        }
+    }
+
+    public function test__codex_stream_reports_success_only_after_retry_completion(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('The harness process runner requires setsid.');
+        }
+        class_exists(aihelper::class);
+        foreach (['completed', 'failed', 'disconnected'] as $status) {
+            $codex = new class($status) extends \vielhuber\aihelper\ai_codex {
+                public function __construct(private string $status)
+                {
+                    $this->model = 'test';
+                    $this->session_id = 'retry-stream-' . bin2hex(random_bytes(8));
+                    $this->workdir = sys_get_temp_dir();
+                    $this->timeout = 5;
+                    $this->stream = true;
+                    $this->enable_thinking = false;
+                }
+
+                protected function resolveBinary(): ?string
+                {
+                    return PHP_BINARY;
+                }
+
+                protected function harnessEnvironmentOverrides(): array
+                {
+                    return [];
+                }
+
+                protected function nativeEventCommand(): ?array
+                {
+                    return null;
+                }
+
+                protected function buildArgs(): array
+                {
+                    $events = [
+                        [
+                            'method' => 'error',
+                            'params' => ['error' => ['message' => 'Reconnecting... 2/2'], 'willRetry' => true]
+                        ],
+                        [
+                            'method' => 'item/completed',
+                            'params' => ['item' => ['type' => 'agentMessage', 'text' => 'Report text.']]
+                        ]
+                    ];
+                    if ($this->status !== 'disconnected') {
+                        $events[] = [
+                            'method' => 'turn/completed',
+                            'params' => ['turn' => [
+                                'status' => $this->status,
+                                'error' => $this->status === 'failed' ? ['message' => 'Retries exhausted'] : null
+                            ]]
+                        ];
+                    }
+                    $output = implode("\n", array_map('json_encode', $events)) . "\n";
+                    return ['-r', 'stream_get_contents(STDIN); echo ' . var_export($output, true) . ';'];
+                }
+
+                public function request(): array
+                {
+                    return $this->askThis('Generate a report.');
+                }
+            };
+            ob_start(static fn(string $output): string => '');
+            try {
+                $response = $codex->request();
+            } finally {
+                ob_end_clean();
+            }
+            $this->assertSame($status === 'completed', $response['success'], $status);
+            $this->assertStringContainsString(match ($status) {
+                'completed' => 'Report text.',
+                'failed' => 'Retries exhausted',
+                'disconnected' => 'Reconnecting... 2/2'
+            }, $response['response'], $status);
+        }
+    }
+
     public function test__codex_app_server_preserves_requested_session(): void
     {
         foreach (['error', 'missing', 'different', 'success'] as $scenario) {
