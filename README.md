@@ -242,25 +242,32 @@ $result = $ai->ask('Wer wurde 2018 Fußball-Weltmeister?');
 // $result = ['response' => 'Frankreich.', 'success' => true, 'costs' => 0.001]
 ```
 
-`event: reasoning` carries json objects with the same format for native api reasoning, claude code, codex and opencode:
+assistant text, native reasoning and activities use provider-independent json objects for apis, claude code, codex and opencode. text retains the existing unnamed sse messages and `choices[0].delta.content` field; it is not emitted twice:
 
 ```text
-event: reasoning
-data: {"type":"reasoning.delta","id":"reasoning-a1","delta":"Inspecting the files...","seq":1}
+data: {"type":"text.delta","id":"text-a1","delta":"I will inspect the files.","phase":"commentary","choices":[{"delta":{"content":"I will inspect the files."}}],"seq":1}
 
 event: reasoning
-data: {"type":"activity.upsert","id":"tool-1","kind":"tool","label":"Read README.md","status":"running","detail":{"path":"README.md"},"captures_content":true,"seq":2}
+data: {"type":"reasoning.delta","id":"reasoning-a1","delta":"Checking dependencies...","seq":2}
 
 event: reasoning
-data: {"type":"activity.upsert","id":"tool-1","kind":"tool","label":"Read README.md","status":"completed","detail":{"output":"..."},"captures_content":true,"seq":3}
+data: {"type":"activity.upsert","id":"tool-1","kind":"tool","label":"Read README.md","status":"running","detail":{"path":"README.md"},"captures_content":true,"seq":3}
+
+event: reasoning
+data: {"type":"activity.upsert","id":"tool-1","kind":"tool","label":"Read README.md","status":"completed","detail":{"output":"..."},"captures_content":true,"seq":4}
+
+data: {"type":"text.delta","id":"text-a2","delta":"Implemented.","phase":null,"choices":[{"delta":{"content":"Implemented."}}],"seq":5}
+
+data: {"type":"text.phase","id":"text-a2","phase":"final_answer","seq":6}
 ```
 
-- for `reasoning.delta`, append `delta` to the text block identified by `id`. for `activity.upsert`, insert the block once and update it in place. `detail` is its current snapshot: an object, array, string or `null`.
-- activity `kind`: `tool`, `plan`, `task`, `status`, `usage`, `warning`, `error` or `diagnostic` (stderr). `status`: `running`, `completed` or `error`. `captures_content` distinguishes tool activity from standalone lifecycle notifications.
+- for `text.delta` and `reasoning.delta`, append `delta` to the block identified by `id`. render assistant text, including progress messages, visibly in the conversation; only reasoning and activities belong in collapsible details. subsequent tools must not move text into reasoning. read either `delta` or the compatibility field `choices[0].delta.content`, never both.
+- text `phase` is `commentary`, `final_answer` or `null` (unknown). codex and the responses api preserve explicit phases. `text.phase` updates metadata on an existing block without appending text. claude code and opencode do not provide this phase; aihelper does not guess it from tool calls, wording or a completed text block. a failed or interrupted run does not turn partial text into a final answer.
+- for `activity.upsert`, insert the block once and update it in place. `detail` is its current snapshot: an object, array, string or `null`. activity `kind`: `tool`, `plan`, `task`, `status`, `usage`, `warning`, `error` or `diagnostic` (stderr). `status`: `running`, `completed` or `error`. `captures_content` remains for compatibility with older consumers; new consumers must not use it to reclassify assistant text.
 - `id` identifies a display block; `seq` orders events within one `ask()`, not schema versions. scope both to the current response. unchanged snapshots and internal token telemetry are omitted; progress updates and errors remain visible.
-- events are flushed immediately. codex app-server streams text deltas without repeating completed items; opencode's json cli retains its native completed-block granularity. activity details redact secrets and binary data and mark shortened strings or collections. native reasoning and the complete tool history in `getSessionContent()` are not shortened.
+- events are flushed immediately. codex app-server streams text deltas without repeating completed items; opencode enables `--thinking` and retains its native completed-block granularity. activity details redact secrets and binary data and mark shortened strings or collections. native reasoning and the complete tool history in `getSessionContent()` are not shortened. display ids and phase updates do not add unsupported fields to the harness conversation history.
 
-this replaces the previous formatted transcript (`kind: transcript`, `boundary`, display text in `delta`); consumers must handle the new event types. regular answer chunks and session notifications remain unchanged. harnesses send `[DONE]` once, after the complete `ask()` including goal continuations and exit events, not after individual native turns.
+this replaces the previous formatted transcript (`kind: transcript`, `boundary`, display text in `delta`); consumers must handle the new event types. session notifications remain unchanged. harnesses send `[DONE]` once, after the complete `ask()` including goal continuations and exit events, not after individual native turns. `[DONE]` marks the end of delivery, not successful execution; errors and the request result remain authoritative.
 
 if streaming stutters on apache2 with php-fpm, disable gzip for the streaming route and configure fastcgi to forward packets without buffering:
 

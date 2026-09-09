@@ -66,6 +66,9 @@ abstract class aihelper
     protected array $transcript_labels = [];
     protected int $stream_event_sequence = 0;
     protected ?string $stream_reasoning_id = null;
+    protected ?string $stream_text_id = null;
+    protected array $stream_text_blocks = [];
+    protected array $stream_text_phases = [];
 
     protected ?string $session_id = null;
     protected static array $sessions = [];
@@ -2636,6 +2639,9 @@ abstract class aihelper
     {
         $this->stream_event_sequence = 0;
         $this->stream_reasoning_id = null;
+        $this->stream_text_id = null;
+        $this->stream_text_blocks = [];
+        $this->stream_text_phases = [];
         $this->transcript_states = [];
         $this->transcript_labels = [];
         $this->autoCompactSession();
@@ -6562,6 +6568,9 @@ abstract class aihelper
         $this->stream_current_block_type = null;
         $this->stream_reasoning_id = null;
         $this->stream_block_offset = 0;
+        $this->stream_text_id = null;
+        $this->stream_text_blocks = [];
+        $this->stream_text_phases = [];
         $this->stream_first_text_sent = false;
         $this->stream_running = false;
         $this->stream_in_think = false;
@@ -6657,6 +6666,7 @@ abstract class aihelper
                             // anchor the block indices of the message that starts here
                             if (isset($parsed['type']) && $parsed['type'] === 'message_start') {
                                 $this->stream_block_offset = count($this->stream_response->result->content ?? []);
+                                $this->stream_text_id = null;
                             }
 
                             // add new content block
@@ -6664,6 +6674,28 @@ abstract class aihelper
                                 $this->stream_reasoning_id = null;
                                 $initial_block_type = $parsed['content_block']['type'] ?? null;
                                 $initial_thinking = $parsed['content_block']['thinking'] ?? '';
+                                // if this is not the first block and previous was text, add separator
+                                if (
+                                    $this->stream_current_block_type === 'text' &&
+                                    !empty($this->stream_response->result->content)
+                                ) {
+                                    $lastBlock = end($this->stream_response->result->content);
+                                    if (
+                                        isset($lastBlock->text) &&
+                                        $lastBlock->text !== '' &&
+                                        !preg_match('/\n$/', $lastBlock->text)
+                                    ) {
+                                        $text = "\n\n";
+                                        $lastBlock->text .= $text;
+                                        $this->emitTextDelta(
+                                            $text,
+                                            $this->stream_text_blocks[
+                                                array_key_last($this->stream_response->result->content)
+                                            ] ?? null
+                                        );
+                                        $this->stream_running = false;
+                                    }
+                                }
                                 if (
                                     $initial_block_type === 'thinking' &&
                                     is_string($initial_thinking) &&
@@ -6671,33 +6703,37 @@ abstract class aihelper
                                 ) {
                                     $this->emitReasoningDelta($initial_thinking);
                                 }
-                                // if this is not the first block and previous was text, add separator
-                                if (
-                                    $this->stream_current_block_type === 'text' &&
-                                    !empty($this->stream_response->result->content)
-                                ) {
-                                    $lastBlock = end($this->stream_response->result->content);
-                                    if (isset($lastBlock->text) && !preg_match('/\n$/', $lastBlock->text)) {
-                                        $text = "\n\n";
-                                        $lastBlock->text .= $text;
-                                        echo 'data: ' .
-                                            json_encode([
-                                                'id' => uniqid(),
-                                                'choices' => [['delta' => ['content' => $text]]]
-                                            ]) .
-                                            "\n\n";
-                                        if (ob_get_level() > 0) {
-                                            ob_flush();
-                                        }
-                                        flush();
-                                        $this->stream_running = false;
-                                    }
-                                }
                                 // add the full content block from the API
                                 if (isset($parsed['content_block'])) {
-                                    $this->stream_response->result->content[] = (object) $parsed['content_block'];
+                                    $contentBlock = $parsed['content_block'];
+                                    if ($this->is_harness === true && $initial_block_type === 'text') {
+                                        unset($contentBlock['id'], $contentBlock['phase']);
+                                    }
+                                    $this->stream_response->result->content[] = (object) $contentBlock;
+                                }
+                                if ($initial_block_type === 'text') {
+                                    $index = $this->stream_block_offset + ($parsed['index'] ?? 0);
+                                    $id = 'text-' . ($parsed['content_block']['id'] ?? bin2hex(random_bytes(8)));
+                                    $this->stream_text_blocks[$index] = $id;
+                                    $this->setStreamTextPhase($id, $parsed['content_block']['phase'] ?? null);
+                                    $initialText = (string) ($parsed['content_block']['text'] ?? '');
+                                    if ($initialText !== '') {
+                                        $this->stream_first_text_sent = true;
+                                        $this->stream_text_emitted_since_tool = true;
+                                    }
+                                    $this->emitTextDelta($initialText, $id);
                                 }
                                 $this->stream_current_block_type = $parsed['content_block']['type'] ?? null;
+                            }
+
+                            if (($parsed['type'] ?? '') === 'content_block_metadata') {
+                                $index = $this->stream_block_offset + ($parsed['index'] ?? 0);
+                                if (isset($this->stream_text_blocks[$index])) {
+                                    $this->setStreamTextPhase(
+                                        $this->stream_text_blocks[$index],
+                                        $parsed['phase'] ?? null
+                                    );
+                                }
                             }
 
                             // stream delta content
@@ -6730,16 +6766,7 @@ abstract class aihelper
                                         }
                                         $block->text .= $text;
 
-                                        echo 'data: ' .
-                                            json_encode([
-                                                'id' => uniqid(),
-                                                'choices' => [['delta' => ['content' => $text]]]
-                                            ]) .
-                                            "\n\n";
-                                        if (ob_get_level() > 0) {
-                                            ob_flush();
-                                        }
-                                        flush();
+                                        $this->emitTextDelta($text, $this->stream_text_blocks[$index] ?? null);
                                         $this->stream_running = false;
                                     }
 
@@ -6819,17 +6846,7 @@ abstract class aihelper
                                     ) {
                                         $text = "\n\n";
                                         $this->stream_response->result->content[$index]->text .= $text;
-
-                                        echo 'data: ' .
-                                            json_encode([
-                                                'id' => uniqid(),
-                                                'choices' => [['delta' => ['content' => $text]]]
-                                            ]) .
-                                            "\n\n";
-                                        if (ob_get_level() > 0) {
-                                            ob_flush();
-                                        }
-                                        flush();
+                                        $this->emitTextDelta($text, $this->stream_text_blocks[$index] ?? null);
                                         $this->stream_running = false;
                                     }
                                 }
@@ -6975,6 +6992,22 @@ abstract class aihelper
                                 $parsed['item']['type'] === 'message'
                             ) {
                                 $this->stream_first_text_sent = false;
+                                $this->stream_text_id = null;
+                                $this->stream_text_blocks[(string) ($parsed['item']['id'] ?? '')] = [
+                                    'phase' => $parsed['item']['phase'] ?? null,
+                                    'ids' => []
+                                ];
+                            }
+                            if (
+                                ($parsed['type'] ?? '') === 'response.output_item.done' &&
+                                ($parsed['item']['type'] ?? '') === 'message'
+                            ) {
+                                foreach (
+                                    $this->stream_text_blocks[(string) ($parsed['item']['id'] ?? '')]['ids'] ?? []
+                                    as $id
+                                ) {
+                                    $this->setStreamTextPhase($id, $parsed['item']['phase'] ?? null);
+                                }
                             }
 
                             // response.reasoning_summary_text.delta = OpenAI o3 condensed reasoning
@@ -7062,17 +7095,17 @@ abstract class aihelper
                                     $this->stream_text_emitted_since_tool = true;
 
                                     $this->stream_response->result->output[0]->content[0]->text .= $normal_text;
-
-                                    echo 'data: ' .
-                                        json_encode([
-                                            'id' => uniqid(),
-                                            'choices' => [['delta' => ['content' => $normal_text]]]
-                                        ]) .
-                                        "\n\n";
-                                    if (ob_get_level() > 0) {
-                                        ob_flush();
+                                    $itemId = (string) ($parsed['item_id'] ?? '');
+                                    $part = (int) ($parsed['content_index'] ?? 0);
+                                    $id = $this->stream_text_blocks[$itemId]['ids'][$part] ??=
+                                        'text-' . ($itemId !== '' ? $itemId : bin2hex(random_bytes(8))) . '-' . $part;
+                                    if (!array_key_exists($id, $this->stream_text_phases)) {
+                                        $this->setStreamTextPhase(
+                                            $id,
+                                            $this->stream_text_blocks[$itemId]['phase'] ?? null
+                                        );
                                     }
-                                    flush();
+                                    $this->emitTextDelta($normal_text, $id);
                                     $this->stream_running = false;
                                 }
                             }
@@ -7091,6 +7124,14 @@ abstract class aihelper
                                 $this->stream_response->result->id = $parsed['response']['id'] ?? null;
                                 // carry over full output items (incl. function_call) for the tool loop
                                 if (isset($parsed['response']['output']) && is_array($parsed['response']['output'])) {
+                                    foreach ($parsed['response']['output'] as $item) {
+                                        foreach (
+                                            $this->stream_text_blocks[(string) ($item['id'] ?? '')]['ids'] ?? []
+                                            as $id
+                                        ) {
+                                            $this->setStreamTextPhase($id, $item['phase'] ?? null);
+                                        }
+                                    }
                                     $this->stream_response->result->output = json_decode(
                                         json_encode($parsed['response']['output'])
                                     );
@@ -7250,6 +7291,7 @@ abstract class aihelper
 
                         // tool_calls delta
                         if (isset($delta['tool_calls'])) {
+                            $this->stream_text_id = null;
                             foreach ($delta['tool_calls'] as $tc_delta) {
                                 $idx = $tc_delta['index'] ?? 0;
                                 $tool_calls = &$this->stream_response->result->choices[0]->message->tool_calls;
@@ -7376,16 +7418,7 @@ abstract class aihelper
                         $this->stream_response->result->choices[0]->message->content .= $normal_text;
                         $this->stream_running = true;
 
-                        echo 'data: ' .
-                            json_encode([
-                                'id' => uniqid(),
-                                'choices' => [['delta' => ['content' => $normal_text]]]
-                            ]) .
-                            "\n\n";
-                        if (ob_get_level() > 0) {
-                            ob_flush();
-                        }
-                        flush();
+                        $this->emitTextDelta($normal_text);
                     }
                 }
 
@@ -7481,18 +7514,10 @@ abstract class aihelper
                                     $this->stream_text_emitted_since_tool = true;
                                     // echo SSE
                                     $this->stream_running = true;
-                                    echo 'data: ' .
-                                        json_encode([
-                                            'id' => uniqid(),
-                                            'choices' => [['delta' => ['content' => $text]]]
-                                        ]) .
-                                        "\n\n";
-                                    if (ob_get_level() > 0) {
-                                        ob_flush();
-                                    }
-                                    flush();
+                                    $this->emitTextDelta($text);
                                 }
                                 if (isset($part['functionCall'])) {
+                                    $this->stream_text_id = null;
                                     $parts = &$this->stream_response->result->candidates[0]->content->parts;
                                     $fc = $part['functionCall'];
                                     // ensure args is always an object (empty args would serialize as [] otherwise)
@@ -7638,11 +7663,21 @@ abstract class aihelper
      */
     protected function emitReasoningEvent(array $event): void
     {
+        $this->emitStreamEvent($event, 'reasoning');
+    }
+
+    /**
+     * Order all display events without changing the legacy SSE event names.
+     */
+    protected function emitStreamEvent(array $event, ?string $name = null): void
+    {
         if ($this->stream !== true) {
             return;
         }
         $event['seq'] = ++$this->stream_event_sequence;
-        echo "event: reasoning\n";
+        if ($name !== null) {
+            echo 'event: ' . $name . "\n";
+        }
         echo 'data: ' .
             json_encode($event, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) .
             "\n\n";
@@ -7650,6 +7685,43 @@ abstract class aihelper
             ob_flush();
         }
         flush();
+    }
+
+    /**
+     * Keep assistant text typed while retaining the existing text delta field.
+     */
+    protected function emitTextDelta(string $delta, ?string $id = null): void
+    {
+        if ($delta === '' || $this->stream !== true) {
+            return;
+        }
+        $this->stream_text_id = $id ?? ($this->stream_text_id ?? 'text-' . bin2hex(random_bytes(8)));
+        $id = $this->stream_text_id;
+        $this->stream_text_phases[$id] ??= null;
+        $this->stream_reasoning_id = null;
+        $this->emitStreamEvent([
+            'type' => 'text.delta',
+            'id' => $id,
+            'delta' => $delta,
+            'phase' => $this->stream_text_phases[$id],
+            'choices' => [['delta' => ['content' => $delta]]]
+        ]);
+    }
+
+    /**
+     * Preserve explicit provider phases, including metadata arriving after text.
+     */
+    protected function setStreamTextPhase(string $id, ?string $phase): void
+    {
+        if (!in_array($phase, ['commentary', 'final_answer'], true)) {
+            return;
+        }
+        $known = array_key_exists($id, $this->stream_text_phases);
+        $previous = $this->stream_text_phases[$id] ?? null;
+        $this->stream_text_phases[$id] = $phase;
+        if ($known && $previous !== $phase) {
+            $this->emitStreamEvent(['type' => 'text.phase', 'id' => $id, 'phase' => $phase]);
+        }
     }
 
     /**
@@ -7661,6 +7733,7 @@ abstract class aihelper
             return;
         }
         $this->stream_reasoning_id ??= 'reasoning-' . bin2hex(random_bytes(8));
+        $this->stream_text_id = null;
         $this->emitReasoningEvent(['type' => 'reasoning.delta', 'id' => $this->stream_reasoning_id, 'delta' => $delta]);
     }
 
@@ -7782,6 +7855,7 @@ abstract class aihelper
         }
         $this->transcript_states[$id] = $fingerprint;
         $this->stream_reasoning_id = null;
+        $this->stream_text_id = null;
         $this->emitReasoningEvent($event);
         return $id;
     }
@@ -12848,7 +12922,12 @@ class ai_codex extends ai_harness
             $this->handleEvent(
                 [
                     'type' => 'item.completed',
-                    'item' => ['id' => 'native-agent-' . $messageId, 'type' => 'agent_message', 'text' => $text]
+                    'item' => [
+                        'id' => 'native-agent-' . $messageId,
+                        'type' => 'agent_message',
+                        'text' => $text,
+                        'phase' => $payload['phase'] ?? null
+                    ]
                 ],
                 $result,
                 $emit
@@ -13184,7 +13263,11 @@ class ai_codex extends ai_harness
             }
         }
 
-        if ($type === 'item.delta' || $type === 'item.completed') {
+        if (
+            $type === 'item.delta' ||
+            $type === 'item.completed' ||
+            ($type === 'item.started' && ($event['item']['type'] ?? '') === 'agent_message')
+        ) {
             $item_type = $event['item']['type'] ?? null;
             $text = (string) ($event['item']['text'] ?? '');
             if (!in_array($item_type, ['agent_message', 'reasoning'], true)) {
@@ -13223,14 +13306,25 @@ class ai_codex extends ai_harness
                     : (str_starts_with($text, $existing)
                         ? substr($text, strlen($existing))
                         : '');
-            if ($delta !== '' && !isset($this->streamed_items[$id])) {
+            if (($delta !== '' || $type === 'item.started') && !isset($this->streamed_items[$id])) {
                 $this->streamed_items[$id] = ['text' => '', 'index' => count($this->streamed_items)];
                 $this->emitAnthropicEvent($emit, [
                     'type' => 'content_block_start',
                     'index' => $this->streamed_items[$id]['index'],
                     'content_block' => $thinking
                         ? ['type' => 'thinking', 'thinking' => '']
-                        : ['type' => 'text', 'text' => '']
+                        : ['type' => 'text', 'text' => '', 'id' => $id, 'phase' => $event['item']['phase'] ?? null]
+                ]);
+            }
+            if (
+                !$thinking &&
+                isset($this->streamed_items[$id]) &&
+                in_array($event['item']['phase'] ?? null, ['commentary', 'final_answer'], true)
+            ) {
+                $this->emitAnthropicEvent($emit, [
+                    'type' => 'content_block_metadata',
+                    'index' => $this->streamed_items[$id]['index'],
+                    'phase' => $event['item']['phase']
                 ]);
             }
             if ($delta !== '') {
@@ -14017,7 +14111,7 @@ class ai_opencode extends ai_harness
         if ($this->cli_session_id === null && $this->cli_resume_latest) {
             $args[] = '--continue';
         }
-        $args = array_merge($args, ['--format', 'json', '--auto']);
+        $args = array_merge($args, ['--format', 'json', '--auto', '--thinking']);
         foreach ($this->harnessFilePaths() as $path) {
             $args[] = '--file';
             $args[] = $path;
@@ -14071,7 +14165,9 @@ class ai_opencode extends ai_harness
             $this->emitAnthropicEvent($emit, [
                 'type' => 'content_block_start',
                 'index' => $index,
-                'content_block' => $thinking ? ['type' => 'thinking', 'thinking' => ''] : ['type' => 'text', 'text' => '']
+                'content_block' => $thinking
+                    ? ['type' => 'thinking', 'thinking' => '']
+                    : ['type' => 'text', 'text' => '', 'id' => $event['part']['id'] ?? null]
             ]);
             $this->emitAnthropicEvent($emit, [
                 'type' => 'content_block_delta',
@@ -14089,7 +14185,7 @@ class ai_opencode extends ai_harness
 
         // the cli runs its tools itself, so the calls only become visible to the
         // caller when they are written into the session like a native provider does
-        if ($type === 'tool') {
+        if (in_array($type, ['tool', 'tool_use'], true)) {
             $call_id = (string) ($event['part']['callID'] ?? '');
             $state = is_array($event['part']['state'] ?? null) ? $event['part']['state'] : [];
             $status = (string) ($state['status'] ?? '');
