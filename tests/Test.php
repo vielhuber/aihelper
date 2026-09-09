@@ -1865,6 +1865,176 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame('Usage limit reached', $result['response']);
     }
 
+    private function emptyHarnessFixture(string $provider, bool $stream): object
+    {
+        class_exists(aihelper::class);
+        return new class ($provider, $stream) extends \vielhuber\aihelper\ai_harness {
+            public array $events = [];
+            public int $exitCode = 0;
+            public int $attempts = 0;
+            private object $parser;
+            public bool $abortAfterTerminal = false;
+
+            public function __construct(string $provider, bool $stream)
+            {
+                $this->name = $provider;
+                $this->model = 'test';
+                $this->session_id = 'empty-turn-' . bin2hex(random_bytes(8));
+                $this->workdir = sys_get_temp_dir();
+                $this->timeout = 5;
+                $this->stream = $stream;
+                $this->enable_thinking = false;
+                $this->max_tries = 1;
+                $this->parser = (new \ReflectionClass(
+                    'vielhuber\\aihelper\\ai_' . $provider
+                ))->newInstanceWithoutConstructor();
+            }
+
+            protected function binaryName(): string
+            {
+                return 'fixture';
+            }
+            protected function resolveBinary(): ?string
+            {
+                return PHP_BINARY;
+            }
+            protected function harnessEnvironmentOverrides(): array
+            {
+                return [];
+            }
+            protected function emitHarnessLifecycleEvent(array $event): void {}
+            protected function retryBackoffSeconds(int $attempt, bool $transient, bool $authUnavailable = false): int
+            {
+                return 0;
+            }
+
+            protected function buildArgs(): array
+            {
+                $this->attempts++;
+                $output =
+                    implode("\n", array_map(fn(array $event): string => json_encode($event), $this->events)) . "\n";
+                return [
+                    '-r',
+                    'stream_get_contents(STDIN); echo ' . var_export($output, true) . '; exit(' . $this->exitCode . ');'
+                ];
+            }
+
+            protected function handleEvent(array $event, object $result, ?\Closure $emit): void
+            {
+                (new \ReflectionMethod($this->parser, 'handleEvent'))->invoke($this->parser, $event, $result, $emit);
+                if ($this->abortAfterTerminal) {
+                    $this->aborted = true;
+                }
+            }
+
+            public function request(): array
+            {
+                return $this->askThis('Finish silently.');
+            }
+        };
+    }
+
+    function test__harness_accepts_only_verified_empty_completion(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('The harness process runner requires setsid.');
+        }
+        $terminals = [
+            'codex' => ['method' => 'turn/completed', 'params' => ['turn' => ['status' => 'completed']]],
+            'claudecode' => ['type' => 'result', 'subtype' => 'success', 'is_error' => false, 'result' => ''],
+            'opencode' => ['type' => 'step_finish', 'part' => ['reason' => 'stop']]
+        ];
+        foreach ($terminals as $provider => $terminal) {
+            foreach ([false, true] as $stream) {
+                $ai = $this->emptyHarnessFixture($provider, $stream);
+                ob_start(static fn(string $output): string => '');
+                try {
+                    $ai->events = [$terminal];
+                    $result = $ai->ask('Finish silently.');
+                    $this->assertTrue($result['success'], $provider . ': ' . $result['response']);
+                    $this->assertSame('', $result['response']);
+                    $this->assertSame(1, $ai->attempts, 'A completed silent turn must not retry.');
+
+                    $ai->events = [];
+                    $this->assertFalse($ai->request()['success'], 'A previous completion must not carry over.');
+
+                    $ai->events = [$terminal];
+                    $ai->exitCode = 1;
+                    $this->assertFalse($ai->request()['success'], 'A failed process must not allow empty success.');
+                    $ai->exitCode = 0;
+                    $ai->abortAfterTerminal = true;
+                    $this->assertFalse($ai->request()['success'], 'An aborted turn must not allow empty success.');
+                } finally {
+                    ob_end_clean();
+                }
+            }
+        }
+    }
+
+    function test__harness_empty_completion_does_not_hide_errors(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('The harness process runner requires setsid.');
+        }
+        $events = [
+            'codex' => [
+                [['type' => 'error', 'message' => 'Fixture failure'], ['type' => 'turn.completed']],
+                [['type' => 'turn.completed'], ['type' => 'error', 'message' => 'Fixture failure']],
+                [
+                    [
+                        'method' => 'turn/completed',
+                        'params' => ['turn' => ['status' => 'failed', 'error' => ['message' => 'Fixture failure']]]
+                    ]
+                ],
+                [['method' => 'turn/completed', 'params' => ['turn' => ['status' => 'interrupted']]]],
+                [
+                    [
+                        'method' => 'turn/completed',
+                        'params' => ['turn' => ['status' => 'completed', 'error' => ['message' => 'Fixture failure']]]
+                    ]
+                ],
+                [['method' => 'turn/completed', 'params' => ['turn' => []]]],
+                [['type' => 'error', 'willRetry' => true, 'message' => 'Fixture failure']]
+            ],
+            'claudecode' => [
+                [['type' => 'result', 'is_error' => true, 'result' => 'Fixture failure']],
+                [['type' => 'result']],
+                [['type' => 'result', 'subtype' => 'error_max_turns', 'is_error' => false]]
+            ],
+            'opencode' => [
+                [
+                    ['type' => 'error', 'error' => 'Fixture failure'],
+                    ['type' => 'step_finish', 'part' => ['reason' => 'stop']]
+                ],
+                [
+                    ['type' => 'step_finish', 'part' => ['reason' => 'stop']],
+                    ['type' => 'error', 'error' => 'Fixture failure']
+                ],
+                [['type' => 'step_finish', 'part' => ['reason' => 'tool-calls']]],
+                [['type' => 'step_finish', 'part' => ['reason' => 'length']]]
+            ]
+        ];
+        foreach ($events as $provider => $scenarios) {
+            foreach ([false, true] as $stream) {
+                foreach ($scenarios as $scenario) {
+                    $ai = $this->emptyHarnessFixture($provider, $stream);
+                    $ai->events = $scenario;
+                    ob_start(static fn(string $output): string => '');
+                    try {
+                        $result = $ai->request();
+                    } finally {
+                        ob_end_clean();
+                    }
+                    $this->assertFalse($result['success'], $provider . ': ' . json_encode($scenario));
+                    $this->assertNotEmpty($result['response']);
+                    if (str_contains(json_encode($scenario), 'Fixture failure')) {
+                        $this->assertStringContainsString('Fixture failure', $result['response']);
+                    }
+                }
+            }
+        }
+    }
+
     function test__anthropic_uses_model_compatible_thinking_configuration(): void
     {
         $aihelperReflection = new \ReflectionClass(aihelper::class);

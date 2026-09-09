@@ -2624,6 +2624,14 @@ abstract class aihelper
         return $models;
     }
 
+    /**
+     * Keep empty responses invalid unless the transport verifies a silent completion.
+     */
+    protected function acceptsEmptyResponse(): bool
+    {
+        return false;
+    }
+
     public function ask(?string $prompt = null, mixed $files = null): array
     {
         $this->stream_event_sequence = 0;
@@ -2686,7 +2694,8 @@ abstract class aihelper
                 ($return['success'] ?? false) === true &&
                 (($return['response'] ?? null) === null ||
                     (is_string($return['response']) && trim($return['response']) === '')) &&
-                !($this->mcp_servers_call_type === 'local' && !empty($this->mcp_servers_tools_map))
+                !($this->mcp_servers_call_type === 'local' && !empty($this->mcp_servers_tools_map)) &&
+                !(($return['response'] ?? null) === '' && $this->acceptsEmptyResponse())
             ) {
                 $return['response'] = 'No response from provider.';
                 $return['success'] = false;
@@ -8537,7 +8546,7 @@ class ai_anthropic extends aihelper
             );
         }
 
-        if (__::nx($output_text ?? null)) {
+        if (__::nx($output_text ?? null) && !$this->acceptsEmptyResponse()) {
             $this->log($response, 'failed');
             $error_msg = $this->extractErrorMessage($response);
             $return['response'] = $error_msg ?? 'No response from provider.';
@@ -10359,6 +10368,8 @@ class ai_cliproxyapi extends ai_openrouter
  */
 abstract class ai_harness extends ai_anthropic
 {
+    protected bool $harness_empty_response_allowed = false;
+
     public ?bool $supports_mcp_remote = false;
 
     public ?bool $supports_stream = true;
@@ -10908,8 +10919,17 @@ abstract class ai_harness extends ai_anthropic
 
     public function ask(?string $prompt = null, mixed $files = null): array
     {
+        $this->harness_empty_response_allowed = false;
         $this->harness_files = $files === null ? [] : (is_array($files) ? $files : [$files]);
         return parent::ask($prompt, $files);
+    }
+
+    /**
+     * Require both a successful terminal event and a clean process exit.
+     */
+    protected function acceptsEmptyResponse(): bool
+    {
+        return $this->harness_empty_response_allowed && !$this->aborted;
     }
 
     protected function readCliAuthFile(string $path): ?string
@@ -11033,6 +11053,7 @@ abstract class ai_harness extends ai_anthropic
 
     protected function makeApiCall(?array $args = null): mixed
     {
+        $this->harness_empty_response_allowed = false;
         $binary = $this->resolveBinary();
         if ($binary === null) {
             throw new \RuntimeException('harness: binary "' . $this->binaryName() . '" not found.');
@@ -11453,6 +11474,12 @@ abstract class ai_harness extends ai_anthropic
             $result->result->error = (object) ['message' => $message];
             $this->log($message, 'harness failed');
         }
+
+        $this->harness_empty_response_allowed =
+            ($result->result->harness_success ?? false) === true &&
+            $result->result->stop_reason === 'end_turn' &&
+            ($result->result->error ?? null) === null &&
+            $exit_code === 0;
 
         // the parent short-circuits into its own tool loop on a trailing
         // "tool_use" stop reason — the harness has already run its tools
@@ -12076,6 +12103,8 @@ class ai_claudecode extends ai_harness
         $this->harness_turn_complete = true;
         $this->emitHarnessLifecycleEvent($event);
         $result->result->stop_reason = $event['stop_reason'] ?? 'end_turn';
+        $result->result->harness_success =
+            ($event['subtype'] ?? null) === 'success' && ($event['is_error'] ?? null) === false;
         $result->result->usage = (object) [
             'input_tokens' => (int) ($event['usage']['input_tokens'] ?? 0),
             'cache_creation_input_tokens' => (int) ($event['usage']['cache_creation_input_tokens'] ?? 0),
@@ -12648,8 +12677,8 @@ class ai_codex extends ai_harness
         }
         if ($method === 'turn/completed') {
             $this->harness_turn_complete = true;
-            $status = $params['turn']['status'] ?? 'completed';
-            if (in_array($status, ['failed', 'interrupted'], true)) {
+            $status = $params['turn']['status'] ?? 'unknown';
+            if ($status !== 'completed' || ($params['turn']['error'] ?? null) !== null) {
                 return [
                     'type' => 'turn.failed',
                     'turn_id' => $params['turn']['id'] ?? null,
@@ -13234,6 +13263,7 @@ class ai_codex extends ai_harness
 
         if ($type === 'turn.completed') {
             $this->native_initial_turn_completed = true;
+            $result->result->harness_success = true;
             if (($result->result->error->willRetry ?? false) === true) {
                 unset($result->result->error);
             }
@@ -14127,6 +14157,7 @@ class ai_opencode extends ai_harness
             if (($event['part']['reason'] ?? null) !== 'stop') {
                 return;
             }
+            $result->result->harness_success = true;
             $result->result->stop_reason = 'end_turn';
             $this->emitAnthropicEvent($emit, [
                 'type' => 'message_delta',

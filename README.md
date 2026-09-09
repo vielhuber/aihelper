@@ -153,6 +153,8 @@ codex login --device-auth
 opencode auth login
 ```
 
+a successful terminal event followed by exit code `0` may return `success: true` with `response: ''`, including when streaming. missing completion events, aborts and provider errors do not qualify; ordinary empty api responses remain errors and retain their retry behavior.
+
 by default every turn continues the newest thread of `cli_workdir` and opens a new one only when that directory has none yet.
 set `cli_resume_latest: false` for an explicitly fresh thread, then persist `$ai->getCliSessionId()` and pass it as
 `cli_session_id` on later calls to resume that exact native thread. an explicit `cli_session_id` always takes precedence.
