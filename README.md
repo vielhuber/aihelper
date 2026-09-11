@@ -37,7 +37,8 @@ $ai = aihelper::create(
             'authorization_token' => '...',
             'allowed_tools' => ['tool_name_1', 'tool_name_2'], // optional: restrict to specific tools (null or omit = all tools allowed)
             'default_tool_arguments' => ['tool_name_1' => ['optional_argument' => 'default']],
-            'forced_tool_arguments' => ['tool_name_1' => ['fixed_argument' => 'value']]
+            'forced_tool_arguments' => ['tool_name_1' => ['fixed_argument' => 'value']],
+            'reuse_connection' => false // optional: cli harness only, send Connection: close so no idle socket survives a proxy that reaps them (costs one handshake per call)
         ]
     ],
     mcp_servers_call_type: 'remote', // remote = provider calls mcp servers directly, local = client-side tool loop via aihelper

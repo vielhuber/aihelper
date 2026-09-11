@@ -4149,6 +4149,23 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
+    public function test__an_mcp_server_can_refuse_connection_reuse(): void
+    {
+        $servers = [
+            ['id' => 'keeps', 'url' => 'https://example.test/api/keeps/mcp/', 'required' => true],
+            ['id' => 'drops', 'url' => 'https://example.test/api/drops/mcp/', 'required' => true,
+                'reuse_connection' => false]
+        ];
+        $codex = aihelper::create(provider: 'codex', model: 'test', log: 'tests/aihelper.log', mcp_servers: $servers);
+        $arguments = implode(' ', (new \ReflectionMethod($codex, 'buildArgs'))->invoke($codex));
+        // only the server that asked for it gets the header, the other keeps pooling
+        $this->assertStringContainsString('mcp_servers.drops.http_headers={Connection="close"}', $arguments);
+        $this->assertStringNotContainsString('mcp_servers.keeps.http_headers', $arguments);
+        // and the flag must not disturb the rest of the server configuration
+        $this->assertStringContainsString('mcp_servers.drops.required=true', $arguments);
+        $this->assertStringContainsString('mcp_servers.keeps.required=true', $arguments);
+    }
+
     private function harnessStoreAihelper(string $provider, ?string $home, ?string $authHome = null): object
     {
         return aihelper::create(

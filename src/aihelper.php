@@ -11126,7 +11126,8 @@ abstract class ai_harness extends ai_anthropic
             $servers[$name] = [
                 'url' => rtrim($servers__value['url'], '/') . '/',
                 'token' => $servers__value['authorization_token'] ?? null,
-                'required' => ($servers__value['required'] ?? false) === true
+                'required' => ($servers__value['required'] ?? false) === true,
+                'reuse_connection' => ($servers__value['reuse_connection'] ?? true) !== false
             ];
         }
         return $servers;
@@ -12536,6 +12537,17 @@ class ai_codex extends ai_harness
             if ($server['required'] === true) {
                 $options[] = '-c';
                 $options[] = $key . '.required=true';
+            }
+            if ($server['reuse_connection'] === false) {
+                // a proxy in front of this server closes an idle client connection after a
+                // few minutes, and the rust client keeps the dead socket pooled without ever
+                // retrying on it — the next tool call then fails before a byte leaves the
+                // machine, so the server never learns of it. not pooling costs one handshake
+                // per call (measured 143ms reused against 446ms fresh) and removes the idle
+                // socket the proxy reaps. http/2 forbids this header; codex still honours it
+                // as "do not pool" today, so the guard fails silently if that ever changes
+                $options[] = '-c';
+                $options[] = $key . '.http_headers={Connection="close"}';
             }
             if ($server['token'] === null || trim((string) $server['token']) === '') {
                 continue;
