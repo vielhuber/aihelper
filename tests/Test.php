@@ -4116,7 +4116,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertTrue($success);
     }
 
-    public function test__every_harness_keeps_itself_current_without_delaying_a_turn(): void
+    public function test__every_harness_updates_itself_before_a_turn_can_fail_on_a_stale_version(): void
     {
         $expected = [
             'codex' => ['@openai/codex', 'codex update'],
@@ -4130,10 +4130,15 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->assertStringContainsString($command, $script, $provider);
             // at most hourly, so a turn never pays for the check
             $this->assertStringContainsString('-newermt "-1 hour"', $script, $provider);
-            // ten workers share one machine, so the install must be exclusive
-            $this->assertStringContainsString('flock -n 9', $script, $provider);
-            // detached: the harness starts now, the new version serves the next turn
-            $this->assertStringContainsString('2>&1 & ', $script, $provider);
+            // the turn waits for a pending install, a harness on the stale
+            // version is exactly the turn that fails
+            $this->assertStringNotContainsString('2>&1 & ', $script, $provider);
+            // a second worker waits for the running install instead of skipping it
+            $this->assertStringContainsString('flock -w 120 9', $script, $provider);
+            // and re-checks afterwards so it does not install a second time
+            $this->assertSame(2, substr_count($script, '-newermt "-1 hour"'), $provider);
+            // a hung package manager must not hold the turn forever
+            $this->assertStringContainsString('timeout 300 ', $script, $provider);
             // an install costs ten seconds and only happens on a real difference
             $this->assertStringContainsString('[ "$installed" != "$available" ]', $script, $provider);
             // a bare shell can pair a node with an npm from another install

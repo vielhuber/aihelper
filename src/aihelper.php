@@ -10654,15 +10654,15 @@ abstract class ai_harness extends ai_anthropic
     }
 
     /**
-     * Keep the cli current without ever making a turn wait for it.
+     * Keep the cli current before the harness starts.
      *
      * None of the clis updates itself in a non-interactive session, so an
      * environment that is not rebuilt drifts until a release breaks the
-     * protocol. The check runs at most hourly, compares the installed version
-     * against the registry and only then pays for an install — detached, so
-     * the harness starts immediately and the new version serves the next turn.
+     * protocol. The check runs at most hourly and only a real version
+     * difference pays for an install — the turn waits for it, because a
+     * harness started on the stale version is the turn that fails.
      */
-    protected function runHarnessUpdateDetached(): void
+    protected function runHarnessUpdate(): void
     {
         $script = $this->harnessUpdateScript();
         if ($script === '') {
@@ -10689,7 +10689,10 @@ abstract class ai_harness extends ai_anthropic
         $semver = '[0-9]+\\.[0-9]+\\.[0-9]+';
         return '( stamp=' . $stamp . '; mkdir -p "${stamp%/*}" 2>/dev/null; ' .
             'if [ -z "$(find "$stamp" -newermt "-1 hour" 2>/dev/null)" ]; then ' .
-            '( flock -n 9 || exit 0; touch "$stamp"; ' .
+            '( flock -w 120 9 || exit 0; ' .
+            // another worker may have refreshed it while this one waited
+            '[ -n "$(find "$stamp" -newermt "-1 hour" 2>/dev/null)" ] && exit 0; ' .
+            'touch "$stamp"; ' .
             'installed=$(' . $binary . ' --version 2>/dev/null | grep -oE "' . $semver . '" | head -1); ' .
             'available=$(curl -sf --max-time 10 https://registry.npmjs.org/' . $update['package'] . '/latest 2>/dev/null' .
             ' | grep -oE \'"version":"' . $semver . '"\' | head -1 | grep -oE "' . $semver . '"); ' .
@@ -10697,8 +10700,9 @@ abstract class ai_harness extends ai_anthropic
             // the cli shells out to npm, and a bare shell can pair a node with an
             // npm from a different install — putting the cli first makes them match
             'PATH="$(dirname "$(command -v ' . $binary . ')"):$PATH" ' .
-            $update['command'] . ' >>"$stamp.log" 2>&1; ' .
-            ') 9>"$stamp.lock" >>"$stamp.log" 2>&1 & ' .
+            // a hung package manager must not hold the turn forever
+            'timeout 300 ' . $update['command'] . ' >>"$stamp.log" 2>&1; ' .
+            ') 9>"$stamp.lock" >>"$stamp.log" 2>&1; ' .
             'fi ) >/dev/null 2>&1 || true; ';
     }
 
@@ -11284,7 +11288,8 @@ abstract class ai_harness extends ai_anthropic
         } else {
             $command = array_merge(['setsid', '--wait', $binary], $this->buildArgs());
             // a local run has no shell to carry the check along, so it gets its own
-            $this->runHarnessUpdateDetached();
+            // one, and it finishes before the harness is spawned
+            $this->runHarnessUpdate();
         }
         // the mcp config carries bearer tokens and must not reach the log
         $loggable = $command;
