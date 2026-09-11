@@ -4166,6 +4166,31 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertStringContainsString('mcp_servers.keeps.required=true', $arguments);
     }
 
+    public function test__only_the_harness_run_opens_the_reverse_tunnel(): void
+    {
+        $codex = aihelper::create(
+            provider: 'codex',
+            model: 'test',
+            log: 'tests/aihelper.log',
+            cli_ssh_host: 'example.test',
+            cli_ssh_user: 'worker',
+            cli_ssh_reverse_tunnel: '18000:127.0.0.1:8000'
+        );
+        $build = new \ReflectionMethod($codex, 'sshCommand');
+        $plain = implode(' ', $build->invoke($codex));
+        $forwarded = implode(' ', $build->invoke($codex, true));
+        // every other ssh call would try to bind the same port again and fail
+        $this->assertStringNotContainsString('-R', $plain);
+        $this->assertStringContainsString('-R 18000:127.0.0.1:8000', $forwarded);
+        // a collision has to fail loudly instead of silently dropping the forward
+        $this->assertStringContainsString('ExitOnForwardFailure=yes', $forwarded);
+        $this->assertStringNotContainsString('ExitOnForwardFailure', $plain);
+        // without the option configured nothing changes at all
+        $without = aihelper::create(provider: 'codex', model: 'test', log: 'tests/aihelper.log',
+            cli_ssh_host: 'example.test', cli_ssh_user: 'worker');
+        $this->assertStringNotContainsString('-R', implode(' ', (new \ReflectionMethod($without, 'sshCommand'))->invoke($without, true)));
+    }
+
     private function harnessStoreAihelper(string $provider, ?string $home, ?string $authHome = null): object
     {
         return aihelper::create(

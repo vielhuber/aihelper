@@ -184,6 +184,7 @@ $ai = aihelper::create(
     cli_ssh_user: 'root', // optional
     cli_ssh_port: 22, // optional
     cli_ssh_key: '/root/.ssh/id_ed25519', // optional
+    cli_ssh_reverse_tunnel: '40123:127.0.0.1:8000', // optional: -R forward opened for the agent run only, e.g. to reach a local mcp without a public address
     cli_skills: [
         'excel' =>
             "---\nname: excel\ndescription: create and read xlsx files. use for tables and grades.\n---\n\nuse the excel_create_file tool ...",

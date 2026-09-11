@@ -28,6 +28,7 @@ abstract class aihelper
     protected ?string $ssh_user = null;
     protected ?int $ssh_port = null;
     protected ?string $ssh_key = null;
+    protected ?string $ssh_reverse_tunnel = null;
     protected ?string $cli_session_id = null;
     protected bool $cli_resume_latest = true;
     protected bool $cli_native_memory = true;
@@ -103,6 +104,7 @@ abstract class aihelper
         ?string $cli_ssh_user = null,
         ?int $cli_ssh_port = null,
         ?string $cli_ssh_key = null,
+        ?string $cli_ssh_reverse_tunnel = null,
         ?string $system_prompt = null,
         ?array $cli_skills = null,
         ?string $cli_session_id = null,
@@ -376,6 +378,7 @@ abstract class aihelper
                 cli_ssh_user: $cli_ssh_user,
                 cli_ssh_port: $cli_ssh_port,
                 cli_ssh_key: $cli_ssh_key,
+                cli_ssh_reverse_tunnel: $cli_ssh_reverse_tunnel,
                 cli_session_id: $cli_session_id,
                 cli_resume_latest: $cli_resume_latest,
                 cli_native_memory: $cli_native_memory,
@@ -408,6 +411,7 @@ abstract class aihelper
                 cli_ssh_user: $cli_ssh_user,
                 cli_ssh_port: $cli_ssh_port,
                 cli_ssh_key: $cli_ssh_key,
+                cli_ssh_reverse_tunnel: $cli_ssh_reverse_tunnel,
                 cli_session_id: $cli_session_id,
                 cli_resume_latest: $cli_resume_latest,
                 cli_native_memory: $cli_native_memory,
@@ -440,6 +444,7 @@ abstract class aihelper
                 cli_ssh_user: $cli_ssh_user,
                 cli_ssh_port: $cli_ssh_port,
                 cli_ssh_key: $cli_ssh_key,
+                cli_ssh_reverse_tunnel: $cli_ssh_reverse_tunnel,
                 cli_session_id: $cli_session_id,
                 cli_resume_latest: $cli_resume_latest,
                 cli_native_memory: $cli_native_memory,
@@ -759,6 +764,7 @@ abstract class aihelper
         ?string $cli_ssh_user = null,
         ?int $cli_ssh_port = null,
         ?string $cli_ssh_key = null,
+        ?string $cli_ssh_reverse_tunnel = null,
         ?string $system_prompt = null,
         ?array $cli_skills = null,
         ?string $cli_session_id = null,
@@ -779,6 +785,9 @@ abstract class aihelper
         }
         if ($cli_ssh_port !== null) {
             $this->ssh_port = $cli_ssh_port;
+        }
+        if ($cli_ssh_reverse_tunnel !== null) {
+            $this->ssh_reverse_tunnel = $cli_ssh_reverse_tunnel;
         }
         if ($cli_ssh_key !== null) {
             $this->ssh_key = $cli_ssh_key;
@@ -10863,7 +10872,7 @@ abstract class ai_harness extends ai_anthropic
      *
      * @return array
      */
-    protected function sshCommand(): array
+    protected function sshCommand(bool $withReverseTunnel = false): array
     {
         $controlPath =
             '/tmp/aihelper-ssh-' .
@@ -10897,6 +10906,17 @@ abstract class ai_harness extends ai_anthropic
             '-o',
             'ControlPath=' . $controlPath
         ];
+        if ($withReverseTunnel === true && $this->ssh_reverse_tunnel !== null) {
+            // the harness reaches the mcp through this forward instead of a public
+            // address, which keeps the whole tool traffic on the ssh connection that
+            // is open anyway — no proxy in between that could reap an idle socket.
+            // only the harness run asks for it; every other ssh call would try to
+            // bind the same port again and fail
+            $command[] = '-o';
+            $command[] = 'ExitOnForwardFailure=yes';
+            $command[] = '-R';
+            $command[] = $this->ssh_reverse_tunnel;
+        }
         if ($this->ssh_key !== null && trim($this->ssh_key) !== '') {
             $command[] = '-i';
             $command[] = $this->ssh_key;
@@ -11283,7 +11303,7 @@ abstract class ai_harness extends ai_anthropic
                 '; status=$?; rm -f ' .
                 escapeshellarg($this->harness_remote_pid_file) .
                 '; exit "$status"';
-            $command = array_merge($this->sshCommand(), [
+            $command = array_merge($this->sshCommand(withReverseTunnel: true), [
                 'export ' . implode(' ', $exports) . '; ' . $remoteRun
             ]);
         } else {
