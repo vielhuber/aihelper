@@ -4133,9 +4133,14 @@ class Test extends \PHPUnit\Framework\TestCase
             // ten workers share one machine, so the install must be exclusive
             $this->assertStringContainsString('flock -n 9', $script, $provider);
             // detached: the harness starts now, the new version serves the next turn
-            $this->assertStringContainsString('>/dev/null 2>&1 &', $script, $provider);
+            $this->assertStringContainsString('2>&1 & ', $script, $provider);
             // an install costs ten seconds and only happens on a real difference
             $this->assertStringContainsString('[ "$installed" != "$available" ]', $script, $provider);
+            // a bare shell can pair a node with an npm from another install
+            $this->assertStringContainsString('PATH="$(dirname "$(command -v ', $script, $provider);
+            // a failed update has to leave a trace instead of passing unnoticed
+            $this->assertStringContainsString('>>"$stamp.log" 2>&1', $script, $provider);
+            $this->assertStringNotContainsString('update >/dev/null', $script, $provider);
         }
     }
 

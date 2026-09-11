@@ -10694,8 +10694,11 @@ abstract class ai_harness extends ai_anthropic
             'available=$(curl -sf --max-time 10 https://registry.npmjs.org/' . $update['package'] . '/latest 2>/dev/null' .
             ' | grep -oE \'"version":"' . $semver . '"\' | head -1 | grep -oE "' . $semver . '"); ' .
             '[ -n "$installed" ] && [ -n "$available" ] && [ "$installed" != "$available" ] && ' .
-            $update['command'] . ' >/dev/null 2>&1; ' .
-            ') 9>"$stamp.lock" >/dev/null 2>&1 & ' .
+            // the cli shells out to npm, and a bare shell can pair a node with an
+            // npm from a different install — putting the cli first makes them match
+            'PATH="$(dirname "$(command -v ' . $binary . ')"):$PATH" ' .
+            $update['command'] . ' >>"$stamp.log" 2>&1; ' .
+            ') 9>"$stamp.lock" >>"$stamp.log" 2>&1 & ' .
             'fi ) >/dev/null 2>&1 || true; ';
     }
 
