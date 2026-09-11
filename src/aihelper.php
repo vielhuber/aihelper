@@ -10644,6 +10644,62 @@ abstract class ai_harness extends ai_anthropic
     }
 
     /**
+     * Registry package and self-update command of this cli, null without one.
+     *
+     * @return array{package: string, command: string}|null
+     */
+    protected function harnessUpdate(): ?array
+    {
+        return null;
+    }
+
+    /**
+     * Keep the cli current without ever making a turn wait for it.
+     *
+     * None of the clis updates itself in a non-interactive session, so an
+     * environment that is not rebuilt drifts until a release breaks the
+     * protocol. The check runs at most hourly, compares the installed version
+     * against the registry and only then pays for an install — detached, so
+     * the harness starts immediately and the new version serves the next turn.
+     */
+    protected function runHarnessUpdateDetached(): void
+    {
+        $script = $this->harnessUpdateScript();
+        if ($script === '') {
+            return;
+        }
+        $process = @proc_open(
+            ['bash', '-c', $this->shellPrelude() . $script . 'exit 0'],
+            [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
+            $pipes
+        );
+        if (is_resource($process)) {
+            proc_close($process);
+        }
+    }
+
+    protected function harnessUpdateScript(): string
+    {
+        $update = $this->harnessUpdate();
+        if ($update === null) {
+            return '';
+        }
+        $stamp = '"$HOME/.cache/aihelper/update-' . $this->binaryName() . '"';
+        $binary = $this->binaryName();
+        $semver = '[0-9]+\\.[0-9]+\\.[0-9]+';
+        return '( stamp=' . $stamp . '; mkdir -p "${stamp%/*}" 2>/dev/null; ' .
+            'if [ -z "$(find "$stamp" -newermt "-1 hour" 2>/dev/null)" ]; then ' .
+            '( flock -n 9 || exit 0; touch "$stamp"; ' .
+            'installed=$(' . $binary . ' --version 2>/dev/null | grep -oE "' . $semver . '" | head -1); ' .
+            'available=$(curl -sf --max-time 10 https://registry.npmjs.org/' . $update['package'] . '/latest 2>/dev/null' .
+            ' | grep -oE \'"version":"' . $semver . '"\' | head -1 | grep -oE "' . $semver . '"); ' .
+            '[ -n "$installed" ] && [ -n "$available" ] && [ "$installed" != "$available" ] && ' .
+            $update['command'] . ' >/dev/null 2>&1; ' .
+            ') 9>"$stamp.lock" >/dev/null 2>&1 & ' .
+            'fi ) >/dev/null 2>&1 || true; ';
+    }
+
+    /**
      * The harness runs its own tool loop, so the local one of the parent must
      * stay dormant — an empty tool list keeps mcp_servers_tools_map empty.
      *
@@ -11194,6 +11250,7 @@ abstract class ai_harness extends ai_anthropic
             // working directory is created on the machine that owns it
             $inner = array_merge([$binary], $this->buildArgs());
             $script =
+                $this->harnessUpdateScript() .
                 'mkdir -p ' .
                 escapeshellarg($this->workspace()) .
                 ' && cd ' .
@@ -11223,6 +11280,8 @@ abstract class ai_harness extends ai_anthropic
             ]);
         } else {
             $command = array_merge(['setsid', '--wait', $binary], $this->buildArgs());
+            // a local run has no shell to carry the check along, so it gets its own
+            $this->runHarnessUpdateDetached();
         }
         // the mcp config carries bearer tokens and must not reach the log
         $loggable = $command;
@@ -11881,6 +11940,14 @@ class ai_claudecode extends ai_harness
     }
 
     /**
+     * @return array{package: string, command: string}
+     */
+    protected function harnessUpdate(): ?array
+    {
+        return ['package' => '@anthropic-ai/claude-code', 'command' => 'claude update'];
+    }
+
+    /**
      * Route the harness through a configured gateway (e.g. cliproxyapi).
      * Without one the cli uses its own login and inherits the environment
      * unchanged — replacing it wholesale could strip what the cli needs.
@@ -12340,6 +12407,14 @@ class ai_codex extends ai_harness
         return 'codex';
     }
 
+    /**
+     * @return array{package: string, command: string}
+     */
+    protected function harnessUpdate(): ?array
+    {
+        return ['package' => '@openai/codex', 'command' => 'codex update'];
+    }
+
     protected function harnessPromptFilePaths(): array
     {
         // "--image" only takes images; anything else is named in the prompt
@@ -12584,7 +12659,10 @@ class ai_codex extends ai_harness
         $this->app_server_usage = [];
 
         $id = $this->appServerSend($pipes, 'initialize', [
-            'clientInfo' => ['name' => 'aihelper', 'version' => '1.0.0']
+            'clientInfo' => ['name' => 'aihelper', 'version' => '1.0.0'],
+            // thread/resume.excludeTurns is gated behind this capability on codex
+            // builds around 0.146; newer ones accept the parameter either way
+            'capabilities' => ['experimentalApi' => true]
         ]);
         if ($this->appServerAwait($pipes, $id, 30.0) === null) {
             throw new \RuntimeException('harness: codex app server did not answer initialize');
@@ -13705,6 +13783,14 @@ class ai_opencode extends ai_harness
     protected function binaryName(): string
     {
         return 'opencode';
+    }
+
+    /**
+     * @return array{package: string, command: string}
+     */
+    protected function harnessUpdate(): ?array
+    {
+        return ['package' => 'opencode-ai', 'command' => 'opencode upgrade'];
     }
 
     public function fetchModels(): array

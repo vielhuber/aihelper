@@ -4116,6 +4116,29 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertTrue($success);
     }
 
+    public function test__every_harness_keeps_itself_current_without_delaying_a_turn(): void
+    {
+        $expected = [
+            'codex' => ['@openai/codex', 'codex update'],
+            'claudecode' => ['@anthropic-ai/claude-code', 'claude update'],
+            'opencode' => ['opencode-ai', 'opencode upgrade']
+        ];
+        foreach ($expected as $provider => [$package, $command]) {
+            $harness = $this->harnessStoreAihelper($provider, null);
+            $script = (new \ReflectionMethod($harness, 'harnessUpdateScript'))->invoke($harness);
+            $this->assertStringContainsString('registry.npmjs.org/' . $package . '/latest', $script, $provider);
+            $this->assertStringContainsString($command, $script, $provider);
+            // at most hourly, so a turn never pays for the check
+            $this->assertStringContainsString('-newermt "-1 hour"', $script, $provider);
+            // ten workers share one machine, so the install must be exclusive
+            $this->assertStringContainsString('flock -n 9', $script, $provider);
+            // detached: the harness starts now, the new version serves the next turn
+            $this->assertStringContainsString('>/dev/null 2>&1 &', $script, $provider);
+            // an install costs ten seconds and only happens on a real difference
+            $this->assertStringContainsString('[ "$installed" != "$available" ]', $script, $provider);
+        }
+    }
+
     private function harnessStoreAihelper(string $provider, ?string $home, ?string $authHome = null): object
     {
         return aihelper::create(
@@ -4427,6 +4450,9 @@ class Test extends \PHPUnit\Framework\TestCase
                     file($requestFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)
                 );
                 $this->assertNotContains('thread/start', array_column($requests, 'method'), $scenario);
+                $this->assertSame('initialize', $requests[0]['method']);
+                // excludeTurns is refused unless the client announces this capability
+                $this->assertTrue($requests[0]['params']['capabilities']['experimentalApi'] ?? false);
                 $this->assertSame('saved-thread', $requests[1]['params']['threadId']);
                 $this->assertTrue($requests[1]['params']['excludeTurns'] ?? false);
                 if ($scenario === 'success') {
