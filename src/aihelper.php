@@ -944,15 +944,23 @@ abstract class aihelper
         return is_file($path) ? (string) file_get_contents($path) : null;
     }
 
+    protected function getCliAuthFiles(string $nativePath, string $proxyPattern): array
+    {
+        $files =
+            $this->name === 'cliproxyapi'
+                ? (glob('/host/data/server/cliproxyapi/auth/' . basename($proxyPattern)) ?: [])
+                : (is_file($nativePath) ? [$nativePath] : []);
+
+        return $files ?: (glob($proxyPattern) ?: []);
+    }
+
     protected function getCodexAuthentication(): ?array
     {
         $cliAuthHome = $this->cli_auth_home ?? '';
-        $auth_files =
-            $this->name === 'cliproxyapi'
-                ? (glob('/host/data/server/cliproxyapi/auth/codex*.json') ?: [])
-                : [
-                    $cliAuthHome !== '' ? $cliAuthHome . '/codex/auth.json' : '/root/.codex/auth.json'
-                ];
+        $auth_files = $this->getCliAuthFiles(
+            $cliAuthHome !== '' ? $cliAuthHome . '/codex/auth.json' : '/root/.codex/auth.json',
+            '/root/.cli-proxy-api/codex*.json'
+        );
         foreach ($auth_files as $auth_file) {
             $auth_content = $this->readCliAuthFile($auth_file);
             if ($auth_content === null) {
@@ -1366,14 +1374,10 @@ abstract class aihelper
         }
 
         $cliAuthHome = $this->cli_auth_home ?? '';
-        $auth_files =
-            $this->name === 'cliproxyapi'
-                ? (glob('/host/data/server/cliproxyapi/auth/claude*.json') ?: [])
-                : [
-                    $cliAuthHome !== ''
-                        ? $cliAuthHome . '/claude/.credentials.json'
-                        : '/root/.claude/.credentials.json'
-                ];
+        $auth_files = $this->getCliAuthFiles(
+            $cliAuthHome !== '' ? $cliAuthHome . '/claude/.credentials.json' : '/root/.claude/.credentials.json',
+            '/root/.cli-proxy-api/claude*.json'
+        );
         $access_token = null;
         foreach ($auth_files as $auth_file) {
             $auth_content = $this->readCliAuthFile($auth_file);

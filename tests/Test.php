@@ -2302,6 +2302,33 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertFalse($ai->authenticationIsExpired(['access_token' => 'token']));
     }
 
+    function test__cli_authentication_falls_back_only_when_the_native_file_is_missing(): void
+    {
+        $ai = $this->retryAihelper([]);
+        $method = new \ReflectionMethod($ai, 'getCliAuthFiles');
+        $directory = sys_get_temp_dir() . '/aihelper-auth-' . bin2hex(random_bytes(8));
+        mkdir($directory, 0700);
+        try {
+            foreach (['codex', 'claude'] as $tool) {
+                $native = $directory . '/auth.json';
+                $proxy = $directory . '/' . $tool . '-test.json';
+                $pattern = $directory . '/' . $tool . '*.json';
+                file_put_contents($native, '{}');
+                file_put_contents($proxy, '{}');
+                $this->assertSame([$native], $method->invoke($ai, $native, $pattern));
+                unlink($native);
+                $this->assertSame([$proxy], $method->invoke($ai, $native, $pattern));
+                unlink($proxy);
+                $this->assertSame([], $method->invoke($ai, $native, $pattern));
+            }
+        } finally {
+            foreach (glob($directory . '/*') ?: [] as $file) {
+                unlink($file);
+            }
+            rmdir($directory);
+        }
+    }
+
     function test__cli_usage_caches_are_isolated_by_authentication_source(): void
     {
         $ai = $this->retryAihelper([]);
