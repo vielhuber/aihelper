@@ -13853,7 +13853,11 @@ class ai_opencode extends ai_harness
         ];
         $messages = $this->readOpenCodeUsageMessages($limits['monthly']['from'] * 1000);
         if ($messages === null) {
-            return null;
+            $limits = [];
+            foreach ($this->fetchOpenCodeServerLimits() as $type => $serverLimit) {
+                $limits[] = ['type' => $type, 'scope' => null, ...$serverLimit, 'estimated' => false];
+            }
+            return $limits ?: null;
         }
 
         foreach ($limits as $type => $limit) {
@@ -13934,7 +13938,7 @@ class ai_opencode extends ai_harness
      *
      * @return array|null
      */
-    private function readOpenCodeUsageMessages(int $from): ?array
+    protected function readOpenCodeUsageMessages(int $from): ?array
     {
         $query =
             "SELECT time_created, data FROM message
@@ -13992,7 +13996,7 @@ class ai_opencode extends ai_harness
      *
      * @return array<string,array{'percent used': float, resets_at: string}>
      */
-    private function fetchOpenCodeServerLimits(): array
+    protected function fetchOpenCodeServerLimits(): array
     {
         $authCookie = trim((string) getenv('OPENCODE_GO_AUTH_COOKIE'));
         $cacheIdentity = $authCookie !== ''

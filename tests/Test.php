@@ -2516,6 +2516,58 @@ class Test extends \PHPUnit\Framework\TestCase
         rmdir($dataHome);
     }
 
+    private function opencodeUsageAihelper(?array $messages, array $serverLimits): object
+    {
+        class_exists(aihelper::class);
+        return new class ($messages, $serverLimits) extends \vielhuber\aihelper\ai_opencode {
+            public function __construct(private ?array $messages, private array $serverLimits) {}
+
+            protected function readOpenCodeUsageMessages(int $from): ?array
+            {
+                return $this->messages;
+            }
+
+            protected function fetchOpenCodeServerLimits(): array
+            {
+                return $this->serverLimits;
+            }
+        };
+    }
+
+    function test__opencode_usage_without_a_database_returns_only_available_server_limits(): void
+    {
+        $reset = '2026-10-01T00:00:00+00:00';
+        $limits = $this->opencodeUsageAihelper(null, [
+            'monthly' => ['percent used' => 39.1, 'resets_at' => $reset]
+        ])->getCliUsageLimits();
+
+        $this->assertSame([
+            ['type' => 'monthly', 'scope' => null, 'percent used' => 39.1, 'resets_at' => $reset, 'estimated' => false]
+        ], $limits);
+    }
+
+    function test__opencode_usage_without_any_data_remains_unavailable(): void
+    {
+        $this->assertNull($this->opencodeUsageAihelper(null, [])->getCliUsageLimits());
+    }
+
+    function test__opencode_usage_keeps_local_statistics_when_server_limits_are_available(): void
+    {
+        $reset = '2026-10-01T00:00:00+00:00';
+        $limits = $this->opencodeUsageAihelper([
+            ['time_created' => time() * 1000, 'data' => json_encode(['cost' => 0.25, 'modelID' => 'test-model'])]
+        ], ['monthly' => ['percent used' => 39.1, 'resets_at' => $reset]])->getCliUsageLimits();
+
+        $this->assertCount(3, $limits);
+        $this->assertSame(1, $limits[2]['requests']);
+        $this->assertSame(0.25, $limits[2]['used_usd']);
+        $this->assertSame(['test-model'], $limits[2]['models']);
+        $this->assertSame(39.1, $limits[2]['percent used']);
+        $this->assertSame($reset, $limits[2]['resets_at']);
+        $this->assertFalse($limits[2]['estimated']);
+        $this->assertTrue($limits[0]['estimated']);
+    }
+
     function test__opencode_usage_parses_dashboard_limits(): void
     {
         $method = new \ReflectionMethod(aihelper::create(provider: 'opencode'), 'parseOpenCodeDashboardLimits');
