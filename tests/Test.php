@@ -1460,6 +1460,10 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertStringContainsString('SessionStart:startup', $claudeOutput);
         $this->assertStringContainsString('Session status', $claudeOutput);
         $this->assertStringContainsString('requesting', $claudeOutput);
+        $this->assertStringContainsString(
+            '"id":"session-status","kind":"status","label":"Session status","status":"completed"',
+            $claudeOutput
+        );
         $this->assertStringNotContainsString('├', $claudeOutput);
         $this->assertStringContainsString('Turn completed', $claudeOutput);
         $this->assertStringContainsString('"captures_content":false', $claudeOutput);
@@ -1854,7 +1858,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 return $this->stream_response->result->content[0]->text;
             }
         };
-        ob_start(static fn(string $output): string => '');
+        ob_start(static fn(): string => '');
         try {
             $result = $ai->request();
         } finally {
@@ -1947,7 +1951,7 @@ class Test extends \PHPUnit\Framework\TestCase
         foreach ($terminals as $provider => $terminal) {
             foreach ([false, true] as $stream) {
                 $ai = $this->emptyHarnessFixture($provider, $stream);
-                ob_start(static fn(string $output): string => '');
+                ob_start(static fn(): string => '');
                 try {
                     $ai->events = [$terminal];
                     $result = $ai->ask('Finish silently.');
@@ -2019,7 +2023,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 foreach ($scenarios as $scenario) {
                     $ai = $this->emptyHarnessFixture($provider, $stream);
                     $ai->events = $scenario;
-                    ob_start(static fn(string $output): string => '');
+                    ob_start(static fn(): string => '');
                     try {
                         $result = $ai->request();
                     } finally {
@@ -2390,7 +2394,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $ai = $this->retryAihelper(['invalid request']);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('invalid request');
+        $this->expectExceptionMessageIs('invalid request');
         $ai->ask('test');
     }
 
@@ -4519,7 +4523,7 @@ class Test extends \PHPUnit\Framework\TestCase
                     return $this->askThis('Generate a report.');
                 }
             };
-            ob_start(static fn(string $output): string => '');
+            ob_start(static fn(): string => '');
             try {
                 $response = $codex->request();
             } finally {
@@ -4992,7 +4996,7 @@ PHP;
         foreach (['openrouter', 'google'] as $name) {
             $provider = $this->streamEventProvider($name);
             $events = $this->captureStreamEvents(function () use ($provider, $name): void {
-                foreach ([1, 2] as $request) {
+                for ($round = 1; $round <= 2; $round++) {
                     $callback = (new ReflectionMethod($provider, 'getStreamCallback'))->invoke($provider);
                     foreach (['text', 'reasoning', 'text', 'reasoning'] as $kind) {
                         $event =
@@ -5567,7 +5571,7 @@ PHP;
                 return ['success' => true, 'response' => 'Done', 'costs' => 0.0];
             }
         };
-        foreach ([1, 2] as $request) {
+        for ($round = 1; $round <= 2; $round++) {
             ob_start();
             ob_start();
             try {

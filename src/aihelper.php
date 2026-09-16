@@ -728,7 +728,7 @@ abstract class aihelper
                 return $decoded_response;
             }
             return null;
-        } catch (\Exception $e) {
+        } catch (\Exception) {
             return null;
         }
     }
@@ -1995,7 +1995,7 @@ abstract class aihelper
             ];
             if (!$include_body) {
                 unset($result['request_body'], $result['response']['body']);
-                foreach ($result['api_requests'] as $api_request_key => $api_request) {
+                foreach (array_keys($result['api_requests']) as $api_request_key) {
                     unset($result['api_requests'][$api_request_key]['body']);
                 }
                 foreach ($result['api_responses'] as $api_response_key => $api_response) {
@@ -7047,7 +7047,6 @@ abstract class aihelper
                                     $reasoning_text = '';
 
                                     while ($pending !== '') {
-                                        $tag = $this->stream_in_think ? '<\/think>' : '<think>';
                                         $pos = strpos($pending, $this->stream_in_think ? '</think>' : '<think>');
                                         if ($pos !== false) {
                                             if ($this->stream_in_think) {
@@ -7595,15 +7594,15 @@ abstract class aihelper
         if (!(headers_sent() || ob_get_length() > 0)) {
             try {
                 ini_set('zlib.output_compression', '0');
-            } catch (\ValueError $e) {
+            } catch (\ValueError) {
             }
             try {
                 ini_set('output_buffering', '0');
-            } catch (\ValueError $e) {
+            } catch (\ValueError) {
             }
             try {
                 ini_set('implicit_flush', '1');
-            } catch (\ValueError $e) {
+            } catch (\ValueError) {
             }
         }
         // 2k padding (for browsers)
@@ -7653,7 +7652,7 @@ abstract class aihelper
         }
         try {
             $message = ($this->input_callback)();
-        } catch (\Throwable $exception) {
+        } catch (\Throwable) {
             return null;
         }
         return is_string($message) && trim($message) !== '' ? $message : null;
@@ -7666,7 +7665,7 @@ abstract class aihelper
         }
         try {
             return ($this->abort_callback)() === true;
-        } catch (\Throwable $exception) {
+        } catch (\Throwable) {
             return false;
         }
     }
@@ -10533,12 +10532,15 @@ abstract class ai_harness extends ai_anthropic
     }
 
     /**
-     * Deliver a follow-up message to the running turn. Returns false when this
-     * harness cannot take one.
+     * Deliver a follow-up message to the running turn over its stdin.
      */
     protected function harnessSteer(array $pipes, string $message): bool
     {
-        return false;
+        if (!is_resource($pipes[0])) {
+            return false;
+        }
+        fwrite($pipes[0], $this->harnessInput($message));
+        return true;
     }
 
     /**
@@ -10593,6 +10595,7 @@ abstract class ai_harness extends ai_anthropic
      */
     protected function handleNativeEvent(array $event, object $result, ?\Closure $emit): void
     {
+        $this->handleEvent($event, $result, $emit);
     }
 
     /**
@@ -11773,6 +11776,7 @@ class ai_claudecode extends ai_harness
                 default => ($event['status'] ?? '') === 'compacting' ? 'Compacting context' : 'Session status'
             };
             $completed = $name === 'compact_boundary' || ($name === 'status' && empty($event['status']));
+            $this->session_status_running = $completed !== true;
             $this->emitTranscript(
                 'session-status',
                 $label,
@@ -11897,6 +11901,8 @@ class ai_claudecode extends ai_harness
     public ?string $title = 'Claude Code';
 
     public ?string $name = 'claudecode';
+
+    protected bool $session_status_running = false;
 
     public ?string $icon = <<<'SVG'
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M17.304 3.541h-3.672l6.696 16.918H24Zm-10.608 0L0 20.459h3.744l1.37-3.553h7.005l1.369 3.553h3.744L10.536 3.541Zm-.371 10.223L8.616 7.82l2.291 5.945Z"/></svg>
@@ -12151,15 +12157,6 @@ class ai_claudecode extends ai_harness
         return $this->input_callback !== null;
     }
 
-    protected function harnessSteer(array $pipes, string $message): bool
-    {
-        if (!is_resource($pipes[0])) {
-            return false;
-        }
-        fwrite($pipes[0], $this->harnessInput($message));
-        return true;
-    }
-
     protected function harnessInput(string $prompt): string
     {
         // claude code has no attachment flag, but it can read any path itself —
@@ -12181,6 +12178,13 @@ class ai_claudecode extends ai_harness
     protected function handleEvent(array $event, object $result, ?\Closure $emit): void
     {
         $type = $event['type'] ?? null;
+
+        // the cli reports "requesting" for every api call but only sends an
+        // empty status on permission mode changes, so the reply ends the wait
+        if ($type !== 'system' && $this->session_status_running === true) {
+            $this->session_status_running = false;
+            $this->emitTranscript('session-status', '', 'completed', null, false, 'status');
+        }
 
         if ($type === 'system' && ($event['subtype'] ?? null) === 'init' && !empty($event['session_id'])) {
             $sessionId = (string) $event['session_id'];
