@@ -2212,6 +2212,8 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertStringContainsString("' && ' .\n                        \$this->remoteShell(\$script)", $source);
         $this->assertStringNotContainsString("' && exec ' .\n                        \$this->remoteShell(\$script)", $source);
         $this->assertStringContainsString('/tmp/aihelper-runs/', $source);
+        // the harness inherits the shell umask, a restrictive one would hide its files from the web server
+        $this->assertStringNotContainsString("'umask 077; mkdir -p /tmp/aihelper-runs", $source);
         $this->assertStringContainsString('"/proc/$pid/environ"', $source);
         $this->assertStringNotContainsString("'pkill -' . \$signal", $source);
     }

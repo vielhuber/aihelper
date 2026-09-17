@@ -11299,7 +11299,7 @@ abstract class ai_harness extends ai_anthropic
             $this->harness_remote_pid_file =
                 '/tmp/aihelper-runs/' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $this->harness_run_id) . '.pid';
             $remoteRun =
-                'umask 077; mkdir -p /tmp/aihelper-runs; chmod 700 /tmp/aihelper-runs; ' .
+                'mkdir -p /tmp/aihelper-runs; chmod 700 /tmp/aihelper-runs; ' .
                 'setsid --wait bash -c ' .
                 escapeshellarg(
                     'printf "%s\\n" "$$" > ' .
