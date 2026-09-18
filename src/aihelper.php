@@ -944,14 +944,48 @@ abstract class aihelper
         return is_file($path) ? (string) file_get_contents($path) : null;
     }
 
+    protected function getCliProxyDirs(): array
+    {
+        $dirs = [];
+        foreach ([dirname(__DIR__, 4), (string) getcwd(), dirname((string) getcwd())] as $root) {
+            if ($root !== '' && is_dir($root . '/.cliproxyapi') && !in_array($root . '/.cliproxyapi', $dirs, true)) {
+                $dirs[] = $root . '/.cliproxyapi';
+            }
+        }
+        return $dirs;
+    }
+
+    protected function getCliProxyAuthDirs(): array
+    {
+        return array_merge(
+            array_map(fn(string $dir): string => $dir . '/auth', $this->getCliProxyDirs()),
+            ['/root/.cli-proxy-api', '/host/data/server/cliproxyapi/auth']
+        );
+    }
+
+    protected function getCliProxyLogDirs(): array
+    {
+        return array_merge(
+            array_map(fn(string $dir): string => $dir . '/logs', $this->getCliProxyDirs()),
+            ['/root/.cli-proxy-api/logs', '/host/data/server/cliproxyapi/logs']
+        );
+    }
+
+    protected function getCliProxyAuthFiles(string $pattern): array
+    {
+        $files = [];
+        foreach ($this->getCliProxyAuthDirs() as $dir) {
+            $files = array_merge($files, glob($dir . '/' . $pattern) ?: []);
+        }
+        return array_values(array_unique($files));
+    }
+
     protected function getCliAuthFiles(string $nativePath, string $proxyPattern): array
     {
-        $files =
-            $this->name === 'cliproxyapi'
-                ? (glob('/host/data/server/cliproxyapi/auth/' . basename($proxyPattern)) ?: [])
-                : (is_file($nativePath) ? [$nativePath] : []);
+        $proxyFiles = $this->getCliProxyAuthFiles($proxyPattern);
+        $files = $this->name === 'cliproxyapi' ? $proxyFiles : (is_file($nativePath) ? [$nativePath] : []);
 
-        return $files ?: (glob($proxyPattern) ?: []);
+        return $files ?: $proxyFiles;
     }
 
     protected function getCodexAuthentication(): ?array
@@ -959,7 +993,7 @@ abstract class aihelper
         $cliAuthHome = $this->cli_auth_home ?? '';
         $auth_files = $this->getCliAuthFiles(
             $cliAuthHome !== '' ? $cliAuthHome . '/codex/auth.json' : '/root/.codex/auth.json',
-            '/root/.cli-proxy-api/codex*.json'
+            'codex*.json'
         );
         foreach ($auth_files as $auth_file) {
             $auth_content = $this->readCliAuthFile($auth_file);
@@ -1269,8 +1303,7 @@ abstract class aihelper
                 array_unique(
                     array_merge(
                         ['/root/.gemini/antigravity-cli/antigravity-oauth-token'],
-                        glob('/root/.cli-proxy-api/antigravity*.json') ?: [],
-                        glob('/host/data/server/cliproxyapi/auth/antigravity*.json') ?: []
+                        $this->getCliProxyAuthFiles('antigravity*.json')
                     )
                 )
             );
@@ -1376,7 +1409,7 @@ abstract class aihelper
         $cliAuthHome = $this->cli_auth_home ?? '';
         $auth_files = $this->getCliAuthFiles(
             $cliAuthHome !== '' ? $cliAuthHome . '/claude/.credentials.json' : '/root/.claude/.credentials.json',
-            '/root/.cli-proxy-api/claude*.json'
+            'claude*.json'
         );
         $access_token = null;
         foreach ($auth_files as $auth_file) {
@@ -1641,7 +1674,7 @@ abstract class aihelper
         bool $group_by = false
     ): array {
         $log_files = [];
-        foreach (['/root/.cli-proxy-api/logs', '/host/data/server/cliproxyapi/logs'] as $dir) {
+        foreach ($this->getCliProxyLogDirs() as $dir) {
             $log_files = array_merge($log_files, glob($dir . '/*.log') ?: []);
         }
         // the proxy rotates logs away while they are being scanned, so a globbed file can already be
@@ -2412,7 +2445,7 @@ abstract class aihelper
         $date_until_time = $date_until !== null ? strtotime($date_until) : false;
         $deleted = [];
         $bytes = 0;
-        foreach (['/root/.cli-proxy-api/logs', '/host/data/server/cliproxyapi/logs'] as $dir) {
+        foreach ($this->getCliProxyLogDirs() as $dir) {
             foreach (glob($dir . '/*.log') ?: [] as $file) {
                 // the request timestamp sits in the file head, above the body
                 $timestamp = null;
