@@ -973,7 +973,8 @@ abstract class aihelper
 
     protected static function getCliProxyAuthFiles(string $pattern): array
     {
-        $files = [];
+        // an absolute pattern is globbed as given, a bare pattern only inside the proxy directories
+        $files = str_starts_with($pattern, '/') ? glob($pattern) ?: [] : [];
         foreach (static::getCliProxyAuthDirs() as $dir) {
             $files = array_merge($files, glob($dir . '/' . $pattern) ?: []);
         }
