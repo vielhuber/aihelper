@@ -11045,6 +11045,11 @@ abstract class ai_harness extends ai_anthropic
                 implode(' ', array_map('escapeshellarg', $directories))
             ];
             foreach ($links as $link => $target) {
+                // a run that was killed after a token refresh left the refreshed file here instead of the link
+                $commands[] =
+                    'if [ -f ' . escapeshellarg($link) . ' ] && [ ! -L ' . escapeshellarg($link) . ' ]; then ' .
+                    'if [ -s ' . escapeshellarg($link) . ' ] && [ ' . escapeshellarg($link) . ' -nt ' . escapeshellarg($target) . ' ]; then ' .
+                    'cat ' . escapeshellarg($link) . ' > ' . escapeshellarg($target) . '; fi; rm -f ' . escapeshellarg($link) . '; fi';
                 $commands[] =
                     'if [ -L ' . escapeshellarg($link) . ' ]; then ln -sfn ' .
                     escapeshellarg($target) . ' ' . escapeshellarg($link) .
@@ -11065,6 +11070,15 @@ abstract class ai_harness extends ai_anthropic
                 continue;
             }
             if (is_link($link)) {
+                unlink($link);
+            }
+            // a run that was killed after a token refresh left the refreshed file here instead of the link
+            if (is_file($link)) {
+                $contents = file_get_contents($link);
+                if (is_string($contents) && trim($contents) !== '' && (!is_file($target) || filemtime($link) > filemtime($target))) {
+                    file_put_contents($target, $contents);
+                    chmod($target, 0600);
+                }
                 unlink($link);
             }
             if (file_exists($link)) {
@@ -11616,6 +11630,11 @@ abstract class ai_harness extends ai_anthropic
                     $event = $redact($event);
                     $this->handleEvent($event, $result, $emit);
                 }
+            }
+            // a refreshed token has to reach the shared profile while the run is alive: a run that is
+            // killed later would take the only valid token with it, and every other run fails to refresh
+            if (!$this->isRemote()) {
+                $this->persistHarnessStoreLinks();
             }
             // a lingering grandchild can hold the pipes open after the harness
             // itself is gone, so the process state ends the loop, not eof

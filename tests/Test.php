@@ -586,6 +586,47 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame([true, false], $ai->promptAdditions);
     }
 
+    function test__harness_store_keeps_a_refreshed_token_in_the_shared_profile(): void
+    {
+        $root = sys_get_temp_dir() . '/aihelper-store-' . bin2hex(random_bytes(4));
+        mkdir($root . '/profile', 0700, true);
+        $target = $root . '/profile/.credentials.json';
+        $link = $root . '/run/.credentials.json';
+        file_put_contents($target, 'old');
+        // all providers live in one file that the autoloader finds through the main class
+        class_exists(aihelper::class);
+        $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_claudecode::class))->newInstanceWithoutConstructor();
+        $prepare = new \ReflectionMethod($harness, 'prepareHarnessStore');
+        $persist = new \ReflectionMethod($harness, 'persistHarnessStoreLinks');
+        $prepare->invoke($harness, [$root . '/run'], [$link => $target]);
+        $this->assertTrue(is_link($link));
+        // the cli refreshes its token and replaces the link atomically
+        unlink($link);
+        file_put_contents($link, 'refreshed');
+        $persist->invoke($harness);
+        $this->assertSame('refreshed', file_get_contents($target));
+        $this->assertTrue(is_link($link));
+        // a killed run leaves the refreshed file behind; the next run adopts it when it is newer than the profile
+        unlink($link);
+        file_put_contents($link, 'left behind');
+        touch($link, time() + 5);
+        $prepare->invoke($harness, [$root . '/run'], [$link => $target]);
+        $this->assertSame('left behind', file_get_contents($target));
+        $this->assertTrue(is_link($link));
+        // an older leftover never overwrites a profile that was logged in again since
+        unlink($link);
+        file_put_contents($link, 'stale');
+        touch($link, time() - 3600);
+        $prepare->invoke($harness, [$root . '/run'], [$link => $target]);
+        $this->assertSame('left behind', file_get_contents($target));
+        $this->assertTrue(is_link($link));
+        unlink($link);
+        unlink($target);
+        rmdir($root . '/run');
+        rmdir($root . '/profile');
+        rmdir($root);
+    }
+
     function test__harness_mcp_startup_errors_are_retried_once(): void
     {
         $error =
