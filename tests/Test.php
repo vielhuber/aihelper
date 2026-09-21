@@ -2615,22 +2615,169 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertTrue($limits[0]['estimated']);
     }
 
-    function test__opencode_usage_parses_dashboard_limits(): void
+    private function opencodeConsoleAihelper(array $responses, string $cookie = 'test-cookie'): object
     {
-        $method = new \ReflectionMethod(aihelper::create(provider: 'opencode'), 'parseOpenCodeDashboardLimits');
-        $limits = $method->invoke(
-            null,
-            'rollingUsage:$R[1]={resetInSec:17940,usagePercent:0}' .
-                ' weeklyUsage:$R[2]={usagePercent:5,resetInSec:583200}' .
-                ' monthlyUsage:$R[3]={usagePercent:52,resetInSec:2250000}'
-        );
+        class_exists(aihelper::class);
+        return new class ($responses, $cookie) extends \vielhuber\aihelper\ai_opencode {
+            public array $requests = [];
+            public ?array $messages = null;
+
+            public function __construct(private array $responses, private string $cookie) {}
+
+            public function getCliUsageLimits(): ?array
+            {
+                $previous = getenv('OPENCODE_GO_AUTH_COOKIE');
+                putenv('OPENCODE_GO_AUTH_COOKIE=' . $this->cookie);
+                try {
+                    return parent::getCliUsageLimits();
+                } finally {
+                    putenv($previous === false ? 'OPENCODE_GO_AUTH_COOKIE' : 'OPENCODE_GO_AUTH_COOKIE=' . $previous);
+                }
+            }
+
+            protected function readOpenCodeUsageMessages(int $from): ?array
+            {
+                return $this->messages;
+            }
+
+            protected function requestOpenCodeConsole(
+                string $path,
+                string $authCookie,
+                ?string $organizationId = null
+            ): ?array {
+                $this->requests[] = [$path, $authCookie, $organizationId];
+                $response = array_shift($this->responses);
+                if ($response instanceof \RuntimeException) {
+                    throw $response;
+                }
+                return $response;
+            }
+        };
+    }
+
+    private function opencodeConsoleSubscription(): array
+    {
+        return [
+            'access' => [
+                'endsAt' => '2026-10-01T00:00:00Z',
+                'meters' => [
+                    'fiveHour' => ['limitMicroCents' => '1200000000', 'usedMicroCents' => '0', 'resetsAt' => null],
+                    'week' => [
+                        'limitMicroCents' => '3000000000',
+                        'usedMicroCents' => '150000000',
+                        'resetsAt' => '2026-09-28T00:00:00Z'
+                    ],
+                    'month' => ['limitMicroCents' => '6000000000', 'usedMicroCents' => '3120000000']
+                ]
+            ]
+        ];
+    }
+
+    function test__opencode_usage_reads_console_limits(): void
+    {
+        $ai = $this->opencodeConsoleAihelper([[['id' => 'wrk_example']], $this->opencodeConsoleSubscription()]);
+        $result = $ai->getCliUsageLimits();
+        $this->assertTrue(array_is_list($result));
+        $this->assertSame([false, false, false], array_column($result, 'estimated'));
+        $limits = array_column($result, null, 'type');
 
         $this->assertSame(0.0, $limits['5-hour']['percent used']);
         $this->assertSame(5.0, $limits['weekly']['percent used']);
         $this->assertSame(52.0, $limits['monthly']['percent used']);
-        $this->assertMatchesRegularExpression('/T/', $limits['5-hour']['resets_at']);
-        $this->assertMatchesRegularExpression('/T/', $limits['weekly']['resets_at']);
-        $this->assertMatchesRegularExpression('/T/', $limits['monthly']['resets_at']);
+        $this->assertNull($limits['5-hour']['resets_at']);
+        $this->assertSame(strtotime('2026-09-28T00:00:00Z'), strtotime($limits['weekly']['resets_at']));
+        $this->assertSame(strtotime('2026-10-01T00:00:00Z'), strtotime($limits['monthly']['resets_at']));
+        $this->assertSame(
+            [['/api/orgs', 'test-cookie', null], ['/api/go/status', 'test-cookie', 'wrk_example']],
+            $ai->requests
+        );
+    }
+
+    function test__opencode_console_clamps_exhausted_limits(): void
+    {
+        $subscription = $this->opencodeConsoleSubscription();
+        $subscription['access']['meters']['fiveHour'] = [
+            'limitMicroCents' => '1200000000',
+            'usedMicroCents' => '1300000000',
+            'resetsAt' => '2026-09-21T14:20:00Z'
+        ];
+        $ai = $this->opencodeConsoleAihelper([[['id' => 'org_example']], $subscription]);
+        $limits = array_column($ai->getCliUsageLimits(), null, 'type');
+        $this->assertSame(100.0, $limits['5-hour']['percent used']);
+        $this->assertSame(strtotime('2026-09-21T14:20:00Z'), strtotime($limits['5-hour']['resets_at']));
+    }
+
+    function test__opencode_console_rejects_invalid_responses(): void
+    {
+        $subscription = $this->opencodeConsoleSubscription();
+        $responses = [
+            [null],
+            [[]],
+            [[['id' => 'wrk_a'], ['id' => 'wrk_b']]],
+            [[['id' => "bad\r\nheader"]]],
+            [[['id' => 'wrk_a']], null],
+            [[['id' => 'wrk_a']], ['access' => null]]
+        ];
+        foreach (['limitMicroCents' => '0', 'usedMicroCents' => '-1', 'resetsAt' => 'invalid'] as $field => $value) {
+            $invalid = $subscription;
+            $invalid['access']['meters']['week'][$field] = $value;
+            $responses[] = [[['id' => 'wrk_a']], $invalid];
+        }
+        $responses[] = [[['id' => 'wrk_a']], ['access' => ['meters' => []]]];
+        foreach ($responses as $response) {
+            try {
+                $this->opencodeConsoleAihelper($response)->getCliUsageLimits();
+                $this->fail('Invalid console responses must not pass startup validation.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('OpenCode Go', $exception->getMessage());
+            }
+        }
+    }
+
+    function test__opencode_console_propagates_authentication_and_transport_failures(): void
+    {
+        foreach (['authentication rejected', 'HTTP 503', 'invalid JSON'] as $message) {
+            foreach ([0, 1] as $request) {
+                $error = new \RuntimeException($message);
+                $responses = $request === 0 ? [$error] : [[['id' => 'wrk_a']], $error];
+                try {
+                    $ai = $this->opencodeConsoleAihelper($responses);
+                    $ai->messages = [];
+                    $ai->getCliUsageLimits();
+                    $this->fail('Console failures must reach the startup caller.');
+                } catch (\RuntimeException $exception) {
+                    $this->assertSame($error, $exception);
+                }
+            }
+        }
+    }
+
+    function test__opencode_console_does_not_hide_revoked_authentication_behind_cached_limits(): void
+    {
+        $error = new \RuntimeException('authentication rejected');
+        $ai = $this->opencodeConsoleAihelper([[['id' => 'wrk_a']], $this->opencodeConsoleSubscription(), $error]);
+        $this->assertCount(3, $ai->getCliUsageLimits());
+        try {
+            $ai->getCliUsageLimits();
+            $this->fail('A cached success must not hide revoked authentication.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame($error, $exception);
+            $this->assertCount(3, $ai->requests);
+        }
+    }
+
+    function test__opencode_console_rejects_injected_cookies(): void
+    {
+        foreach (["cookie\r\nInjected: header", 'cookie; other=secret'] as $cookie) {
+            $ai = $this->opencodeConsoleAihelper([], $cookie);
+            try {
+                $ai->getCliUsageLimits();
+                $this->fail('Invalid cookie must be rejected before making a request.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('__Host-console_session', $exception->getMessage());
+                $this->assertSame([], $ai->requests);
+            }
+        }
     }
 
     function test__opencode_direct_requests_identify_their_session(): void
