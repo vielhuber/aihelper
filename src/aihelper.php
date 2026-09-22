@@ -114,6 +114,20 @@ abstract class aihelper
         ?string $cli_session_home = null,
         ?string $cli_auth_home = null
     ): ?self {
+        if ($provider === 'typesafe') {
+            if (($max_tries ?? 3) < 1 || ($timeout ?? 300) < 1) {
+                throw new \InvalidArgumentException('max_tries and timeout must be positive.');
+            }
+            return new ai_typesafe(
+                model: $model,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries ?? 3,
+                url: $url,
+                abort_callback: $abort_callback
+            );
+        }
         if ($provider === 'openai') {
             return new ai_openai(
                 model: $model,
@@ -496,6 +510,7 @@ abstract class aihelper
                 ai_lmstudio::class,
                 ai_nvidia::class,
                 ai_elevenlabs::class,
+                ai_typesafe::class,
                 ai_claudecode::class,
                 ai_codex::class,
                 ai_opencode::class,
@@ -2921,6 +2936,16 @@ abstract class aihelper
             return min(60, 5 * (int) pow(2, $attempt - 1));
         }
         return $transient ? min(4, (int) pow(2, $attempt - 1)) : 15 * (int) pow(2, $attempt - 1);
+    }
+
+    /**
+     * Keep structured evaluation separate from stateful chat and text generation.
+     *
+     * @param list<array<string, mixed>> $questions
+     */
+    public function evaluate(string|array|object $state, array $questions): array
+    {
+        throw new \BadMethodCallException('Provider "' . $this->name . '" does not support evaluate().');
     }
 
     public function image(
@@ -10205,6 +10230,413 @@ class ai_elevenlabs extends ai_openai
             return ['response' => $output_file, 'success' => true, 'costs' => $costs];
         }
         return ['response' => base64_encode((string) $raw), 'success' => true, 'costs' => $costs];
+    }
+}
+
+final class ai_typesafe extends aihelper
+{
+    private const INPUT_TOKEN_COST = 42 / 1000000000;
+
+    public ?string $provider = 'TypeSafe';
+    public ?string $title = 'TypeSafe';
+    public ?string $name = 'typesafe';
+    protected ?string $url = 'https://api.typesafe.ai/v1';
+    public ?bool $supports_mcp_remote = false;
+    public ?bool $supports_stream = false;
+
+    /**
+     * Keep the pinned Jev version available even when the account only lists aliases.
+     */
+    public function fetchModels(): array
+    {
+        $names = ['jev-latest', 'jev-preview', 'jev-1.13.0'];
+        foreach ($this->fetchModelsFromProvider() as $model) {
+            if (!in_array($model['name'], $names, true)) {
+                $names[] = $model['name'];
+            }
+        }
+        $models = [];
+        foreach ($names as $name) {
+            $models[] = [
+                'name' => $name,
+                'context_length' => 64000,
+                'costs' => ['input' => self::INPUT_TOKEN_COST, 'input_cached' => self::INPUT_TOKEN_COST, 'output' => 0],
+                'supports_temperature' => false,
+                'supports_tools' => false,
+                'default' => $name === 'jev-latest'
+            ];
+        }
+        $models = $this->normalizeAndEnrichModels($models);
+        // The evaluation endpoint exposes no output-token budget.
+        foreach (array_keys($models) as $modelIndex) {
+            $models[$modelIndex]['max_output_tokens'] = null;
+        }
+        return $models;
+    }
+
+    /**
+     * Let ping distinguish authenticated discovery from the offline catalog.
+     */
+    public function fetchModelsFromProvider(): array
+    {
+        if (trim($this->api_key ?? '') === '') {
+            return [];
+        }
+        $response = $this->makeApiCall();
+        if ($response->status !== 200 || !is_array($response->result->models ?? null)) {
+            return [];
+        }
+        $models = [];
+        foreach ($response->result->models as $model) {
+            if (is_string($model->name ?? null) && $model->name !== '') {
+                $models[] = ['name' => $model->name];
+            }
+        }
+        return $models;
+    }
+
+    /**
+     * Evaluate all questions against the same state without reading or changing chat history.
+     *
+     * @param list<array<string, mixed>> $questions
+     * @throws \InvalidArgumentException
+     * @throws \JsonException
+     */
+    public function evaluate(string|array|object $state, array $questions): array
+    {
+        if ($questions === [] || !array_is_list($questions)) {
+            throw new \InvalidArgumentException('questions must be a non-empty list with a key in each question.');
+        }
+        if (($this->max_tries ?? 0) < 1 || ($this->timeout ?? 0) < 1) {
+            throw new \InvalidArgumentException('max_tries and timeout must be positive.');
+        }
+        $data = json_decode(
+            json_encode(['state' => $state, 'questions' => $questions], JSON_THROW_ON_ERROR),
+            flags: JSON_THROW_ON_ERROR
+        );
+        if (!is_string($data->state) && !is_array($data->state) && !is_object($data->state)) {
+            throw new \InvalidArgumentException('state must serialize to a string, object or array.');
+        }
+        $questionMap = new \stdClass();
+        foreach ($data->questions as $question) {
+            if (!is_object($question)) {
+                throw new \InvalidArgumentException('Each question must contain type and key fields.');
+            }
+            $key = $question->key ?? null;
+            $type = $question->type ?? null;
+            if (
+                !is_string($key) ||
+                trim($key) === '' ||
+                str_contains($key, "\0") ||
+                property_exists($questionMap, $key)
+            ) {
+                throw new \InvalidArgumentException('Each question key must be a unique, non-empty string.');
+            }
+            if (!in_array($type, ['choice', 'score', 'noul'], true)) {
+                throw new \InvalidArgumentException('Question type must be choice, score or noul.');
+            }
+            if (
+                array_diff(array_keys(get_object_vars($question)), ['type', 'key', 'instructions', 'criteria']) !== []
+            ) {
+                throw new \InvalidArgumentException(
+                    'Unknown question field. Use type, key, instructions and criteria.'
+                );
+            }
+            if (!$this->isEntry($question->instructions ?? null)) {
+                throw new \InvalidArgumentException('instructions must be a string, object, array or null.');
+            }
+            $criteria = $question->criteria ?? null;
+            if (
+                $type === 'choice' &&
+                (!is_object($criteria) ||
+                    count(get_object_vars($criteria)) < 1 ||
+                    count(get_object_vars($criteria)) > 255)
+            ) {
+                throw new \InvalidArgumentException(
+                    'choice criteria must be a map of 1 to 255 options to descriptions.'
+                );
+            }
+            if (
+                $type === 'score' &&
+                (!is_array($criteria) || !array_is_list($criteria) || count($criteria) < 2 || count($criteria) > 10)
+            ) {
+                throw new \InvalidArgumentException(
+                    'score criteria must be an ordered list of 2 to 10 level descriptions.'
+                );
+            }
+            if (
+                $type === 'noul' &&
+                $criteria !== null &&
+                (!is_object($criteria) || array_diff(array_keys(get_object_vars($criteria)), ['true', 'false']) !== [])
+            ) {
+                throw new \InvalidArgumentException(
+                    'noul criteria may only contain the string keys "true" and "false".'
+                );
+            }
+            foreach ($criteria ?? [] as $description) {
+                if (!$this->isEntry($description) || ($type === 'score' && $description === null)) {
+                    throw new \InvalidArgumentException(
+                        $type === 'score'
+                            ? 'Each score level must be a string, object or array.'
+                            : 'Each criterion must be a string, object, array or null.'
+                    );
+                }
+            }
+            unset($question->key);
+            $questionMap->{$key} = $question;
+        }
+
+        $this->aborted = false;
+        $return = ['response' => null, 'success' => false, 'costs' => 0.0, 'aborted' => false];
+        if (trim($this->api_key ?? '') === '') {
+            $return['response'] = 'TypeSafe API key is required.';
+            return $return;
+        }
+        $args = ['model' => $this->model, 'state' => $data->state, 'questions' => $questionMap];
+        for ($attempt = 1; $attempt <= $this->max_tries; $attempt++) {
+            if ($this->shouldAbort()) {
+                $this->aborted = true;
+                break;
+            }
+            $response = $this->makeApiCall($args);
+            if ($this->aborted) {
+                break;
+            }
+            $status = $response->status;
+            $body = $response->result;
+            $return['request_id'] = $response->headers['x-typesafe-request-id'][0] ?? null;
+            if ($status >= 200 && $status < 300) {
+                $validUsage =
+                    is_int($body->usage->input_tokens ?? null) &&
+                    $body->usage->input_tokens >= 0 &&
+                    is_int($body->usage->output_tokens ?? null) &&
+                    $body->usage->output_tokens >= 0;
+                if ($validUsage) {
+                    $return['input_tokens'] = $body->usage->input_tokens;
+                    $return['output_tokens'] = $body->usage->output_tokens;
+                    $return['costs'] = $body->usage->input_tokens * self::INPUT_TOKEN_COST;
+                }
+                $valid =
+                    $validUsage &&
+                    is_object($body) &&
+                    is_object($body->answers ?? null) &&
+                    count(get_object_vars($body->answers)) === count(get_object_vars($questionMap)) &&
+                    is_string($body->model ?? null) &&
+                    $body->model !== '' &&
+                    !isset($body->error);
+                if ($valid) {
+                    $return['model'] = $body->model;
+                    foreach ($questionMap as $key => $question) {
+                        $answer = $body->answers->{$key} ?? null;
+                        $type = $question->type;
+                        if (!is_object($answer) || ($answer->type ?? null) !== $type) {
+                            $valid = false;
+                            break;
+                        }
+                        if ($type === 'noul') {
+                            if (!$this->isProbability($answer->noul ?? null)) {
+                                $valid = false;
+                                break;
+                            }
+                            $answer->noul = (float) $answer->noul;
+                            continue;
+                        }
+                        $options =
+                            $type === 'choice'
+                                ? array_keys(get_object_vars($question->criteria))
+                                : array_keys($question->criteria);
+                        if (
+                            !$this->isProbability($answer->confidence ?? null) ||
+                            !is_object($answer->probabilities ?? null) ||
+                            count(get_object_vars($answer->probabilities)) !== count($options)
+                        ) {
+                            $valid = false;
+                            break;
+                        }
+                        if (
+                            $type === 'choice' &&
+                            (!is_string($answer->choice ?? null) ||
+                                !property_exists($question->criteria, $answer->choice))
+                        ) {
+                            $valid = false;
+                            break;
+                        }
+                        if (
+                            $type === 'score' &&
+                            ((!is_int($answer->score ?? null) && !is_float($answer->score ?? null)) ||
+                                !is_finite((float) $answer->score) ||
+                                $answer->score < 0 ||
+                                $answer->score > count($options) - 1 ||
+                                !is_object($answer->legend ?? null) ||
+                                count(get_object_vars($answer->legend)) !== count($options))
+                        ) {
+                            $valid = false;
+                            break;
+                        }
+                        foreach ($options as $option) {
+                            if (
+                                !$this->isProbability($answer->probabilities->{$option} ?? null) ||
+                                ($type === 'score' && !property_exists($answer->legend, (string) $option))
+                            ) {
+                                $valid = false;
+                                break 2;
+                            }
+                            $answer->probabilities->{$option} = (float) $answer->probabilities->{$option};
+                        }
+                        $answer->confidence = (float) $answer->confidence;
+                        if ($type === 'score') {
+                            $answer->score = (float) $answer->score;
+                        }
+                    }
+                }
+                $return['success'] = $valid;
+                $return['response'] = $valid ? $body->answers : 'Invalid TypeSafe response.';
+                break;
+            }
+            $detail = is_object($body)
+                ? $body->error->message ?? ($body->error ?? ($body->detail ?? ($body->message ?? null)))
+                : null;
+            if (!is_string($detail)) {
+                $detail = $detail !== null ? json_encode($detail) : $response->error;
+                $detail = $detail ?: 'Request failed.';
+            }
+            $detail = str_replace($this->api_key, '***', $detail);
+            $return['response'] = 'TypeSafe HTTP ' . $status . ': ' . substr($detail, 0, 1000);
+            if (
+                $attempt === $this->max_tries ||
+                !(in_array($status, [0, 408, 429], true) || ($status >= 500 && $status <= 599))
+            ) {
+                break;
+            }
+            $delay = (float) $this->retryBackoffSeconds($attempt, true);
+            $retryAfter = $response->headers['retry-after'][0] ?? null;
+            $retryAfterMilliseconds = $response->headers['retry-after-ms'][0] ?? null;
+            if ($retryAfter !== null) {
+                $seconds = is_numeric($retryAfter)
+                    ? (float) $retryAfter
+                    : (($date = strtotime($retryAfter)) === false
+                        ? -1
+                        : $date - time());
+                if ($seconds >= 0) {
+                    $delay = $seconds;
+                }
+            }
+            if (is_numeric($retryAfterMilliseconds) && (float) $retryAfterMilliseconds >= 0) {
+                $delay = (float) $retryAfterMilliseconds / 1000;
+            }
+            if ($delay > $this->timeout) {
+                break;
+            }
+            $deadline = microtime(true) + $delay;
+            while (microtime(true) < $deadline) {
+                if ($this->shouldAbort()) {
+                    $this->aborted = true;
+                    break;
+                }
+                usleep((int) min(100000, max(1, ($deadline - microtime(true)) * 1000000)));
+            }
+            if ($this->aborted) {
+                break;
+            }
+        }
+        $return['aborted'] = $this->aborted;
+        if ($this->aborted) {
+            $return['response'] = null;
+        }
+        $this->log(
+            ['success' => $return['success'], 'costs' => $return['costs'], 'aborted' => $return['aborted']],
+            'typesafe'
+        );
+        return $return;
+    }
+
+    /**
+     * Allow structured rubric entries without interpreting scalar numbers as descriptions.
+     */
+    private function isEntry(mixed $value): bool
+    {
+        return $value === null || is_string($value) || is_array($value) || is_object($value);
+    }
+
+    /**
+     * Accept numeric zero while rejecting booleans and numeric strings from malformed responses.
+     */
+    private function isProbability(mixed $value): bool
+    {
+        return (is_int($value) || is_float($value)) && is_finite((float) $value) && $value >= 0 && $value <= 1;
+    }
+
+    /**
+     * Share authenticated transport between model discovery and stateless evaluation.
+     */
+    protected function makeApiCall(?array $args = null): object
+    {
+        $request = __::curl(
+            url: rtrim($this->url, '/') . ($args === null ? '/models' : '/systemone'),
+            data: $args,
+            method: $args === null ? 'GET' : 'POST',
+            headers: ['Authorization' => 'Bearer ' . $this->api_key],
+            timeout: $this->timeout,
+            follow_redirects: false,
+            ssl_verify: true,
+            prepare_only: true
+        );
+        if ($this->abort_callback !== null) {
+            curl_setopt_array($request->handle, [
+                CURLOPT_NOPROGRESS => false,
+                CURLOPT_XFERINFOFUNCTION => function (): int {
+                    if ($this->shouldAbort()) {
+                        $this->aborted = true;
+                        return 1;
+                    }
+                    return 0;
+                }
+            ]);
+        }
+        $raw = curl_exec($request->handle);
+        $request->status = $raw === false ? 0 : curl_getinfo($request->handle, CURLINFO_HTTP_CODE);
+        $request->error = curl_error($request->handle);
+        $request->result = is_string($raw) ? json_decode($raw) : null;
+        unset($request->handle);
+        return $request;
+    }
+
+    /**
+     * Reject free-text generation instead of silently changing the requested operation.
+     */
+    public function ask(?string $prompt = null, mixed $files = null): array
+    {
+        throw new \BadMethodCallException('TypeSafe supports evaluate(), not ask().');
+    }
+
+    /**
+     * Keep the inherited chat entry point unavailable for this provider.
+     */
+    protected function askThis(
+        ?string $prompt = null,
+        mixed $files = null,
+        bool $add_prompt_to_session = true,
+        ?string $prev_output_text = null,
+        float $prev_costs = 0.0,
+        int $length_continuation_count = 0
+    ): array {
+        return $this->ask($prompt, $files);
+    }
+
+    /**
+     * Prevent chat session helpers from accepting evaluation input as a prompt.
+     */
+    protected function bringPromptInFormat(string $prompt, mixed $files = null): array
+    {
+        return $this->ask($prompt, $files);
+    }
+
+    /**
+     * Prevent structured decisions from being appended to a conversation.
+     */
+    protected function addResponseToSession(mixed $response): void
+    {
+        $this->ask();
     }
 }
 

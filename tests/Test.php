@@ -5776,4 +5776,820 @@ PHP;
             $this->assertStringContainsString('Process exited', $output);
         }
     }
+
+    private const TYPESAFE_ROUTER = <<<'ROUTER'
+    <?php
+    declare(strict_types=1);
+
+    if ($_SERVER['REQUEST_URI'] === '/ready') {
+        http_response_code(204);
+        return;
+    }
+
+    $directory = getenv('TYPESAFE_TEST_DIRECTORY');
+    if (!is_string($directory) || $directory === '') {
+        http_response_code(404);
+        return;
+    }
+    $scenario = json_decode(file_get_contents($directory . '/scenario.json'));
+    file_put_contents(
+        $directory . '/requests.jsonl',
+        json_encode([
+            'path' => $_SERVER['REQUEST_URI'],
+            'method' => $_SERVER['REQUEST_METHOD'],
+            'authorization' => $_SERVER['HTTP_AUTHORIZATION'] ?? '',
+            'content_type' => $_SERVER['CONTENT_TYPE'] ?? '',
+            'body' => json_decode(file_get_contents('php://input'))
+        ]) . "\n",
+        FILE_APPEND
+    );
+    header('Content-Type: application/json');
+
+    if ($_SERVER['REQUEST_URI'] === '/v1/models') {
+        http_response_code($scenario->models_status);
+        echo json_encode([
+            'models' => [
+                ['name' => 'jev-latest', 'description' => 'Stable model', 'release_date' => '2026-09-15'],
+                ['name' => 'jev-preview', 'description' => 'Preview model', 'release_date' => '2026-09-15']
+            ]
+        ]);
+        return;
+    }
+
+    if ($_SERVER['REQUEST_URI'] !== '/v1/systemone' || $_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(404);
+        return;
+    }
+
+    $attempt = (int) file_get_contents($directory . '/attempts');
+    file_put_contents($directory . '/attempts', (string) ($attempt + 1));
+    $response = $scenario->responses[min($attempt, count($scenario->responses) - 1)];
+    http_response_code($response->status);
+    foreach ($response->headers ?? [] as $name => $value) {
+        header($name . ': ' . $value);
+    }
+    if ($response->flush_headers ?? false) {
+        flush();
+    }
+    if (isset($response->delay)) {
+        usleep((int) ($response->delay * 1000000));
+    }
+    echo $response->raw ?? json_encode($response->body);
+    ROUTER;
+
+    private ?string $typesafeDirectory = null;
+    private string $typesafeUrl;
+    private mixed $typesafeProcess = null;
+
+    protected function setUp(): void
+    {
+        if (!str_starts_with($this->name(), 'test__typesafe_')) {
+            return;
+        }
+        $directory = tempnam(sys_get_temp_dir(), 'aihelper-typesafe-');
+        $this->assertNotFalse($directory);
+        unlink($directory);
+        mkdir($directory);
+        $this->typesafeDirectory = $directory;
+        $socket = stream_socket_server('tcp://127.0.0.1:0', $errorCode, $errorMessage);
+        $this->assertNotFalse($socket, $errorMessage);
+        $address = stream_socket_get_name($socket, false);
+        fclose($socket);
+        $this->typesafeUrl = 'http://' . $address . '/v1';
+        $this->typesafeRespond([$this->typesafeAnswer()]);
+        file_put_contents($this->typesafeDirectory . '/router.php', self::TYPESAFE_ROUTER);
+        $nullDevice = DIRECTORY_SEPARATOR === '\\' ? 'NUL' : '/dev/null';
+        $this->typesafeProcess = proc_open(
+            [PHP_BINARY, '-S', $address, $this->typesafeDirectory . '/router.php'],
+            [0 => ['file', $nullDevice, 'r'], 1 => ['file', $nullDevice, 'a'], 2 => ['file', $nullDevice, 'a']],
+            $pipes,
+            __DIR__,
+            array_merge(getenv(), ['TYPESAFE_TEST_DIRECTORY' => $this->typesafeDirectory])
+        );
+        $this->assertIsResource($this->typesafeProcess);
+        for ($attempt = 0; $attempt < 100; $attempt++) {
+            $connection = curl_init('http://' . $address . '/ready');
+            curl_setopt_array($connection, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT_MS => 100]);
+            curl_exec($connection);
+            if (curl_getinfo($connection, CURLINFO_HTTP_CODE) === 204) {
+                return;
+            }
+            usleep(20000);
+        }
+        $this->fail('TypeSafe fixture did not start.');
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->typesafeDirectory === null) {
+            return;
+        }
+        if (is_resource($this->typesafeProcess)) {
+            proc_terminate($this->typesafeProcess);
+            proc_close($this->typesafeProcess);
+        }
+        foreach (glob($this->typesafeDirectory . '/*') ?: [] as $path) {
+            unlink($path);
+        }
+        rmdir($this->typesafeDirectory);
+    }
+
+    private function typesafeProvider(array $options = []): aihelper
+    {
+        return aihelper::create(
+            ...array_merge(
+                [
+                    'provider' => 'typesafe',
+                    'api_key' => 'fixture-key',
+                    'url' => $this->typesafeUrl,
+                    'max_tries' => 1
+                ],
+                $options
+            )
+        );
+    }
+
+    private function typesafeQuestions(): array
+    {
+        return [
+            [
+                'type' => 'choice',
+                'key' => 'team',
+                'instructions' => 'Which team should handle this?',
+                'criteria' => ['support' => 'Technical issues', 'billing' => 'Invoices and payments']
+            ],
+            [
+                'type' => 'score',
+                'key' => 'urgency',
+                'instructions' => 'How urgent is this?',
+                'criteria' => ['Not urgent', 'Time-sensitive', 'Immediate action needed']
+            ],
+            ['type' => 'noul', 'key' => 'refund', 'instructions' => 'Is a refund requested?']
+        ];
+    }
+
+    private function typesafeAnswer(): array
+    {
+        return [
+            'status' => 200,
+            'headers' => ['x-typesafe-request-id' => 'fixture-request'],
+            'body' => [
+                'model' => 'jev-1.13.0',
+                'answers' => [
+                    'team' => [
+                        'type' => 'choice',
+                        'choice' => 'billing',
+                        'confidence' => 0.7,
+                        'probabilities' => ['support' => 0.1, 'billing' => 0.9]
+                    ],
+                    'urgency' => [
+                        'type' => 'score',
+                        'score' => 1.4,
+                        'confidence' => 0.6,
+                        'probabilities' => json_decode('{"0":0,"1":0.6,"2":0.4}'),
+                        'legend' => json_decode('{"0":"Not urgent","1":"Time-sensitive","2":"Immediate action needed"}')
+                    ],
+                    'refund' => ['type' => 'noul', 'noul' => 0.95]
+                ],
+                'usage' => ['input_tokens' => 3, 'output_tokens' => 20]
+            ]
+        ];
+    }
+
+    private function typesafeRespond(array $responses, int $modelsStatus = 200): void
+    {
+        file_put_contents(
+            $this->typesafeDirectory . '/scenario.json',
+            json_encode(
+                [
+                    'responses' => $responses,
+                    'models_status' => $modelsStatus
+                ],
+                JSON_THROW_ON_ERROR
+            )
+        );
+        file_put_contents($this->typesafeDirectory . '/requests.jsonl', '');
+        file_put_contents($this->typesafeDirectory . '/attempts', '0');
+    }
+
+    private function typesafeRequests(string $method = 'POST'): array
+    {
+        $lines = file($this->typesafeDirectory . '/requests.jsonl', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        return array_values(
+            array_filter(
+                array_map(fn(string $line): object => json_decode($line), $lines),
+                fn(object $request): bool => $request->method === $method
+            )
+        );
+    }
+
+    public function test__typesafe_factory_and_catalog_expose_jev_without_chat_capabilities(): void
+    {
+        $provider = $this->typesafeProvider();
+        $this->assertSame('typesafe', $provider->name);
+        $this->assertSame('TypeSafe', $provider->title);
+        $this->assertFalse($provider->supports_stream);
+        $this->assertFalse($provider->supports_mcp_remote);
+        $models = array_column($provider->models, null, 'name');
+        $this->assertArrayHasKey('jev-latest', $models);
+        $this->assertArrayHasKey('jev-preview', $models);
+        $this->assertArrayHasKey('jev-1.13.0', $models);
+        $this->assertTrue($models['jev-latest']['default']);
+        $this->assertFalse($models['jev-latest']['supports_tools']);
+        $this->assertFalse($models['jev-latest']['supports_temperature']);
+        $this->assertSame(64000, $models['jev-latest']['context_length']);
+        $this->assertNull($models['jev-latest']['max_output_tokens']);
+        $this->assertSame(42 / 1000000000, $models['jev-latest']['costs']['input']);
+        $this->assertSame(0, $models['jev-latest']['costs']['output']);
+        $this->assertTrue($provider->ping());
+        $this->assertSame('Bearer fixture-key', $this->typesafeRequests('GET')[0]->authorization);
+    }
+
+    public function test__typesafe_mixed_questions_use_the_native_wire_contract_and_preserve_metadata(): void
+    {
+        $provider = $this->typesafeProvider([
+            'stream' => true,
+            'temperature' => 0.5,
+            'effort' => 'max',
+            'enable_thinking' => true,
+            'system_prompt' => 'Ignored',
+            'history' => [['role' => 'user', 'content' => 'Ignored']],
+            'mcp_servers' => [['url' => $this->typesafeUrl . '/mcp']],
+            'auto_compact' => true
+        ]);
+        $state = ['message' => 'Please refund the duplicate charge.', 'amount' => 49.9];
+        $result = $provider->evaluate(state: $state, questions: $this->typesafeQuestions());
+        $this->assertTrue($result['success']);
+        $this->assertFalse($result['aborted']);
+        $this->assertSame('billing', $result['response']->team->choice);
+        $this->assertSame(1.4, $result['response']->urgency->score);
+        $this->assertSame(0.95, $result['response']->refund->noul);
+        $this->assertSame(0.7, $result['response']->team->confidence);
+        $this->assertSame(0.9, $result['response']->team->probabilities->billing);
+        $this->assertSame('Time-sensitive', $result['response']->urgency->legend->{'1'});
+        $this->assertEqualsWithDelta(0.000000126, $result['costs'], 1e-15);
+        $this->assertSame(3, $result['input_tokens']);
+        $this->assertSame(20, $result['output_tokens']);
+        $this->assertSame('jev-1.13.0', $result['model']);
+        $this->assertSame('fixture-request', $result['request_id']);
+        $this->assertSame([], $provider->getSessionContent());
+        $requests = $this->typesafeRequests();
+        $this->assertCount(1, $requests);
+        $this->assertSame('/v1/systemone', $requests[0]->path);
+        $this->assertSame('application/json', $requests[0]->content_type);
+        $this->assertSame('Bearer fixture-key', $requests[0]->authorization);
+        $this->assertSame(['model', 'state', 'questions'], array_keys(get_object_vars($requests[0]->body)));
+        $this->assertSame('jev-latest', $requests[0]->body->model);
+        $this->assertEquals($state, get_object_vars($requests[0]->body->state));
+        $this->assertSame(['team', 'urgency', 'refund'], array_keys(get_object_vars($requests[0]->body->questions)));
+        foreach ($requests[0]->body->questions as $question) {
+            $this->assertObjectNotHasProperty('key', $question);
+        }
+    }
+
+    public function test__typesafe_each_primitive_works_alone_with_zero_values_and_without_history(): void
+    {
+        $provider = $this->typesafeProvider(['model' => 'jev-1.13.0']);
+        foreach ($this->typesafeQuestions() as $question) {
+            $answer = $this->typesafeAnswer();
+            $value = $answer['body']['answers'][$question['key']];
+            if ($question['type'] !== 'choice') {
+                $value[$question['type']] = 0;
+            }
+            if (isset($value['confidence'])) {
+                $value['confidence'] = 0;
+            }
+            $answer['body']['answers'] = [$question['key'] => $value];
+            $this->typesafeRespond([$answer]);
+            $result = $provider->evaluate('A new independent state.', [$question]);
+            $this->assertTrue($result['success']);
+            $this->assertIsObject($result['response']);
+            $actual = $result['response']->{$question['key']}->{$question['type']};
+            $this->assertSame($question['type'] === 'choice' ? 'billing' : 0.0, $actual);
+            $this->assertSame([], $provider->getSessionContent());
+            $this->assertSame('jev-1.13.0', $this->typesafeRequests()[0]->body->model);
+        }
+    }
+
+    public function test__typesafe_structured_rubrics_noul_criteria_and_numeric_question_keys_are_preserved(): void
+    {
+        $questions = $this->typesafeQuestions();
+        $questions[0]['instructions'] = ['question' => 'Choose the team', 'examples' => ['Invoice: billing']];
+        $questions[0]['criteria']['support'] = null;
+        $questions[0]['criteria']['billing'] = ['includes' => ['Invoices', 'Payments']];
+        $questions[1]['criteria'][0] = ['description' => 'Not urgent', 'examples' => ['FYI']];
+        $questions[2]['key'] = '0';
+        $questions[2]['criteria'] = ['true' => ['Explicit refund request'], 'false' => 'No refund requested'];
+        $answer = $this->typesafeAnswer();
+        $answer['body']['answers']['0'] = $answer['body']['answers']['refund'];
+        unset($answer['body']['answers']['refund']);
+        $this->typesafeRespond([$answer]);
+        $provider = $this->typesafeProvider();
+        $result = $provider->evaluate(json_decode('{"messages":["A","B"],"paid":true}'), $questions);
+        $this->assertTrue($result['success']);
+        $this->assertSame(0.95, $result['response']->{'0'}->noul);
+        $wire = $this->typesafeRequests()[0]->body->questions;
+        $this->assertSame('Choose the team', $wire->team->instructions->question);
+        $this->assertNull($wire->team->criteria->support);
+        $this->assertSame(['Invoices', 'Payments'], $wire->team->criteria->billing->includes);
+        $this->assertSame(['Explicit refund request'], $wire->{'0'}->criteria->true);
+        $this->assertSame('Not urgent', $wire->urgency->criteria[0]->description);
+    }
+
+    public function test__typesafe_invalid_questions_fail_before_evaluation(): void
+    {
+        $provider = $this->typesafeProvider();
+        $question = $this->typesafeQuestions()[2];
+        $invalid = [
+            [],
+            ['refund' => $question],
+            [$question, $question],
+            [array_diff_key($question, ['key' => true])],
+            [array_replace($question, ['key' => ''])],
+            [array_replace($question, ['key' => "\0invalid"])],
+            [array_replace($question, ['key' => 1])],
+            [array_replace($question, ['type' => 'boolean'])],
+            [array_replace($question, ['instructions' => true])],
+            [array_replace($question, ['extra' => true])],
+            [array_replace($question, ['criteria' => [true => 'Yes', false => 'No']])],
+            [array_replace($question, ['criteria' => ['maybe' => 'Unclear']])],
+            [array_replace($this->typesafeQuestions()[0], ['criteria' => []])],
+            [array_replace($this->typesafeQuestions()[0], ['criteria' => ['a', 'b']])],
+            [array_replace($this->typesafeQuestions()[0], ['criteria' => ['a' => 42]])],
+            [array_replace($this->typesafeQuestions()[0], ['criteria' => array_fill_keys(range(1, 256), null)])],
+            [array_replace($this->typesafeQuestions()[1], ['criteria' => ['Only one']])],
+            [array_replace($this->typesafeQuestions()[1], ['criteria' => [null, 'Urgent']])],
+            [array_replace($this->typesafeQuestions()[1], ['criteria' => array_fill(0, 11, 'Level')])],
+            [array_replace($this->typesafeQuestions()[1], ['criteria' => ['low' => 'Low', 'high' => 'High']])]
+        ];
+        foreach ($invalid as $questions) {
+            try {
+                $provider->evaluate('State', $questions);
+                $this->fail('Invalid questions were accepted: ' . json_encode($questions));
+            } catch (\InvalidArgumentException $exception) {
+                $this->assertNotSame('', $exception->getMessage());
+            }
+        }
+        $this->assertSame([], $this->typesafeRequests());
+    }
+
+    public function test__typesafe_non_json_state_is_rejected_without_a_request(): void
+    {
+        $provider = $this->typesafeProvider();
+        foreach ([['value' => INF], ['text' => "\xB1\x31"], ["\0invalid" => 'Value']] as $state) {
+            try {
+                $provider->evaluate($state, $this->typesafeQuestions());
+                $this->fail('Invalid JSON state was accepted.');
+            } catch (\JsonException $exception) {
+                $this->assertNotSame('', $exception->getMessage());
+            }
+        }
+        $this->assertSame([], $this->typesafeRequests());
+    }
+
+    public function test__typesafe_permanent_errors_are_not_retried_and_credentials_are_not_logged(): void
+    {
+        foreach ([400, 401, 403, 404, 422] as $status) {
+            $this->typesafeRespond([
+                ['status' => $status, 'body' => ['error' => ['message' => 'Rejected fixture-key']]]
+            ]);
+            $log = $this->typesafeDirectory . '/request.log';
+            $result = $this->typesafeProvider(['max_tries' => 3, 'log' => $log])->evaluate(
+                'State',
+                $this->typesafeQuestions()
+            );
+            $this->assertFalse($result['success']);
+            $this->assertStringContainsString('HTTP ' . $status, $result['response']);
+            $this->assertStringNotContainsString('fixture-key', $result['response']);
+            $this->assertStringNotContainsString('fixture-key', (string) file_get_contents($log));
+            $this->assertSame(0.0, $result['costs']);
+            $this->assertCount(1, $this->typesafeRequests());
+        }
+    }
+
+    public function test__typesafe_retryable_errors_honor_attempt_limits(): void
+    {
+        foreach ([408, 429, 500, 503, 529] as $status) {
+            $failure = ['status' => $status, 'headers' => ['Retry-After' => '0'], 'body' => ['error' => 'Try later']];
+            $this->typesafeRespond([$failure, $this->typesafeAnswer()]);
+            $result = $this->typesafeProvider(['max_tries' => 2])->evaluate('State', $this->typesafeQuestions());
+            $this->assertTrue($result['success']);
+            $this->assertCount(2, $this->typesafeRequests());
+            $this->typesafeRespond([$failure]);
+            $result = $this->typesafeProvider()->evaluate('State', $this->typesafeQuestions());
+            $this->assertFalse($result['success']);
+            $this->assertCount(1, $this->typesafeRequests());
+        }
+    }
+
+    public function test__typesafe_malformed_success_responses_are_not_reported_as_success(): void
+    {
+        $valid = $this->typesafeAnswer();
+        $missing = $valid;
+        unset($missing['body']['answers']['refund']);
+        $wrongType = $valid;
+        $wrongType['body']['answers']['refund']['noul'] = true;
+        $wrongRange = $valid;
+        $wrongRange['body']['answers']['urgency']['score'] = 3;
+        $unknownChoice = $valid;
+        $unknownChoice['body']['answers']['team']['choice'] = 'unknown';
+        $missingUsage = $valid;
+        unset($missingUsage['body']['usage']);
+        $missingConfidence = $valid;
+        unset($missingConfidence['body']['answers']['team']['confidence']);
+        $invalidProbability = $valid;
+        $invalidProbability['body']['answers']['team']['probabilities']['billing'] = '0.9';
+        $missingProbability = $valid;
+        unset($missingProbability['body']['answers']['team']['probabilities']['billing']);
+        $wrongPrimitive = $valid;
+        $wrongPrimitive['body']['answers']['refund']['type'] = 'choice';
+        $missingLegend = $valid;
+        unset($missingLegend['body']['answers']['urgency']['legend']);
+        $wrongAnswerKey = $valid;
+        $wrongAnswerKey['body']['answers']['other'] = $wrongAnswerKey['body']['answers']['refund'];
+        unset($wrongAnswerKey['body']['answers']['refund']);
+        foreach (
+            [
+                ['status' => 200, 'raw' => '<html>Not JSON</html>'],
+                $missing,
+                $wrongType,
+                $wrongRange,
+                $unknownChoice,
+                $missingUsage,
+                $missingConfidence,
+                $invalidProbability,
+                $missingProbability,
+                $wrongPrimitive,
+                $missingLegend,
+                $wrongAnswerKey
+            ]
+            as $response
+        ) {
+            $this->typesafeRespond([$response]);
+            $result = $this->typesafeProvider()->evaluate('State', $this->typesafeQuestions());
+            $this->assertFalse($result['success']);
+            $this->assertStringContainsString('Invalid TypeSafe response', $result['response']);
+            $expectedCosts = isset($response['body']['usage']) ? (3 * 42) / 1000000000 : 0.0;
+            $this->assertEqualsWithDelta($expectedCosts, $result['costs'], 1e-15);
+            $this->assertCount(1, $this->typesafeRequests());
+        }
+    }
+
+    public function test__typesafe_failed_model_discovery_uses_catalog_without_making_ping_succeed(): void
+    {
+        $this->typesafeRespond([$this->typesafeAnswer()], 401);
+        $provider = $this->typesafeProvider();
+        $this->assertNotEmpty($provider->models);
+        $this->assertFalse($provider->ping());
+        $this->assertSame([], $provider->fetchModelsFromProvider());
+    }
+
+    public function test__typesafe_missing_key_and_abort_do_not_evaluate(): void
+    {
+        $result = $this->typesafeProvider(['api_key' => ''])->evaluate('State', $this->typesafeQuestions());
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('API key', $result['response']);
+        $provider = $this->typesafeProvider();
+        $provider->setAbortCallback(fn(): bool => true);
+        $result = $provider->evaluate('State', $this->typesafeQuestions());
+        $this->assertFalse($result['success']);
+        $this->assertTrue($result['aborted']);
+        $this->assertNull($result['response']);
+        $this->assertSame([], $this->typesafeRequests());
+        $provider->setAbortCallback(null);
+        $this->assertTrue($provider->evaluate('State', $this->typesafeQuestions())['success']);
+    }
+
+    public function test__typesafe_chat_is_explicitly_unsupported(): void
+    {
+        $this->expectException(\BadMethodCallException::class);
+        $this->expectExceptionMessage('evaluate');
+        $this->typesafeProvider()->ask('State');
+    }
+
+    public function test__typesafe_existing_chat_providers_reject_evaluation_without_a_network_call(): void
+    {
+        class_exists(aihelper::class);
+        $provider = (new \ReflectionClass(\vielhuber\aihelper\ai_anthropic::class))->newInstanceWithoutConstructor();
+        $this->expectException(\BadMethodCallException::class);
+        $provider->evaluate('State', $this->typesafeQuestions());
+    }
+
+    public function test__typesafe_readme_example_matches_the_documented_result_access(): void
+    {
+        $answer = $this->typesafeAnswer();
+        $answer['body']['answers']['team']['probabilities'] = ['support' => 0.1, 'sales' => 0.0, 'billing' => 0.9];
+        $this->typesafeRespond([$answer]);
+        $this->assertSame(
+            1,
+            preg_match(
+                '/### typesafe \/ jev evaluations.*?```php\n(.*?)\n```/s',
+                file_get_contents(__DIR__ . '/../README.md'),
+                $matches
+            )
+        );
+        $example = str_replace(
+            'api_key: $apiKey',
+            'api_key: $apiKey, url: ' . var_export($this->typesafeUrl, true),
+            $matches[1],
+            $replacements
+        );
+        $this->assertSame(1, $replacements);
+        $apiKey = 'fixture-key';
+        eval($example);
+        $this->assertSame('billing', $team);
+        $this->assertSame(1.4, $urgency);
+        $this->assertSame(0.95, $refund);
+        $this->assertCount(1, $this->typesafeRequests());
+    }
+
+    public function test__typesafe_array_state_and_nullable_rubrics_preserve_json_shapes(): void
+    {
+        $questions = $this->typesafeQuestions();
+        $questions[0]['instructions'] = null;
+        $questions[1]['criteria'] = ['Not urgent', ['label' => 'Time-sensitive'], ['Immediate action needed']];
+        $questions[2]['criteria'] = ['true' => ['definition' => 'Refund requested'], 'false' => null];
+        $answer = $this->typesafeAnswer();
+        $answer['body']['answers']['urgency']['legend'] = json_decode(
+            '{"0":"Not urgent","1":{"label":"Time-sensitive"},"2":["Immediate action needed"]}'
+        );
+        $answer['body']['usage'] = ['input_tokens' => 0, 'output_tokens' => 0];
+        $this->typesafeRespond([$answer]);
+        $provider = $this->typesafeProvider();
+        $result = $provider->evaluate(['First message', 'Second message'], $questions);
+        $this->assertTrue($result['success']);
+        $this->assertSame(0.0, $result['costs']);
+        $this->assertSame(0, $result['input_tokens']);
+        $this->assertSame(0, $result['output_tokens']);
+        $this->assertSame(['First message', 'Second message'], $this->typesafeRequests()[0]->body->state);
+        $this->assertNull($this->typesafeRequests()[0]->body->questions->team->instructions);
+        $this->assertSame('Not urgent', $result['response']->urgency->legend->{'0'});
+        $this->assertSame('Time-sensitive', $result['response']->urgency->legend->{'1'}->label);
+        $this->assertSame(['Immediate action needed'], $result['response']->urgency->legend->{'2'});
+    }
+
+    public function test__typesafe_default_attempt_budget_and_retry_after_headers(): void
+    {
+        $failure = ['status' => 429, 'headers' => ['Retry-After' => '0'], 'body' => ['error' => 'Wait']];
+        $this->typesafeRespond([$failure]);
+        $result = $this->typesafeProvider(['max_tries' => null])->evaluate('State', $this->typesafeQuestions());
+        $this->assertFalse($result['success']);
+        $this->assertCount(3, $this->typesafeRequests());
+
+        foreach ([['Retry-After' => '0.15'], ['Retry-After' => '0', 'retry-after-ms' => '150']] as $headers) {
+            $failure['headers'] = $headers;
+            $this->typesafeRespond([$failure, $this->typesafeAnswer()]);
+            $provider = $this->typesafeProvider(['max_tries' => 2]);
+            $started = microtime(true);
+            $result = $provider->evaluate('State', $this->typesafeQuestions());
+            $this->assertTrue($result['success']);
+            $this->assertGreaterThanOrEqual(0.14, microtime(true) - $started);
+            $this->assertCount(2, $this->typesafeRequests());
+        }
+    }
+
+    public function test__typesafe_retry_after_http_date_and_exponential_fallback(): void
+    {
+        $provider = $this->typesafeProvider(['max_tries' => 2]);
+        foreach ([['Retry-After' => gmdate('D, d M Y H:i:s', time() + 2) . ' GMT'], []] as $headers) {
+            $this->typesafeRespond([
+                ['status' => 503, 'headers' => $headers, 'body' => ['error' => 'Unavailable']],
+                $this->typesafeAnswer()
+            ]);
+            $started = microtime(true);
+            $result = $provider->evaluate('State', $this->typesafeQuestions());
+            $this->assertTrue($result['success']);
+            $this->assertGreaterThanOrEqual(0.9, microtime(true) - $started);
+            $this->assertCount(2, $this->typesafeRequests());
+        }
+    }
+
+    public function test__typesafe_long_server_delay_does_not_trigger_an_early_retry(): void
+    {
+        $this->typesafeRespond([
+            ['status' => 429, 'headers' => ['Retry-After' => '3600'], 'body' => ['error' => 'Wait']]
+        ]);
+        $result = $this->typesafeProvider(['max_tries' => 2, 'timeout' => 1])->evaluate(
+            'State',
+            $this->typesafeQuestions()
+        );
+        $this->assertFalse($result['success']);
+        $this->assertCount(1, $this->typesafeRequests());
+    }
+
+    public function test__typesafe_abort_interrupts_retry_waits(): void
+    {
+        $this->typesafeRespond([['status' => 429, 'headers' => ['Retry-After' => '5'], 'body' => ['error' => 'Wait']]]);
+        $provider = $this->typesafeProvider(['max_tries' => 3]);
+        $started = microtime(true);
+        $provider->setAbortCallback(fn(): bool => microtime(true) - $started >= 0.2);
+        $result = $provider->evaluate('State', $this->typesafeQuestions());
+        $this->assertTrue($result['aborted']);
+        $this->assertFalse($result['success']);
+        $this->assertNull($result['response']);
+        $this->assertLessThan(4.0, microtime(true) - $started);
+        $this->assertCount(1, $this->typesafeRequests());
+    }
+
+    public function test__typesafe_abort_interrupts_the_http_request_before_a_response(): void
+    {
+        $answer = $this->typesafeAnswer();
+        $answer['delay'] = 5;
+        $this->typesafeRespond([$answer]);
+        $provider = $this->typesafeProvider(['max_tries' => 3]);
+        $started = microtime(true);
+        $provider->setAbortCallback(fn(): bool => microtime(true) - $started >= 0.2);
+        $result = $provider->evaluate('State', $this->typesafeQuestions());
+        $this->assertTrue($result['aborted']);
+        $this->assertFalse($result['success']);
+        $this->assertNull($result['response']);
+        $this->assertSame(0.0, $result['costs']);
+        $this->assertLessThan(4.0, microtime(true) - $started);
+        $this->assertCount(1, $this->typesafeRequests());
+    }
+
+    public function test__typesafe_timeout_is_reported_as_transport_failure(): void
+    {
+        $answer = $this->typesafeAnswer();
+        $answer['delay'] = 3;
+        $this->typesafeRespond([$answer]);
+        $provider = $this->typesafeProvider(['timeout' => 1]);
+        $result = $provider->evaluate('State', $this->typesafeQuestions());
+        $this->assertFalse($result['success']);
+        $this->assertFalse($result['aborted']);
+        $this->assertStringContainsString('HTTP 0', $result['response']);
+        $this->assertCount(1, $this->typesafeRequests());
+    }
+
+    public function test__typesafe_redirects_are_not_followed_with_the_bearer_token(): void
+    {
+        $this->typesafeRespond([
+            [
+                'status' => 307,
+                'headers' => ['Location' => $this->typesafeUrl . '/systemone'],
+                'body' => ['error' => 'Redirect']
+            ]
+        ]);
+        $result = $this->typesafeProvider(['max_tries' => 3])->evaluate('State', $this->typesafeQuestions());
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('HTTP 307', $result['response']);
+        $this->assertCount(1, $this->typesafeRequests());
+    }
+
+    public function test__typesafe_malformed_error_details_still_return_a_failure_result(): void
+    {
+        $this->typesafeRespond([['status' => 400, 'raw' => '{"error":{"detail":1e999}}']]);
+        $result = $this->typesafeProvider()->evaluate('State', $this->typesafeQuestions());
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('HTTP 400', $result['response']);
+        $this->assertCount(1, $this->typesafeRequests());
+    }
+
+    public function test__typesafe_invalid_connection_options_fail_before_any_request(): void
+    {
+        foreach ([['timeout' => 0], ['timeout' => -1], ['max_tries' => 0], ['max_tries' => -1]] as $options) {
+            try {
+                $this->typesafeProvider($options);
+                $this->fail('Invalid connection options were accepted.');
+            } catch (\InvalidArgumentException $exception) {
+                $this->assertNotSame('', $exception->getMessage());
+            }
+        }
+        $this->assertSame([], $this->typesafeRequests('GET'));
+        $this->assertSame([], $this->typesafeRequests());
+    }
+
+    public function test__typesafe_transport_failure_after_headers_is_retried(): void
+    {
+        $incomplete = $this->typesafeAnswer();
+        $incomplete['flush_headers'] = true;
+        $incomplete['delay'] = 2;
+        $this->typesafeRespond([$incomplete, $this->typesafeAnswer()]);
+        $result = $this->typesafeProvider(['timeout' => 1, 'max_tries' => 2])->evaluate(
+            'State',
+            $this->typesafeQuestions()
+        );
+        $this->assertTrue($result['success'], (string) ($result['success'] ? '' : $result['response']));
+        $this->assertCount(2, $this->typesafeRequests());
+    }
+
+    public function test__ai_typesafe(): void
+    {
+        if ($this->skipIfMissingEnv('TYPESAFE_API_KEY', false)) {
+            return;
+        }
+        $provider = aihelper::create(
+            provider: 'typesafe',
+            api_key: $_SERVER['TYPESAFE_API_KEY'],
+            timeout: 30,
+            max_tries: 1
+        );
+        $questions = $this->typesafeQuestions();
+        $message = 'My invoice was charged twice. Please refund the duplicate payment immediately.';
+        $structuredQuestions = $questions;
+        $structuredQuestions[0]['instructions'] = ['question' => 'Which team handles this?', 'focus' => ['message']];
+        $structuredQuestions[0]['criteria'] = ['billing' => ['includes' => ['Invoices', 'Refunds']], 'support' => null];
+        $structuredQuestions[1]['criteria'] = ['Not urgent', ['description' => 'Time sensitive'], ['Immediate action']];
+        $structuredQuestions[2]['key'] = '0';
+        $structuredQuestions[2]['criteria'] = ['true' => ['definition' => 'Explicit refund request'], 'false' => null];
+        $structuredQuestions[] = [
+            'type' => 'noul',
+            'key' => 'paid',
+            'instructions' => null,
+            'criteria' => ['true' => 'The invoice was paid.', 'false' => 'The invoice was not paid.']
+        ];
+        $cases = [
+            ['state' => $message, 'questions' => [$questions[0]]],
+            ['state' => ['message' => $message], 'questions' => [$questions[1]]],
+            ['state' => json_decode(json_encode(['message' => $message])), 'questions' => [$questions[2]]],
+            ['state' => [$message], 'questions' => $questions],
+            ['state' => ['message' => $message, 'paid' => true], 'questions' => $structuredQuestions],
+            [
+                'model' => 'jev-1.13.0',
+                'state' => 'This is about option_42. It requires immediate action.',
+                'questions' => [
+                    [
+                        'type' => 'choice',
+                        'key' => 'single',
+                        'instructions' => 'Select the option.',
+                        'criteria' => ['billing' => null]
+                    ],
+                    [
+                        'type' => 'choice',
+                        'key' => 'many',
+                        'instructions' => 'Which option is mentioned?',
+                        'criteria' => array_fill_keys(
+                            array_map(fn(int $number): string => 'option_' . $number, range(0, 254)),
+                            null
+                        )
+                    ],
+                    [
+                        'type' => 'score',
+                        'key' => 'urgency',
+                        'instructions' => 'Rate the urgency from 0 (none) to 9 (immediate action).',
+                        'criteria' => array_map(fn(int $level): string => 'Urgency level ' . $level, range(0, 9))
+                    ]
+                ]
+            ],
+            [
+                'model' => 'jev-preview',
+                'state' => ['message' => 'Bitte die doppelte Abbuchung sofort erstatten.'],
+                'questions' => $questions
+            ]
+        ];
+        foreach ($cases as $case) {
+            $currentProvider = isset($case['model'])
+                ? aihelper::create(
+                    provider: 'typesafe',
+                    model: $case['model'],
+                    api_key: $_SERVER['TYPESAFE_API_KEY'],
+                    timeout: 30,
+                    max_tries: 1
+                )
+                : $provider;
+            $result = $currentProvider->evaluate(state: $case['state'], questions: $case['questions']);
+            $this->assertTrue($result['success'], (string) ($result['success'] ? '' : $result['response']));
+            $this->assertFalse($result['aborted']);
+            $this->assertEqualsCanonicalizing(
+                array_column($case['questions'], 'key'),
+                array_keys(get_object_vars($result['response']))
+            );
+            foreach ($case['questions'] as $question) {
+                $answer = $result['response']->{$question['key']};
+                $this->assertSame($question['type'], $answer->type);
+                if ($question['type'] !== 'noul') {
+                    $this->assertIsFloat($answer->confidence);
+                    $this->assertGreaterThanOrEqual(0, $answer->confidence);
+                    $this->assertLessThanOrEqual(1, $answer->confidence);
+                    $this->assertEqualsCanonicalizing(
+                        array_keys($question['criteria']),
+                        array_keys(get_object_vars($answer->probabilities))
+                    );
+                    foreach ($answer->probabilities as $probability) {
+                        $this->assertIsFloat($probability);
+                        $this->assertGreaterThanOrEqual(0, $probability);
+                        $this->assertLessThanOrEqual(1, $probability);
+                    }
+                }
+                if ($question['type'] === 'choice') {
+                    $this->assertContains($answer->choice, array_keys($question['criteria']));
+                    continue;
+                }
+                $this->assertIsFloat($answer->{$question['type']});
+                $this->assertGreaterThanOrEqual(0, $answer->{$question['type']});
+                $maximum = $question['type'] === 'score' ? count($question['criteria']) - 1 : 1;
+                $this->assertLessThanOrEqual($maximum, $answer->{$question['type']});
+                if ($question['type'] === 'score') {
+                    foreach ($question['criteria'] as $level => $description) {
+                        $this->assertEquals(json_decode(json_encode($description)), $answer->legend->{(string) $level});
+                    }
+                }
+            }
+            $this->assertNotEmpty($result['model']);
+            $this->assertGreaterThan(0, $result['input_tokens']);
+            $this->assertIsInt($result['output_tokens']);
+            $this->assertEqualsWithDelta(($result['input_tokens'] * 42) / 1000000000, $result['costs'], 1e-12);
+            $this->assertSame([], $currentProvider->getSessionContent());
+        }
+    }
 }

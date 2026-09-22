@@ -8,7 +8,7 @@
 
 # 🤖 aihelper 🤖
 
-aihelper provides a single, consistent php interface for multiple ai providers. it supports chat and vision use cases, session-aware conversations, robust retry logic, logging, simple cost tracking, and optional model context protocol (mcp) integration — all behind one method.
+aihelper provides a single, consistent php interface for multiple ai providers. it supports chat and vision use cases, session-aware conversations, structured evaluations with typesafe, robust retry logic, logging, simple cost tracking, and optional model context protocol (mcp) integration — with a shared factory and result format.
 
 ## installation
 
@@ -22,7 +22,7 @@ composer require vielhuber/aihelper
 use vielhuber\aihelper\aihelper;
 
 $ai = aihelper::create(
-    provider: 'anthropic', // anthropic|google|openai|xai|deepseek|openrouter|cliproxyapi|elevenlabs|nvidia|llamacpp|lmstudio|claudecode|codex|opencode
+    provider: 'anthropic', // anthropic|google|openai|xai|deepseek|openrouter|cliproxyapi|elevenlabs|typesafe|nvidia|llamacpp|lmstudio|claudecode|codex|opencode
     model: 'claude-opus-4-1', // claude-opus-4-1|gemini-2.5-pro|gpt-5|grok-4|deepseek-chat|qwen/qwen3-coder-next|...
     effort: null, // null|none|minimal|low|medium|high|xhigh|max|ultra — reasoning effort, ignored when the provider/model has no supported reasoning control
     temperature: 1.0, // controls the randomness of the text generated
@@ -49,7 +49,7 @@ $ai = aihelper::create(
     cli_session_home: null, // cli harness only: persistent native history, configuration and skills for this session
     cli_auth_home: null, // cli harness only: persistent authentication profile shared by separate session homes
     history: null, // submit messages (get with $ai->getSessionContent()),
-    system_prompt: null, // works with every provider — cli harnesses receive it as a real system prompt, everyone else gets it prepended to the session (same as writing it into `history` yourself or calling $ai->setSystemPrompt() later)
+    system_prompt: null, // chat providers: cli harnesses receive a real system prompt, other chat providers prepend it to the session (same as writing it into `history` yourself or calling $ai->setSystemPrompt() later)
     stream: false,
     url: null, // overwrite connection url (e.g. for llamacpp/lmstudio)
     enable_thinking: null, // true|false|null — force reasoning/thinking on/off; null = provider default (see below)
@@ -140,6 +140,106 @@ aihelper::callMcpTool(
     authorization_token: '...'
 );
 // ['jsonrpc' => '2.0', 'id' => 123, 'result' => ['content' => [['type' => 'text', 'text' => '...']]]]
+```
+
+### typesafe / jev evaluations
+
+[typesafe](https://docs.typesafe.ai/introduction) evaluates text or structured data with Jev instead of generating a chat response. use the existing factory and `evaluate(state:, questions:)`, without additional question classes:
+
+```php
+use vielhuber\aihelper\aihelper;
+
+$ai = aihelper::create(provider: 'typesafe', model: 'jev-latest', api_key: $apiKey);
+
+$ticket = [
+    'message' => 'Meine Rechnung wurde doppelt abgebucht. Bitte sofort erstatten.',
+    'order' => [
+        'number' => 'A-104',
+        'amount' => 49.9,
+        'currency' => 'EUR'
+    ]
+];
+
+$result = $ai->evaluate(
+    state: $ticket,
+    questions: [
+        [
+            'type' => 'choice',
+            'key' => 'team',
+            'instructions' => 'Welches Team ist zuständig?',
+            'criteria' => [
+                'support' => 'Technische Probleme',
+                'sales' => 'Kaufberatung',
+                'billing' => 'Rechnungen und Zahlungen'
+            ]
+        ],
+        [
+            'type' => 'score',
+            'key' => 'urgency',
+            'instructions' => 'Wie dringend ist die Anfrage?',
+            'criteria' => [
+                'Keine zeitliche Dringlichkeit',
+                'Zeitnahe Bearbeitung erforderlich',
+                'Sofortiges Handeln erforderlich'
+            ]
+        ],
+        [
+            'type' => 'noul',
+            'key' => 'refund',
+            'instructions' => 'Wird eine Rückerstattung verlangt?'
+        ]
+    ]
+);
+
+if (!$result['success']) {
+    throw new RuntimeException($result['response'] ?? 'Evaluation aborted.');
+}
+
+$answers = $result['response'];
+$team = $answers->team->choice;
+$urgency = $answers->urgency->score;
+$refund = $answers->refund->noul;
+```
+
+`questions` is a non-empty list. each entry has a `type` and a unique, non-empty string `key`. the adapter converts these keys to the native TypeSafe question IDs; the model does not see them. keep a single entry for one question, or mix any number of the three question types in one request. the response is always an object keyed by these IDs, even for one question. multiple questions are not a fourth primitive.
+
+| type     | criteria                                                           | answer fields                                                                                              |
+| -------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `choice` | a map of option names to descriptions (up to 255 options)          | `choice`: string; `confidence`: float from 0 to 1; `probabilities`: object with every option's probability |
+| `score`  | an ordered list of 2–10 level descriptions                         | `score`: float from 0 to the last level index; `confidence`, `probabilities`, `legend`                     |
+| `noul`   | optional descriptions under the string keys `'true'` and `'false'` | `noul`: float from 0 to 1, the probability of yes, **not a boolean**                                       |
+
+a three-level score ranges from 0 to 2 and can fall between levels. score `probabilities` and `legend` use zero-based level keys, accessible as `$answers->urgency->probabilities->{'0'}`. confidence is separate from the winning option's probability and does not guarantee correctness. no automatic thresholds, rounding or boolean conversion are applied.
+
+`state` accepts a string or JSON-compatible PHP arrays/objects, including nested records and message lists. paths and URLs are only text, not attachments to fetch. convert images, audio, video and binary files to text or structured data first. instructions and individual criterion descriptions also support structured arrays/objects. instructions, choice descriptions and noul descriptions may be `null`; score level descriptions must not be `null`. the live API rejects null score levels with HTTP 422, matching the [HTTP reference](https://docs.typesafe.ai/api), despite the broader nullable `EntryType` claim in the [advanced documentation](https://docs.typesafe.ai/primitives/advanced). aihelper rejects these levels before sending a request. for a noul, optional criteria can be added as follows (use string keys, not PHP booleans):
+
+```php
+'criteria' => [
+    'true' => 'An explicit request to return money.',
+    'false' => 'A billing question without a refund request.'
+]
+```
+
+the result retains `success`, `response` and `costs`, plus `aborted`. successful evaluations also expose `model` (the resolved version), `input_tokens`, `output_tokens` and `request_id` (when supplied by the server, otherwise `null`). numeric zero is a valid answer. `costs` is in USD and retains small amounts without rounding them to zero: the documented Jev 1.13 price is $0.042 per million input tokens; output tokens are free.
+
+`model` defaults to `jev-latest`; `jev-preview` and the pinned `jev-1.13.0` are also available. `fetchModels()` merges authenticated discovery with the known catalog; `ping()` requires successful authenticated discovery, not just an offline fallback. pass `api_key` explicitly (for example from `TYPESAFE_API_KEY` loaded by the application). no new dependency is needed.
+
+evaluations are stateless: repeated calls neither read nor update chat history. chat-only factory options such as history, system prompts, MCP, streaming, temperature, effort and auto-compaction are ignored for TypeSafe. `ask()` throws `BadMethodCallException`; `evaluate()` on other providers does the same. existing chat providers are unchanged.
+
+invalid question shapes or non-positive `timeout` / `max_tries` values raise `InvalidArgumentException`; non-JSON-compatible data raises `JsonException`. HTTP, connection and malformed-response failures return `success => false` with an error string in `response`. cancellation through `abort_callback` returns `aborted => true` and `response => null`. TypeSafe defaults to three total attempts (`max_tries: 1` disables retries); only connection failures (including interrupted response bodies), HTTP 408/429 and 5xx are retried, with exponential backoff and `Retry-After` / `retry-after-ms` support. waits remain cancellable. `timeout` defaults to 300 seconds per HTTP request; a server-requested retry delay exceeding this timeout ends the call instead of retrying early. authentication and validation errors are not retried.
+
+Jev's documented input limits are 64k tokens for the whole request and 32k for the state plus the longest question. English currently has the best accuracy; verify other languages against representative data. the provider does not estimate or truncate these inputs. see the [API contract](https://docs.typesafe.ai/api), [state formats](https://docs.typesafe.ai/concepts/state), [primitives](https://docs.typesafe.ai/primitives) and [current models/pricing](https://docs.typesafe.ai/models).
+
+run the isolated provider contract tests without API credentials or paid requests:
+
+```sh
+./vendor/bin/phpunit --filter test__typesafe_
+```
+
+with a valid `TYPESAFE_API_KEY` in `.env`, the following live test makes seven paid evaluations: each primitive individually, mixed and structured questions, the maximum choice/score sizes, and all three model names. without the key, it is skipped:
+
+```sh
+./vendor/bin/phpunit --filter test__ai_typesafe
 ```
 
 ### cli harnesses
