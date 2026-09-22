@@ -6275,16 +6275,19 @@ PHP;
         $provider->evaluate('State', $this->typesafeQuestions());
     }
 
-    public function test__typesafe_readme_example_matches_the_documented_result_access(): void
+    #[\PHPUnit\Framework\Attributes\TestWith(["\n"], 'LF')]
+    #[\PHPUnit\Framework\Attributes\TestWith(["\r\n"], 'CRLF')]
+    public function test__typesafe_readme_example_matches_the_documented_result_access(string $lineEnding): void
     {
         $answer = $this->typesafeAnswer();
         $answer['body']['answers']['team']['probabilities'] = ['support' => 0.1, 'sales' => 0.0, 'billing' => 0.9];
         $this->typesafeRespond([$answer]);
+        $readme = str_replace("\r\n", "\n", file_get_contents(__DIR__ . '/../README.md'));
         $this->assertSame(
             1,
             preg_match(
-                '/### typesafe \/ jev evaluations.*?```php\n(.*?)\n```/s',
-                file_get_contents(__DIR__ . '/../README.md'),
+                '/### typesafe \/ jev evaluations.*?```php\r?\n(.*?)\r?\n```/s',
+                str_replace("\n", $lineEnding, $readme),
                 $matches
             )
         );
