@@ -12876,6 +12876,13 @@ class ai_codex extends ai_harness
 
     protected array $native_goal_tool_calls = [];
 
+    /**
+     * Thread totals of the first token_count event of this run, minus that request: what the resumed thread had used before.
+     *
+     * @var array<string, int>|null
+     */
+    protected ?array $native_usage_baseline = null;
+
     public array $models = [
         [
             'name' => 'gpt-6-astra',
@@ -13455,6 +13462,7 @@ class ai_codex extends ai_harness
         $this->native_initial_turn_completed = false;
         $this->native_goal_turn_active = false;
         $this->native_goal_tool_calls = [];
+        $this->native_usage_baseline = null;
     }
 
     /**
@@ -13489,6 +13497,21 @@ class ai_codex extends ai_harness
     {
         $payload = is_array($event['payload'] ?? null) ? $event['payload'] : [];
         $type = (string) ($payload['type'] ?? '');
+        if (
+            ($event['type'] ?? null) === 'event_msg' &&
+            $type === 'token_count' &&
+            $this->native_usage_baseline === null &&
+            is_array($payload['info']['total_token_usage'] ?? null) &&
+            is_array($payload['info']['last_token_usage'] ?? null)
+        ) {
+            $this->native_usage_baseline = [];
+            foreach (['input_tokens', 'cached_input_tokens', 'output_tokens'] as $field) {
+                $this->native_usage_baseline[$field] =
+                    (int) ($payload['info']['total_token_usage'][$field] ?? 0) -
+                    (int) ($payload['info']['last_token_usage'][$field] ?? 0);
+            }
+            return;
+        }
         if (($event['type'] ?? null) === 'event_msg' && $type === 'task_complete') {
             if (!$this->native_goal_turn_active) {
                 $this->native_initial_turn_completed = true;
@@ -13974,11 +13997,16 @@ class ai_codex extends ai_harness
             }
             $this->emitHarnessLifecycleEvent($event);
             $result->result->stop_reason = 'end_turn';
+            // exec --json reports the thread total, which on a resumed thread includes every earlier turn
+            $baseline = $this->native_usage_baseline ?? [];
             $result->result->usage = (object) [
-                'input_tokens' => (int) ($event['usage']['input_tokens'] ?? 0),
+                'input_tokens' => max(0, (int) ($event['usage']['input_tokens'] ?? 0) - ($baseline['input_tokens'] ?? 0)),
                 'cache_creation_input_tokens' => (int) ($event['usage']['cache_write_input_tokens'] ?? 0),
-                'cache_read_input_tokens' => (int) ($event['usage']['cached_input_tokens'] ?? 0),
-                'output_tokens' => (int) ($event['usage']['output_tokens'] ?? 0)
+                'cache_read_input_tokens' => max(
+                    0,
+                    (int) ($event['usage']['cached_input_tokens'] ?? 0) - ($baseline['cached_input_tokens'] ?? 0)
+                ),
+                'output_tokens' => max(0, (int) ($event['usage']['output_tokens'] ?? 0) - ($baseline['output_tokens'] ?? 0))
             ];
             $this->emitAnthropicEvent($emit, [
                 'type' => 'message_delta',

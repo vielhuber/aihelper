@@ -1097,6 +1097,58 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame("HALLO123\n", $result->result->content[5]->content);
     }
 
+    function test__codex_bills_a_resumed_turn_without_the_thread_history(): void
+    {
+        class_exists(aihelper::class);
+        $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_codex::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($harness, true);
+        $result = (object) ['result' => (object) ['content' => [], 'stop_reason' => null, 'usage' => (object) []]];
+        $native = new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'handleNativeEvent');
+        $primary = new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'handleEvent');
+        $count = static fn(int $input, int $cached, int $output, int $lastInput, int $lastCached, int $lastOutput): array => [
+            'type' => 'event_msg',
+            'payload' => [
+                'type' => 'token_count',
+                'info' => [
+                    'total_token_usage' => ['input_tokens' => $input, 'cached_input_tokens' => $cached, 'output_tokens' => $output],
+                    'last_token_usage' => [
+                        'input_tokens' => $lastInput,
+                        'cached_input_tokens' => $lastCached,
+                        'output_tokens' => $lastOutput
+                    ]
+                ]
+            ]
+        ];
+        ob_start();
+        ob_start();
+        // the thread already held 1000/800/100 before this run; two requests of 60/50/7 and 70/60/8 follow
+        $native->invoke($harness, $count(1060, 850, 107, 60, 50, 7), $result, null);
+        $native->invoke($harness, $count(1130, 910, 115, 70, 60, 8), $result, null);
+        $primary->invoke(
+            $harness,
+            ['type' => 'turn.completed', 'usage' => ['input_tokens' => 1130, 'cached_input_tokens' => 910, 'output_tokens' => 115]],
+            $result,
+            null
+        );
+        ob_end_clean();
+        ob_end_clean();
+        $this->assertSame(130, $result->result->usage->input_tokens);
+        $this->assertSame(110, $result->result->usage->cache_read_input_tokens);
+        $this->assertSame(15, $result->result->usage->output_tokens);
+
+        // a fresh thread without token_count events keeps the reported numbers
+        $fresh = (new \ReflectionClass(\vielhuber\aihelper\ai_codex::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty(aihelper::class, 'stream'))->setValue($fresh, true);
+        $result = (object) ['result' => (object) ['content' => [], 'stop_reason' => null, 'usage' => (object) []]];
+        ob_start();
+        ob_start();
+        $primary->invoke($fresh, ['type' => 'turn.completed', 'usage' => ['input_tokens' => 10, 'output_tokens' => 5]], $result, null);
+        ob_end_clean();
+        ob_end_clean();
+        $this->assertSame(10, $result->result->usage->input_tokens);
+        $this->assertSame(5, $result->result->usage->output_tokens);
+    }
+
     function test__codex_maps_native_goal_continuations(): void
     {
         class_exists(aihelper::class);
