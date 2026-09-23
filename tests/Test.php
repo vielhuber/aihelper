@@ -2332,6 +2332,8 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $this->assertContains('ControlMaster=auto', $command);
         $this->assertContains('ControlPersist=60', $command);
+        $this->assertContains('StrictHostKeyChecking=no', $command);
+        $this->assertContains('UserKnownHostsFile=/dev/null', $command);
         $controlPath = current(
             array_filter($command, fn(string $argument): bool => str_starts_with($argument, 'ControlPath='))
         );
