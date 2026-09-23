@@ -2136,7 +2136,7 @@ class Test extends \PHPUnit\Framework\TestCase
     {
         $aihelperReflection = new \ReflectionClass(aihelper::class);
         foreach (
-            ['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5', 'claude-fable-5-1', 'claude-mythos-5']
+            ['claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5', 'claude-fable-5-1', 'claude-mythos-5']
             as $model
         ) {
             $anthropic = (new \ReflectionClass(\vielhuber\aihelper\ai_anthropic::class))->newInstanceWithoutConstructor();

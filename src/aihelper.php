@@ -12414,6 +12414,21 @@ class ai_claudecode extends ai_harness
             'default' => false
         ],
         [
+            'name' => 'claude-opus-5-5',
+            'context_length' => 1000000,
+            'max_output_tokens' => 128000,
+            'costs' => ['input' => 0.000004, 'input_cached' => 0.0000002, 'output' => 0.00002],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
+            'supports_effort' => true,
+            'efforts' => ['low', 'medium', 'high', 'xhigh', 'max'],
+            'default' => true
+        ],
+        [
             'name' => 'claude-opus-5',
             'context_length' => 200000,
             'max_output_tokens' => 64000,
@@ -12426,7 +12441,7 @@ class ai_claudecode extends ai_harness
             'supports_audio_to_text' => false,
             'supports_effort' => true,
             'efforts' => ['low', 'medium', 'high', 'xhigh', 'max'],
-            'default' => true
+            'default' => false
         ],
         [
             'name' => 'claude-sonnet-5',
