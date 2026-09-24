@@ -396,6 +396,176 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
+    private function cliRequestAihelper(): aihelper
+    {
+        // The provider classes are declared in the main aihelper file.
+        class_exists(aihelper::class);
+        return new class extends \vielhuber\aihelper\ai_cliproxyapi {
+            protected const CLI_HARNESS_ROOT = 'harness';
+
+            public function __construct() {}
+        };
+    }
+
+    function test__cli_request_isolated_homes_are_included_once(): void
+    {
+        $testDirectory = sys_get_temp_dir() . '/aihelper-cli-limit-' . bin2hex(random_bytes(8));
+        $dataDirectory = $testDirectory . '/harness/chats/fixture/opencode/data/opencode';
+        mkdir($dataDirectory, recursive: true);
+        $databasePath = $dataDirectory . '/opencode.db';
+        $connection = new \PDO('sqlite:' . $databasePath);
+        $connection->exec('CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT)');
+        $connection->exec('CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT)');
+        $connection->exec('CREATE TABLE part (message_id TEXT, time_created INTEGER, data TEXT)');
+        $connection->exec("INSERT INTO session (id, directory) VALUES ('session-1', '/tmp/project')");
+        $statement = $connection->prepare(
+            'INSERT INTO message (id, session_id, time_created, data) VALUES (:id, :session_id, :time_created, :data)'
+        );
+        foreach ([1, 2, 3] as $requestNumber) {
+            $timeCreated = 2208988800000 + $requestNumber * 1000;
+            $statement->execute([
+                'id' => 'message-' . $requestNumber,
+                'session_id' => 'session-1',
+                'time_created' => $timeCreated,
+                'data' => json_encode(
+                    [
+                        'role' => 'assistant',
+                        'providerID' => 'opencode-go',
+                        'modelID' => 'model-' . $requestNumber,
+                        'tokens' => ['input' => $requestNumber, 'output' => $requestNumber],
+                        'time' => ['created' => $timeCreated, 'completed' => $timeCreated + 100]
+                    ],
+                    JSON_THROW_ON_ERROR
+                )
+            ]);
+        }
+        $originalDataHome = getenv('XDG_DATA_HOME');
+        putenv('XDG_DATA_HOME=' . $testDirectory . '/missing');
+
+        $previousDirectory = getcwd();
+        $helper = $this->cliRequestAihelper();
+        chdir($testDirectory);
+        try {
+            $requests = $helper::getCliApiRequests(
+                limit: 2,
+                date_from: '2040-01-01 00:00:00',
+                date_until: '2040-12-31 23:59:59',
+                group_by: false
+            );
+
+            $this->assertCount(2, $requests);
+            $this->assertSame(['model-3', 'model-2'], array_column($requests, 'model'));
+
+            $groupedRequests = $helper::getCliApiRequests(
+                limit: 2,
+                date_from: '2040-01-01 00:00:00',
+                date_until: '2040-12-31 23:59:59',
+                group_by: true
+            );
+
+            $this->assertCount(1, $groupedRequests);
+            $this->assertSame(3, $groupedRequests[0]['calls']);
+            $this->assertSame(6, $groupedRequests[0]['usage']['input_tokens']);
+        } finally {
+            chdir($previousDirectory);
+            if ($originalDataHome === false) {
+                putenv('XDG_DATA_HOME');
+            }
+            if ($originalDataHome !== false) {
+                putenv('XDG_DATA_HOME=' . $originalDataHome);
+            }
+            $statement = null;
+            $connection = null;
+            unlink($databasePath);
+            rmdir($dataDirectory);
+            rmdir(dirname($dataDirectory));
+            rmdir(dirname($dataDirectory, 2));
+            rmdir(dirname($dataDirectory, 3));
+            rmdir(dirname($dataDirectory, 4));
+            rmdir(dirname($dataDirectory, 5));
+            rmdir($testDirectory);
+        }
+    }
+
+    function test__cli_request_isolated_jsonl_histories_are_included_once(): void
+    {
+        $root = sys_get_temp_dir() . '/aihelper-cli-homes-' . bin2hex(random_bytes(8));
+        $home = $root . '/harness/system/fixture/session';
+        $claude = $home . '/claude/projects/project';
+        $codex = $home . '/codex/sessions/2040/01/01';
+        mkdir($claude, recursive: true);
+        mkdir($codex, recursive: true);
+        file_put_contents($claude . '/session.jsonl', json_encode([
+            'type' => 'assistant', 'timestamp' => '2040-01-01T00:00:01Z',
+            'message' => ['model' => 'claude-fixture', 'usage' => ['input_tokens' => 12, 'output_tokens' => 3]]
+        ]) . "\n");
+        file_put_contents($codex . '/rollout-fixture.jsonl',
+            json_encode(['type' => 'turn_context', 'payload' => ['model' => 'codex-fixture']]) . "\n" .
+            json_encode(['type' => 'event_msg', 'timestamp' => '2040-01-01T00:00:02Z',
+                'payload' => ['type' => 'token_count', 'info' => ['last_token_usage' => ['input_tokens' => 20, 'output_tokens' => 4]]]]) . "\n"
+        );
+        touch($claude . '/session.jsonl', strtotime('2040-01-01T00:00:03Z'));
+        touch($codex . '/rollout-fixture.jsonl', strtotime('2040-01-01T00:00:03Z'));
+        symlink($home, $home . '-alias');
+        $previousDirectory = getcwd();
+        $helper = $this->cliRequestAihelper();
+        chdir($root);
+        try {
+            $rows = $helper::getCliApiRequests(limit: 10, date_from: '2040-01-01', date_until: '2040-01-02');
+            $this->assertSame(['codex-fixture', 'claude-fixture'], array_column($rows, 'model'));
+            $this->assertSame([20, 12], array_column(array_column($rows, 'usage'), 'input_tokens'));
+        } finally {
+            chdir($previousDirectory);
+            unlink($home . '-alias');
+            foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST) as $file) {
+                $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+            }
+            rmdir($root);
+        }
+    }
+
+    function test__cli_request_complete_histories_and_event_order(): void
+    {
+        $home = sys_get_temp_dir() . '/aihelper-cli-history-' . bin2hex(random_bytes(8));
+        mkdir($home);
+        $previousDirectory = getcwd();
+        $helper = $this->cliRequestAihelper();
+        chdir($home);
+        try {
+            foreach (['claude', 'codex'] as $tool) {
+                $toolHome = $home . '/harness/profiles/' . $tool;
+                $directory = $toolHome . ($tool === 'claude' ? '/claude/projects/project' : '/codex/sessions/2040/01/01');
+                mkdir($directory, recursive: true);
+                foreach ([1, 2] as $number) {
+                    $file = $directory . '/rollout-' . $number . '.jsonl';
+                    $time = '2040-01-01T00:00:0' . $number . 'Z';
+                    $model = $tool . '-' . $number;
+                    $usage = ['input_tokens' => $number, 'output_tokens' => 1];
+                    $lines = $tool === 'claude'
+                        ? [['type' => 'assistant', 'timestamp' => $time, 'message' => ['model' => $model, 'usage' => $usage]]]
+                        : [
+                            ['type' => 'turn_context', 'payload' => ['model' => $model]],
+                            ['type' => 'event_msg', 'timestamp' => $time, 'payload' => ['type' => 'token_count', 'info' => ['last_token_usage' => $usage]]]
+                        ];
+                    $lines[] = ['type' => 'irrelevant', 'data' => str_repeat('x', 2 * 1024 * 1024)];
+                    file_put_contents($file, implode("\n", array_map(fn($line) => json_encode($line, JSON_THROW_ON_ERROR), $lines)) . "\n");
+                    touch($file, strtotime('2040-01-01T00:00:00Z') + 10 - $number);
+                }
+                $rows = $helper::getCliApiRequests(date_from: '2040-01-01', date_until: '2040-01-02');
+                $toolRows = array_values(array_filter($rows, fn($row) => str_starts_with($row['model'] ?? '', $tool . '-')));
+                $this->assertSame([$tool . '-2', $tool . '-1'], array_column($toolRows, 'model'));
+                $rows = $helper::getCliApiRequests(limit: 1, date_from: '2040-01-01', date_until: '2040-01-02');
+                $this->assertSame('2040-01-01T00:00:02Z', $rows[0]['time']);
+            }
+        } finally {
+            chdir($previousDirectory);
+            foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($home, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST) as $file) {
+                $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+            }
+            rmdir($home);
+        }
+    }
+
     function test__a_throwing_abort_callback_lets_the_request_continue(): void
     {
         $ai = $this->abortAihelper(function (): bool {
@@ -6317,7 +6487,7 @@ PHP;
     public function test__typesafe_chat_is_explicitly_unsupported(): void
     {
         $this->expectException(\BadMethodCallException::class);
-        $this->expectExceptionMessage('evaluate');
+        $this->expectExceptionMessageIsOrContains('evaluate');
         $this->typesafeProvider()->ask('State');
     }
 
@@ -6326,7 +6496,8 @@ PHP;
         class_exists(aihelper::class);
         $provider = (new \ReflectionClass(\vielhuber\aihelper\ai_anthropic::class))->newInstanceWithoutConstructor();
         $this->expectException(\BadMethodCallException::class);
-        $provider->evaluate('State', $this->typesafeQuestions());
+        $this->expectExceptionMessageIsOrContains('does not support evaluate()');
+        $provider->evaluate(state: 'State', questions: $this->typesafeQuestions());
     }
 
     #[\PHPUnit\Framework\Attributes\TestWith(["\n"], 'LF')]
@@ -6347,16 +6518,15 @@ PHP;
         );
         $example = str_replace(
             'api_key: $apiKey',
-            'api_key: $apiKey, url: ' . var_export($this->typesafeUrl, true),
+            'api_key: ' . var_export('fixture-key', true) . ', url: ' . var_export($this->typesafeUrl, true),
             $matches[1],
             $replacements
         );
         $this->assertSame(1, $replacements);
-        $apiKey = 'fixture-key';
-        eval($example);
-        $this->assertSame('billing', $team);
-        $this->assertSame(1.4, $urgency);
-        $this->assertSame(0.95, $refund);
+        $values = eval($example . "\nreturn get_defined_vars();");
+        $this->assertSame('billing', $values['team']);
+        $this->assertSame(1.4, $values['urgency']);
+        $this->assertSame(0.95, $values['refund']);
         $this->assertCount(1, $this->typesafeRequests());
     }
 

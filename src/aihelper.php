@@ -989,7 +989,7 @@ abstract class aihelper
     protected static function getCliProxyAuthFiles(string $pattern): array
     {
         // a pattern with a directory part is globbed as given, a bare pattern only inside the proxy directories
-        $files = preg_match('~[\\\\/]~', $pattern) === 1 ? glob($pattern) ?: [] : [];
+        $files = preg_match('~[\\\\/]~', $pattern) === 1 ? (glob($pattern) ?: []) : [];
         foreach (static::getCliProxyAuthDirs() as $dir) {
             $files = array_merge($files, glob($dir . '/' . $pattern) ?: []);
         }
@@ -1539,8 +1539,12 @@ abstract class aihelper
         return $finish($limits);
     }
 
-    protected static function getOpenCodeDatabasePath(): ?string
+    protected static function getOpenCodeDatabasePath(?string $cliHome = null): ?string
     {
+        if ($cliHome !== null) {
+            $path = rtrim($cliHome, '/') . '/opencode/data/opencode/opencode.db';
+            return is_file($path) ? (realpath($path) ?: $path) : null;
+        }
         $dataHome = trim((string) getenv('XDG_DATA_HOME'));
         $home = trim((string) getenv('HOME'));
         $candidates = [];
@@ -1681,6 +1685,8 @@ abstract class aihelper
         }
         return $limits;
     }
+
+    protected const CLI_HARNESS_ROOT = '/host/data/harness';
 
     public static function getCliApiRequests(
         ?int $limit = null,
@@ -2106,25 +2112,18 @@ abstract class aihelper
             return $result;
         };
 
-        // session transcripts can be hundreds of MB; only the newest turns are relevant here,
-        // so read just the tail of each file (streamed) instead of loading the whole thing
-        $tail_lines = function (string $file, int $max_bytes = 1048576): array {
-            $size = filesize($file) ?: 0;
+        $session_lines = function (string $file): \Generator {
             $handle = fopen($file, 'rb');
             if ($handle === false) {
-                return [];
+                return;
             }
-            if ($size > $max_bytes) {
-                fseek($handle, $size - $max_bytes);
+            try {
+                while (($line = fgets($handle)) !== false) {
+                    yield rtrim($line, "\r\n");
+                }
+            } finally {
+                fclose($handle);
             }
-            $data = (string) stream_get_contents($handle);
-            fclose($handle);
-            $lines = explode("\n", $data);
-            if ($size > $max_bytes) {
-                // the first line is likely a partial record — drop it
-                array_shift($lines);
-            }
-            return $lines;
         };
 
         // bound the work: without an explicit start date, only scan recently touched sessions
@@ -2142,36 +2141,26 @@ abstract class aihelper
             return true;
         };
 
+        $session_homes = array_merge(
+            glob(static::CLI_HARNESS_ROOT . '/chats/*', GLOB_ONLYDIR) ?: [],
+            glob(static::CLI_HARNESS_ROOT . '/system/*/*', GLOB_ONLYDIR) ?: [],
+            glob(static::CLI_HARNESS_ROOT . '/profiles/*', GLOB_ONLYDIR) ?: []
+        );
         $claude_files = [];
-        foreach (['/root/.claude/projects', '/host/data/claude/projects'] as $claude_dir) {
+        $claude_dirs = array_merge(
+            ['/root/.claude/projects', '/host/data/claude/projects'],
+            array_map(fn(string $home): string => $home . '/claude/projects', $session_homes)
+        );
+        foreach (array_unique(array_filter(array_map('realpath', $claude_dirs))) as $claude_dir) {
             $claude_files = array_merge($claude_files, glob($claude_dir . '/*/*.jsonl') ?: []);
         }
-        if ($source_limit !== null) {
-            $claude_file_times = [];
-            foreach (array_unique($claude_files) as $claude_file) {
-                if (!is_file($claude_file)) {
-                    continue;
-                }
-                $claude_file_time = filemtime($claude_file);
-                if ($claude_file_time === false || $claude_file_time < $min_mtime) {
-                    continue;
-                }
-                $claude_file_times[$claude_file] = $claude_file_time;
-            }
-            arsort($claude_file_times);
-            $claude_files = array_keys($claude_file_times);
-        }
-        $claude_request_count = 0;
         foreach ($claude_files as $session_file) {
-            if ($source_limit !== null && $claude_request_count >= $source_limit) {
-                break;
-            }
             if ((filemtime($session_file) ?: 0) < $min_mtime) {
                 continue;
             }
             $last_user = null;
             $cwd = null;
-            foreach ($tail_lines($session_file) as $line) {
+            foreach ($session_lines($session_file) as $line) {
                 if ($line === '' || $line[0] !== '{') {
                     continue;
                 }
@@ -2229,34 +2218,18 @@ abstract class aihelper
                     $last_user,
                     $cwd
                 );
-                $claude_request_count++;
             }
         }
 
         $codex_files = [];
-        foreach (['/root/.codex/sessions', '/host/data/codex/sessions'] as $codex_dir) {
+        $codex_dirs = array_merge(
+            ['/root/.codex/sessions', '/host/data/codex/sessions'],
+            array_map(fn(string $home): string => $home . '/codex/sessions', $session_homes)
+        );
+        foreach (array_unique(array_filter(array_map('realpath', $codex_dirs))) as $codex_dir) {
             $codex_files = array_merge($codex_files, glob($codex_dir . '/*/*/*/rollout-*.jsonl') ?: []);
         }
-        if ($source_limit !== null) {
-            $codex_file_times = [];
-            foreach (array_unique($codex_files) as $codex_file) {
-                if (!is_file($codex_file)) {
-                    continue;
-                }
-                $codex_file_time = filemtime($codex_file);
-                if ($codex_file_time === false || $codex_file_time < $min_mtime) {
-                    continue;
-                }
-                $codex_file_times[$codex_file] = $codex_file_time;
-            }
-            arsort($codex_file_times);
-            $codex_files = array_keys($codex_file_times);
-        }
-        $codex_request_count = 0;
         foreach ($codex_files as $session_file) {
-            if ($source_limit !== null && $codex_request_count >= $source_limit) {
-                break;
-            }
             if ((filemtime($session_file) ?: 0) < $min_mtime) {
                 continue;
             }
@@ -2266,35 +2239,7 @@ abstract class aihelper
             $model = null;
             $last_user = null;
             $cwd = null;
-            // read the head for defaults: session_meta (line 1) carries the cwd, the first
-            // turn_context (a few lines in) carries the model. both can be absent from the 1MB
-            // tail, so seed them here; the tail overrides with more recent values when present.
-            $meta_handle = fopen($session_file, 'rb');
-            if ($meta_handle !== false) {
-                for ($head_line = 0; $head_line < 200 && ($model === null || $cwd === null); $head_line++) {
-                    $raw = fgets($meta_handle);
-                    if ($raw === false) {
-                        break;
-                    }
-                    $head_entry = json_decode($raw, true);
-                    if (!is_array($head_entry)) {
-                        continue;
-                    }
-                    $head_payload = $head_entry['payload'] ?? [];
-                    if ($cwd === null && ($head_payload['cwd'] ?? '') !== '') {
-                        $cwd = (string) $head_payload['cwd'];
-                    }
-                    if (
-                        $model === null &&
-                        ($head_entry['type'] ?? '') === 'turn_context' &&
-                        ($head_payload['model'] ?? '') !== ''
-                    ) {
-                        $model = (string) $head_payload['model'];
-                    }
-                }
-                fclose($meta_handle);
-            }
-            foreach ($tail_lines($session_file) as $line) {
+            foreach ($session_lines($session_file) as $line) {
                 if ($line === '' || $line[0] !== '{') {
                     continue;
                 }
@@ -2334,12 +2279,18 @@ abstract class aihelper
                     $last_user,
                     $cwd
                 );
-                $codex_request_count++;
             }
         }
 
-        $opencode_database = self::getOpenCodeDatabasePath();
-        if ($opencode_database !== null) {
+        $opencode_databases = array_merge(
+            [self::getOpenCodeDatabasePath()],
+            array_map(fn(string $home): string => $home . '/opencode/data/opencode/opencode.db', $session_homes)
+        );
+        $opencode_databases = array_unique(array_filter(array_map(
+            fn(?string $path): string|false => $path !== null ? realpath($path) : false,
+            $opencode_databases
+        )));
+        foreach ($opencode_databases as $opencode_database) {
             try {
                 $connection = new \PDO(
                     'sqlite:' . $opencode_database,
@@ -2945,7 +2896,14 @@ abstract class aihelper
      */
     public function evaluate(string|array|object $state, array $questions): array
     {
-        throw new \BadMethodCallException('Provider "' . $this->name . '" does not support evaluate().');
+        throw new \BadMethodCallException(
+            sprintf(
+                'Provider "%s" does not support evaluate() (state type: %s, questions: %d).',
+                $this->name,
+                get_debug_type($state),
+                count($questions)
+            )
+        );
     }
 
     public function image(
@@ -14495,7 +14453,7 @@ class ai_opencode extends ai_harness
             $rows = json_decode(implode(PHP_EOL, $output), true);
             return is_array($rows) ? $rows : [];
         }
-        $database = self::getOpenCodeDatabasePath();
+        $database = self::getOpenCodeDatabasePath($this->cli_session_home ?? $this->cli_auth_home);
         if ($database === null) {
             return null;
         }
@@ -14580,7 +14538,7 @@ class ai_opencode extends ai_harness
             rtrim(sys_get_temp_dir(), '/') .
             '/aihelper-opencode-console-limit-' .
             (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) .
-            '-local.json';
+            '-local' . ($this->cli_auth_home !== null ? '-' . hash('sha256', $this->cli_auth_home) : '') . '.json';
         $cached = is_file($cache_file) ? json_decode((string) file_get_contents($cache_file), true) : null;
         if (is_array($cached['limits'] ?? null) && ($cached['checked_at'] ?? 0) > time() - 60) {
             return $cached['limits'];
