@@ -516,7 +516,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->assertSame([20, 12], array_column(array_column($rows, 'usage'), 'input_tokens'));
         } finally {
             chdir($previousDirectory);
-            unlink($home . '-alias');
+            PHP_OS_FAMILY === 'Windows' ? rmdir($home . '-alias') : unlink($home . '-alias');
             foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST) as $file) {
                 $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
             }

@@ -2146,6 +2146,7 @@ abstract class aihelper
             glob(static::CLI_HARNESS_ROOT . '/system/*/*', GLOB_ONLYDIR) ?: [],
             glob(static::CLI_HARNESS_ROOT . '/profiles/*', GLOB_ONLYDIR) ?: []
         );
+        $session_homes = array_unique(array_filter(array_map('realpath', $session_homes)));
         $claude_files = [];
         $claude_dirs = array_merge(
             ['/root/.claude/projects', '/host/data/claude/projects'],
