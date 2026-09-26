@@ -4631,9 +4631,9 @@ class Test extends \PHPUnit\Framework\TestCase
             // version is exactly the turn that fails
             $this->assertStringNotContainsString('2>&1 & ', $script, $provider);
             // a second worker waits for the running install instead of skipping it
-            $this->assertStringContainsString('flock -w 120 9', $script, $provider);
+            $this->assertStringContainsString('flock -w 360 9', $script, $provider);
             // and re-checks afterwards so it does not install a second time
-            $this->assertSame(2, substr_count($script, '-newermt "-1 hour"'), $provider);
+            $this->assertSame(1, substr_count($script, '-newermt "-1 hour"'), $provider);
             // a hung package manager must not hold the turn forever
             $this->assertStringContainsString('timeout 300 ', $script, $provider);
             // an install costs ten seconds and only happens on a real difference
@@ -4643,6 +4643,133 @@ class Test extends \PHPUnit\Framework\TestCase
             // a failed update has to leave a trace instead of passing unnoticed
             $this->assertStringContainsString('>>"$stamp.log" 2>&1', $script, $provider);
             $this->assertStringNotContainsString('update >/dev/null', $script, $provider);
+        }
+    }
+
+    public function test__harness_update_waits_for_a_locked_fresh_stamp(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('The updater requires bash and flock.');
+        }
+        $directory = sys_get_temp_dir() . '/aihelper-update-' . bin2hex(random_bytes(8));
+        mkdir($directory . '/.cache/aihelper', 0700, true);
+        $stamp = $directory . '/.cache/aihelper/update-codex';
+        touch($stamp);
+        $lock = fopen($stamp . '.lock', 'w');
+        flock($lock, LOCK_EX);
+        $harness = $this->harnessStoreAihelper('codex', null);
+        $script = (new \ReflectionMethod($harness, 'harnessUpdateScript'))->invoke($harness);
+        $process = proc_open(
+            ['bash', '-c', 'export HOME=' . escapeshellarg($directory) . '; ' . $script . 'printf ready'],
+            [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']],
+            $pipes
+        );
+        try {
+            usleep(200000);
+            $this->assertTrue(proc_get_status($process)['running'], 'A fresh stamp must not bypass an active install.');
+            flock($lock, LOCK_UN);
+            $this->assertSame('ready', stream_get_contents($pipes[1]));
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+            fclose($pipes[1]);
+            proc_terminate($process);
+            proc_close($process);
+            __::rrmdir($directory);
+        }
+    }
+
+    public function test__codex_app_server_reads_already_buffered_responses(): void
+    {
+        $codex = $this->harnessStoreAihelper('codex', null);
+        (new \ReflectionProperty($codex, 'app_server_buffer'))->setValue($codex, "{\"id\":42,\"result\":{\"ready\":true}}\n");
+        $pipes = [fopen('php://memory', 'r+'), fopen('php://memory', 'r+'), fopen('php://memory', 'r+')];
+        try {
+            $response = (new \ReflectionMethod($codex, 'appServerAwait'))->invoke($codex, $pipes, 42, 0.1);
+            $this->assertSame(['id' => 42, 'result' => ['ready' => true]], $response);
+        } finally {
+            foreach ($pipes as $pipe) {
+                fclose($pipe);
+            }
+        }
+    }
+
+    public function test__remote_harness_update_uses_a_separate_ssh_command_without_protocol_input(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('The updater requires POSIX process descriptors.');
+        }
+        $requestFile = tempnam(sys_get_temp_dir(), 'aihelper-update-ssh-');
+        class_exists(aihelper::class);
+        $codex = new class ($requestFile) extends \vielhuber\aihelper\ai_codex {
+            public function __construct(private string $requestFile)
+            {
+                $this->ssh_host = 'example.test';
+            }
+
+            protected function sshCommand(bool $withReverseTunnel = false): array
+            {
+                return [PHP_BINARY, '-r',
+                    'file_put_contents($argv[1], json_encode([$argv[2], stream_get_contents(STDIN)]));',
+                    $this->requestFile];
+            }
+        };
+        try {
+            (new \ReflectionMethod($codex, 'runHarnessUpdate'))->invoke($codex);
+            [$command, $input] = json_decode(file_get_contents($requestFile), true, flags: JSON_THROW_ON_ERROR);
+            $this->assertStringContainsString('codex update', $command);
+            $this->assertStringNotContainsString('app-server', $command);
+            $this->assertSame('', $input);
+        } finally {
+            unlink($requestFile);
+        }
+    }
+
+    public function test__codex_app_server_drains_stderr_and_reports_early_exit(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('Nonblocking process pipes require POSIX.');
+        }
+        foreach (['verbose', 'exit'] as $scenario) {
+            $server = <<<'PHP'
+            if ($argv[1] === 'verbose') {
+                fwrite(STDERR, str_repeat('startup log line' . "\n", 65536));
+                echo "{\"id\":42,\"result\":{\"ready\":true}}\n";
+                exit(0);
+            }
+            fwrite(STDERR, 'startup failed api_key=fixture-secret');
+            exit(1);
+            PHP;
+            $process = proc_open([PHP_BINARY, '-r', $server, $scenario],
+                [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+            stream_set_blocking($pipes[1], false);
+            stream_set_blocking($pipes[2], false);
+            try {
+                $codex = $this->harnessStoreAihelper('codex', null);
+                $started = microtime(true);
+                $response = null;
+                $error = null;
+                try {
+                    $response = (new \ReflectionMethod($codex, 'appServerAwait'))->invoke($codex, $pipes, 42, 2.0);
+                } catch (\RuntimeException $exception) {
+                    $error = $exception->getMessage();
+                }
+                if ($scenario === 'verbose') {
+                    $this->assertSame(['id' => 42, 'result' => ['ready' => true]], $response);
+                } else {
+                    $this->assertNotNull($error);
+                    $this->assertStringContainsString('stdout closed', $error);
+                    $this->assertStringContainsString('startup failed', $error);
+                    $this->assertStringNotContainsString('fixture-secret', $error);
+                    $this->assertLessThan(1.5, microtime(true) - $started);
+                }
+            } finally {
+                proc_terminate($process);
+                foreach ($pipes as $pipe) {
+                    fclose($pipe);
+                }
+                proc_close($process);
+            }
         }
     }
 
@@ -4791,6 +4918,8 @@ class Test extends \PHPUnit\Framework\TestCase
         $method = new \ReflectionMethod($codex, 'isTransientRequestError');
 
         $this->assertTrue($method->invoke($codex, 'harness: codex app server did not answer initialize'));
+        $this->assertTrue($method->invoke($codex, 'harness: codex app server did not answer thread/resume: stdout closed before response'));
+        $this->assertTrue($method->invoke($codex, 'harness: codex app server did not answer turn/start: timed out after 60 seconds'));
         $this->assertTrue($method->invoke($codex, 'harness: codex app server did not open a thread'));
         $this->assertTrue($method->invoke($codex, 'harness: codex app server did not start a turn'));
     }
@@ -4954,13 +5083,20 @@ class Test extends \PHPUnit\Framework\TestCase
 
     public function test__codex_app_server_preserves_requested_session(): void
     {
-        foreach (['error', 'missing', 'different', 'success'] as $scenario) {
+        foreach (['initialize-error', 'error', 'missing', 'different', 'success'] as $scenario) {
             $requestFile = tempnam(sys_get_temp_dir(), 'aihelper-resume-');
             $server = <<<'PHP'
+            fclose(STDERR);
             while (($line = fgets(STDIN)) !== false) {
                 $request = json_decode($line, true);
                 file_put_contents($argv[1], $line, FILE_APPEND);
+                if (!isset($request['id'])) {
+                    continue;
+                }
                 $response = ['id' => $request['id'], 'result' => []];
+                if ($request['method'] === 'initialize' && $argv[2] === 'initialize-error') {
+                    $response = ['id' => $request['id'], 'error' => ['message' => 'client rejected']];
+                }
                 if ($request['method'] === 'thread/resume') {
                     if ($argv[2] === 'error') {
                         $response = ['id' => $request['id'], 'error' => ['message' => 'resume unavailable']];
@@ -4984,6 +5120,8 @@ class Test extends \PHPUnit\Framework\TestCase
                 $pipes
             );
             $this->assertIsResource($process);
+            stream_set_blocking($pipes[1], false);
+            stream_set_blocking($pipes[2], false);
             try {
                 $codex = $this->harnessStoreAihelper('codex', null);
                 (new \ReflectionProperty($codex, 'input_callback'))->setValue($codex, static fn(): null => null);
@@ -5002,11 +5140,17 @@ class Test extends \PHPUnit\Framework\TestCase
                 $this->assertSame('initialize', $requests[0]['method']);
                 // excludeTurns is refused unless the client announces this capability
                 $this->assertTrue($requests[0]['params']['capabilities']['experimentalApi'] ?? false);
-                $this->assertSame('saved-thread', $requests[1]['params']['threadId']);
-                $this->assertTrue($requests[1]['params']['excludeTurns'] ?? false);
+                if ($scenario === 'initialize-error') {
+                    $this->assertCount(1, $requests);
+                    $this->assertStringContainsString('rejected initialize: client rejected', $error);
+                    continue;
+                }
+                $this->assertSame(['method' => 'initialized'], $requests[1]);
+                $this->assertSame('saved-thread', $requests[2]['params']['threadId']);
+                $this->assertTrue($requests[2]['params']['excludeTurns'] ?? false);
                 if ($scenario === 'success') {
                     $this->assertNull($error);
-                    $this->assertSame('saved-thread', $requests[2]['params']['threadId']);
+                    $this->assertSame('saved-thread', $requests[3]['params']['threadId']);
                 } else {
                     $this->assertNotNull($error);
                     $this->assertNotContains('turn/start', array_column($requests, 'method'), $scenario);
@@ -5033,8 +5177,12 @@ class Test extends \PHPUnit\Framework\TestCase
         file_put_contents($image, 'image');
         $server = <<<'PHP'
 $requestFile = $argv[1];
+fclose(STDERR);
 while (($line = fgets(STDIN)) !== false) {
     $request = json_decode($line, true);
+    if (!isset($request['id'])) {
+        continue;
+    }
     $result = [];
     if (($request['method'] ?? '') === 'thread/start') {
         $result = ['thread' => ['id' => 'thread-test']];
@@ -5057,6 +5205,8 @@ PHP;
             $pipes
         );
         $this->assertIsResource($process);
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
         try {
             $codex = $this->harnessStoreAihelper('codex', null);
             (new \ReflectionProperty($codex, 'input_callback'))->setValue($codex, static fn(): null => null);

@@ -2842,6 +2842,8 @@ abstract class aihelper
                 'no such host',
                 'name or service not known',
                 'codex app server did not answer initialize',
+                'codex app server did not answer thread/',
+                'codex app server did not answer turn/start',
                 'codex app server did not open a thread',
                 'codex app server did not start a turn'
             ]
@@ -11109,13 +11111,22 @@ abstract class ai_harness extends ai_anthropic
         if ($script === '') {
             return;
         }
-        $process = @proc_open(
-            ['bash', '-c', $this->shellPrelude() . $script . 'exit 0'],
+        $command = $this->isRemote()
+            ? array_merge($this->sshCommand(), [$this->remoteShell($script)])
+            : ['bash', '-c', $this->shellPrelude() . $script];
+        $process = proc_open(
+            $command,
             [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
             $pipes
         );
-        if (is_resource($process)) {
-            proc_close($process);
+        if (!is_resource($process)) {
+            throw new \RuntimeException('harness: failed to prepare ' . $this->binaryName() . ' update');
+        }
+        $status = proc_close($process);
+        if ($status !== 0) {
+            throw new \RuntimeException(
+                'harness: ' . $this->binaryName() . ' update preparation failed (exit ' . $status . ')'
+            );
         }
     }
 
@@ -11128,13 +11139,12 @@ abstract class ai_harness extends ai_anthropic
         $stamp = '"$HOME/.cache/aihelper/update-' . $this->binaryName() . '"';
         $binary = $this->binaryName();
         $semver = '[0-9]+\\.[0-9]+\\.[0-9]+';
-        return '( stamp=' . $stamp . '; mkdir -p "${stamp%/*}" 2>/dev/null; ' .
-            'if [ -z "$(find "$stamp" -newermt "-1 hour" 2>/dev/null)" ]; then ' .
-            '( flock -w 120 9 || exit 0; ' .
+        return '( stamp=' . $stamp . '; mkdir -p "${stamp%/*}" 2>/dev/null || exit 1; ' .
+            '( flock -w 360 9 || exit 75; ' .
             // another worker may have refreshed it while this one waited
             '[ -n "$(find "$stamp" -newermt "-1 hour" 2>/dev/null)" ] && exit 0; ' .
             'touch "$stamp"; ' .
-            'installed=$(' . $binary . ' --version 2>/dev/null | grep -oE "' . $semver . '" | head -1); ' .
+            'installed=$(timeout 10 ' . $binary . ' --version 2>/dev/null | grep -oE "' . $semver . '" | head -1); ' .
             'available=$(curl -sf --max-time 10 https://registry.npmjs.org/' . $update['package'] . '/latest 2>/dev/null' .
             ' | grep -oE \'"version":"' . $semver . '"\' | head -1 | grep -oE "' . $semver . '"); ' .
             '[ -n "$installed" ] && [ -n "$available" ] && [ "$installed" != "$available" ] && ' .
@@ -11143,8 +11153,8 @@ abstract class ai_harness extends ai_anthropic
             'PATH="$(dirname "$(command -v ' . $binary . ')"):$PATH" ' .
             // a hung package manager must not hold the turn forever
             'timeout 300 ' . $update['command'] . ' >>"$stamp.log" 2>&1; ' .
-            ') 9>"$stamp.lock" >>"$stamp.log" 2>&1; ' .
-            'fi ) >/dev/null 2>&1 || true; ';
+            'exit 0; ) 9>"$stamp.lock" >>"$stamp.log" 2>&1; ' .
+            ') </dev/null >/dev/null 2>&1; ';
     }
 
     /**
@@ -11717,6 +11727,7 @@ abstract class ai_harness extends ai_anthropic
             }
         }
 
+        $this->runHarnessUpdate();
         $this->harness_run_id = md5(uniqid('', true));
         $this->harness_remote_pid_file = null;
         $this->resetNativeEventStream();
@@ -11726,7 +11737,6 @@ abstract class ai_harness extends ai_anthropic
             // working directory is created on the machine that owns it
             $inner = array_merge([$binary], $this->buildArgs());
             $script =
-                $this->harnessUpdateScript() .
                 'mkdir -p ' .
                 escapeshellarg($this->workspace()) .
                 ' && cd ' .
@@ -11756,9 +11766,6 @@ abstract class ai_harness extends ai_anthropic
             ]);
         } else {
             $command = array_merge(['setsid', '--wait', $binary], $this->buildArgs());
-            // a local run has no shell to carry the check along, so it gets its own
-            // one, and it finishes before the harness is spawned
-            $this->runHarnessUpdate();
         }
         // the mcp config carries bearer tokens and must not reach the log
         $loggable = $command;
@@ -13101,16 +13108,22 @@ class ai_codex extends ai_harness
      * Read until the response with this id arrives; everything else is kept for
      * the main loop so no event of the transcript is lost.
      */
-    private function appServerAwait(array $pipes, int $id, float $timeout = 60.0): ?array
+    private function appServerAwait(array $pipes, int $id, float $timeout = 60.0, string $method = 'initialize'): array
     {
         $deadline = microtime(true) + $timeout;
+        $errors = '';
+        $errorsTruncated = false;
         while (microtime(true) < $deadline) {
-            $chunk = fread($pipes[1], 65536);
-            if ($chunk === false || $chunk === '') {
-                usleep(20000);
-                continue;
+            $errorChunk = fread($pipes[2], 65536);
+            if ($errorChunk !== false && !$errorsTruncated) {
+                $errors .= $errorChunk;
+                if (strlen($errors) > 65536) {
+                    $errors = '[stderr omitted: exceeded 64 KiB]';
+                    $errorsTruncated = true;
+                }
             }
-            $this->app_server_buffer .= $chunk;
+            $chunk = fread($pipes[1], 65536);
+            $this->app_server_buffer .= $chunk === false ? '' : $chunk;
             while (($position = strpos($this->app_server_buffer, "\n")) !== false) {
                 $line = trim(substr($this->app_server_buffer, 0, $position));
                 $this->app_server_buffer = substr($this->app_server_buffer, $position + 1);
@@ -13128,8 +13141,20 @@ class ai_codex extends ai_harness
                     $this->app_server_replay[] = $decoded;
                 }
             }
+            if (feof($pipes[1])) {
+                break;
+            }
+            if (($chunk === false || $chunk === '') && ($errorChunk === false || $errorChunk === '')) {
+                usleep(20000);
+            }
         }
-        return null;
+        throw new \RuntimeException(
+            'harness: codex app server did not answer ' .
+                $method .
+                ': ' .
+                (feof($pipes[1]) ? 'stdout closed before response' : 'timed out after ' . $timeout . ' seconds') .
+                (trim($errors) !== '' ? '; stderr: ' . $this->sanitizeStreamValue($errors) : '')
+        );
     }
 
     /**
@@ -13180,9 +13205,14 @@ class ai_codex extends ai_harness
             // builds around 0.146; newer ones accept the parameter either way
             'capabilities' => ['experimentalApi' => true]
         ]);
-        if ($this->appServerAwait($pipes, $id, 30.0) === null) {
-            throw new \RuntimeException('harness: codex app server did not answer initialize');
+        $response = $this->appServerAwait($pipes, $id, 30.0);
+        if (isset($response['error'])) {
+            throw new \RuntimeException(
+                'harness: codex app server rejected initialize: ' .
+                    $this->sanitizeStreamValue($response['error']['message'] ?? 'unknown protocol error')
+            );
         }
+        fwrite($pipes[0], "{\"method\":\"initialized\"}\n");
 
         $threadParams = [
             'cwd' => $this->workspace(),
@@ -13199,7 +13229,12 @@ class ai_codex extends ai_harness
         } else {
             $id = $this->appServerSend($pipes, 'thread/start', $threadParams);
         }
-        $response = $this->appServerAwait($pipes, $id, 300.0);
+        $response = $this->appServerAwait(
+            $pipes,
+            $id,
+            300.0,
+            $this->cli_session_id !== null ? 'thread/resume' : 'thread/start'
+        );
         $threadId = $response['result']['thread']['id'] ?? null;
         if ($threadId === null) {
             throw new \RuntimeException(
@@ -13207,9 +13242,7 @@ class ai_codex extends ai_harness
                     ($this->cli_session_id !== null ? ' (resume ' . $this->cli_session_id . ')' : '') .
                     (isset($response['error']['message'])
                         ? ': ' . $response['error']['message']
-                        : ($response === null
-                            ? ': timed out after 300 seconds'
-                            : ': missing thread ID'))
+                        : ': missing thread ID')
             );
         }
         if ($this->cli_session_id !== null && $this->cli_session_id !== (string) $threadId) {
@@ -13233,7 +13266,7 @@ class ai_codex extends ai_harness
             $turnParams['effort'] = $effort;
         }
         $id = $this->appServerSend($pipes, 'turn/start', $turnParams);
-        $response = $this->appServerAwait($pipes, $id, 60.0);
+        $response = $this->appServerAwait($pipes, $id, 60.0, 'turn/start');
         $turnId = $response['result']['turn']['id'] ?? null;
         if ($turnId === null) {
             throw new \RuntimeException(
