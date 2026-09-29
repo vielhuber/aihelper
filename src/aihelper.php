@@ -11999,6 +11999,15 @@ abstract class ai_harness extends ai_anthropic
                     }
                     if ($stream === $pipes[2]) {
                         $errors .= $chunk;
+                        if (
+                            $this->binaryName() === 'opencode' &&
+                            preg_match('/\blevel=ERROR\b[^\r\n]*\bmessage="stream error"[^\r\n]*\berror\.error="[^"\r\n]*\bGo usage limit exceeded\b/', $errors) === 1
+                        ) {
+                            $result->result->error = (object) ['message' => 'OpenCode Go usage limit exceeded.'];
+                            $this->terminateProcess($process, $pid);
+                            $exit_code = 1;
+                            break 2;
+                        }
                         $nativeOutput = $redact($chunk);
                         if (is_string($nativeOutput)) {
                             $nativeOutput = preg_replace('/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -\/]*[@-~])/', '', $nativeOutput) ?? $nativeOutput;
@@ -12091,7 +12100,7 @@ abstract class ai_harness extends ai_anthropic
                 fclose($pipes[$descriptor]);
             }
         }
-        $closed = proc_close($process);
+        $closed = is_resource($process) ? proc_close($process) : ($exit_code ?? 1);
         $this->persistHarnessStoreLinks();
         if ($exit_code === null) {
             $exit_code = $closed;
@@ -14782,7 +14791,7 @@ class ai_opencode extends ai_harness
         if ($this->cli_session_id === null && $this->cli_resume_latest) {
             $args[] = '--continue';
         }
-        $args = array_merge($args, ['--format', 'json', '--auto', '--thinking']);
+        $args = array_merge($args, ['--format', 'json', '--auto', '--thinking', '--print-logs', '--log-level', 'ERROR']);
         foreach ($this->harnessFilePaths() as $path) {
             $args[] = '--file';
             $args[] = $path;

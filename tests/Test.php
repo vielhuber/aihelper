@@ -1068,7 +1068,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $environment = (new \ReflectionMethod(\vielhuber\aihelper\ai_opencode::class, 'harnessEnvironmentOverrides'))->invoke($harness);
 
         $this->assertSame(
-            ['run', '--continue', '--format', 'json', '--auto', '--thinking', '--model', 'opencode-go/glm-5.2', '--variant', 'high'],
+            ['run', '--continue', '--format', 'json', '--auto', '--thinking', '--print-logs', '--log-level', 'ERROR', '--model', 'opencode-go/glm-5.2', '--variant', 'high'],
             $args
         );
         $this->assertSame('true', $environment['OPENCODE_DISABLE_CLAUDE_CODE']);
@@ -5063,6 +5063,70 @@ class Test extends \PHPUnit\Framework\TestCase
                     posix_kill($pid, SIGKILL);
                 }
                 unlink($pidFile);
+            }
+        }
+    }
+
+    public function test__opencode_reports_quota_errors_without_waiting_for_inactivity(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('The harness process runner requires setsid.');
+        }
+        class_exists(aihelper::class);
+        foreach ([false, true] as $stream) {
+            foreach ([false, true] as $limited) {
+                $pidFile = tempnam(sys_get_temp_dir(), 'aihelper-quota-');
+                $harness = new class($pidFile, $stream, $limited) extends \vielhuber\aihelper\ai_opencode {
+                    public function __construct(private string $pidFile, bool $stream, private bool $limited)
+                    {
+                        $this->model = 'test';
+                        $this->session_id = 'quota-stream-' . bin2hex(random_bytes(8));
+                        $this->workdir = sys_get_temp_dir();
+                        $this->timeout = 1;
+                        $this->stream = $stream;
+                    }
+
+                    protected function resolveBinary(): ?string
+                    {
+                        return PHP_BINARY;
+                    }
+
+                    protected function harnessEnvironmentOverrides(): array
+                    {
+                        return [];
+                    }
+
+                    protected function buildArgs(): array
+                    {
+                        $log = $this->limited
+                            ? 'timestamp=2026-09-29T10:18:59Z level=ERROR message="stream error" error.error="AI_APICallError: Go usage limit exceeded"'
+                            : 'timestamp=2026-09-29T10:18:59Z level=ERROR message="unrelated diagnostic" note="Go usage limit exceeded"';
+                        $events = [
+                            ['type' => 'step_start', 'sessionID' => 'fixture-session'],
+                            ['type' => 'text', 'part' => ['text' => 'Done.']],
+                            ['type' => 'step_finish', 'part' => ['reason' => 'stop']]
+                        ];
+                        $output = implode("\n", array_map('json_encode', $events)) . "\n";
+                        return ['-r', 'file_put_contents(' . var_export($this->pidFile, true) . ', (string) getmypid()); ' .
+                            'fwrite(STDERR, ' . var_export(substr($log, 0, -12), true) . '); usleep(50000); ' .
+                            'fwrite(STDERR, ' . var_export(substr($log, -12) . "\n", true) . '); ' .
+                            ($this->limited ? 'sleep(10);' : 'echo ' . var_export($output, true) . ';')];
+                    }
+                };
+                ob_start(static fn(): string => '');
+                try {
+                    $result = (new \ReflectionMethod($harness, 'askThis'))->invoke($harness, 'Fixture');
+                    $this->assertSame(!$limited, $result['success']);
+                    $this->assertSame($limited ? 'OpenCode Go usage limit exceeded.' : 'Done.', $result['response']);
+                    $this->assertFalse(posix_kill((int) file_get_contents($pidFile), 0));
+                } finally {
+                    ob_end_clean();
+                    $pid = (int) file_get_contents($pidFile);
+                    if ($pid > 0 && posix_kill($pid, 0)) {
+                        posix_kill($pid, SIGKILL);
+                    }
+                    unlink($pidFile);
+                }
             }
         }
     }
