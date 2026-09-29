@@ -11880,107 +11880,148 @@ abstract class ai_harness extends ai_anthropic
         $nativeEventPipes = [];
         $nativeEventBuffer = '';
         $nativeEventAttempted = false;
-        $this->emitTranscript(
-            id: $harnessTranscriptId,
-            label: $harnessLabel,
-            status: 'running',
-            capturesContent: false,
-            kind: 'status'
-        );
-        while (true) {
-            if ($this->shouldAbort()) {
-                $this->aborted = true;
-                // ctrl+c first: the cli writes an append-only session file and
-                // should get the chance to close it before terminateProcess()
-                // takes the local and the remote side down
-                @proc_terminate($process, 2);
-                usleep(500000);
-                $this->terminateProcess($process, $pid);
-                break;
-            }
-            if ($this->harness_stdin_open === true && $this->harness_turn_complete === true) {
-                // the turn is done; the stream ends here so the cli can exit
-                if (is_resource($pipes[0])) {
-                    fclose($pipes[0]);
+        $streamCompleted = false;
+        try {
+            $this->emitTranscript(
+                id: $harnessTranscriptId,
+                label: $harnessLabel,
+                status: 'running',
+                capturesContent: false,
+                kind: 'status'
+            );
+            while (true) {
+                if ($this->shouldAbort()) {
+                    $this->aborted = true;
+                    // ctrl+c first: the cli writes an append-only session file and
+                    // should get the chance to close it before terminateProcess()
+                    // takes the local and the remote side down
+                    @proc_terminate($process, 2);
+                    usleep(500000);
+                    $this->terminateProcess($process, $pid);
+                    break;
                 }
-                $this->harness_stdin_open = false;
-                $this->harness_turn_complete_at = microtime(true);
-            }
-            if ($this->harness_turn_complete !== true && $this->harnessSupportsSteering()) {
-                if ($this->harness_steer_pending === null) {
-                    $this->harness_steer_pending = $this->pendingInput();
+                if ($this->harness_stdin_open === true && $this->harness_turn_complete === true) {
+                    // the turn is done; the stream ends here so the cli can exit
+                    if (is_resource($pipes[0])) {
+                        fclose($pipes[0]);
+                    }
+                    $this->harness_stdin_open = false;
+                    $this->harness_turn_complete_at = microtime(true);
                 }
-                if ($this->harness_steer_pending !== null && $this->harnessSteer($pipes, $this->harness_steer_pending)) {
-                    $this->log($this->harness_steer_pending, 'harness steer');
-                    $this->harness_steer_pending = null;
-                }
-            }
-            if (
-                $this->harnessOutlivesTurn() &&
-                $this->harness_turn_complete === true &&
-                $this->harness_turn_complete_at !== null &&
-                microtime(true) - $this->harness_turn_complete_at > 20
-            ) {
-                // a protocol server keeps running after a finished turn; once the
-                // result is in and closing stdin did not end it, it is taken down
-                $this->terminateProcess($process, $pid);
-                break;
-            }
-            foreach ($this->harnessPendingEvents() as $pendingEvent) {
-                $this->handleEvent($pendingEvent, $result, $emit);
-            }
-            if (!$nativeEventAttempted && !is_resource($nativeEventProcess)) {
-                $nativeEventCommand = $this->nativeEventCommand();
-                if ($nativeEventCommand !== null) {
-                    $nativeEventAttempted = true;
-                    $nativeEventProcess = proc_open(
-                        $nativeEventCommand,
-                        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-                        $nativeEventPipes,
-                        $this->isRemote() ? null : $this->workspace(),
-                        null
-                    );
-                    if (is_resource($nativeEventProcess)) {
-                        fclose($nativeEventPipes[0]);
-                        stream_set_blocking($nativeEventPipes[1], false);
-                        stream_set_blocking($nativeEventPipes[2], false);
+                if ($this->harness_turn_complete !== true && $this->harnessSupportsSteering()) {
+                    if ($this->harness_steer_pending === null) {
+                        $this->harness_steer_pending = $this->pendingInput();
+                    }
+                    if ($this->harness_steer_pending !== null && $this->harnessSteer($pipes, $this->harness_steer_pending)) {
+                        $this->log($this->harness_steer_pending, 'harness steer');
+                        $this->harness_steer_pending = null;
                     }
                 }
-            }
-            $read = [];
-            if (!feof($pipes[1])) {
-                $read[] = $pipes[1];
-            }
-            if (!feof($pipes[2])) {
-                $read[] = $pipes[2];
-            }
-            if (is_resource($nativeEventProcess)) {
-                if (isset($nativeEventPipes[1]) && !feof($nativeEventPipes[1])) {
-                    $read[] = $nativeEventPipes[1];
+                if (
+                    $this->harnessOutlivesTurn() &&
+                    $this->harness_turn_complete === true &&
+                    $this->harness_turn_complete_at !== null &&
+                    microtime(true) - $this->harness_turn_complete_at > 20
+                ) {
+                    // a protocol server keeps running after a finished turn; once the
+                    // result is in and closing stdin did not end it, it is taken down
+                    $this->terminateProcess($process, $pid);
+                    break;
                 }
-                if (isset($nativeEventPipes[2]) && !feof($nativeEventPipes[2])) {
-                    $read[] = $nativeEventPipes[2];
+                foreach ($this->harnessPendingEvents() as $pendingEvent) {
+                    $this->handleEvent($pendingEvent, $result, $emit);
                 }
-            }
-            if ($read === []) {
-                break;
-            }
-            $write = null;
-            $except = null;
-            if (stream_select($read, $write, $except, 1) === false) {
-                break;
-            }
-            foreach ($read as $stream) {
-                $chunk = fread($stream, 65536);
-                if ($chunk === false || $chunk === '') {
-                    continue;
+                if (!$nativeEventAttempted && !is_resource($nativeEventProcess)) {
+                    $nativeEventCommand = $this->nativeEventCommand();
+                    if ($nativeEventCommand !== null) {
+                        $nativeEventAttempted = true;
+                        $nativeEventProcess = proc_open(
+                            $nativeEventCommand,
+                            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+                            $nativeEventPipes,
+                            $this->isRemote() ? null : $this->workspace(),
+                            null
+                        );
+                        if (is_resource($nativeEventProcess)) {
+                            fclose($nativeEventPipes[0]);
+                            stream_set_blocking($nativeEventPipes[1], false);
+                            stream_set_blocking($nativeEventPipes[2], false);
+                        }
+                    }
                 }
-                $last_activity_at = time();
-                if (is_resource($nativeEventProcess) && $stream === ($nativeEventPipes[1] ?? null)) {
-                    $nativeEventBuffer .= $chunk;
-                    while (($position = strpos($nativeEventBuffer, "\n")) !== false) {
-                        $line = trim(substr($nativeEventBuffer, 0, $position));
-                        $nativeEventBuffer = substr($nativeEventBuffer, $position + 1);
+                $read = [];
+                if (!feof($pipes[1])) {
+                    $read[] = $pipes[1];
+                }
+                if (!feof($pipes[2])) {
+                    $read[] = $pipes[2];
+                }
+                if (is_resource($nativeEventProcess)) {
+                    if (isset($nativeEventPipes[1]) && !feof($nativeEventPipes[1])) {
+                        $read[] = $nativeEventPipes[1];
+                    }
+                    if (isset($nativeEventPipes[2]) && !feof($nativeEventPipes[2])) {
+                        $read[] = $nativeEventPipes[2];
+                    }
+                }
+                if ($read === []) {
+                    break;
+                }
+                $write = null;
+                $except = null;
+                if (stream_select($read, $write, $except, 1) === false) {
+                    break;
+                }
+                foreach ($read as $stream) {
+                    $chunk = fread($stream, 65536);
+                    if ($chunk === false || $chunk === '') {
+                        continue;
+                    }
+                    $last_activity_at = time();
+                    if (is_resource($nativeEventProcess) && $stream === ($nativeEventPipes[1] ?? null)) {
+                        $nativeEventBuffer .= $chunk;
+                        while (($position = strpos($nativeEventBuffer, "\n")) !== false) {
+                            $line = trim(substr($nativeEventBuffer, 0, $position));
+                            $nativeEventBuffer = substr($nativeEventBuffer, $position + 1);
+                            if ($line === '' || $line[0] !== '{') {
+                                continue;
+                            }
+                            $event = json_decode($line, true);
+                            if (!is_array($event)) {
+                                continue;
+                            }
+                            $this->handleNativeEvent($redact($event), $result, $emit);
+                        }
+                        continue;
+                    }
+                    if (is_resource($nativeEventProcess) && $stream === ($nativeEventPipes[2] ?? null)) {
+                        continue;
+                    }
+                    if ($stream === $pipes[2]) {
+                        $errors .= $chunk;
+                        $nativeOutput = $redact($chunk);
+                        if (is_string($nativeOutput)) {
+                            $nativeOutput = preg_replace('/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -\/]*[@-~])/', '', $nativeOutput) ?? $nativeOutput;
+                            $nativeOutput = trim($nativeOutput);
+                            $nativeOutputId = hash('sha256', $nativeOutput);
+                            if ($nativeOutput !== '' && !isset($stderrEntries[$nativeOutputId])) {
+                                $stderrEntries[$nativeOutputId] = true;
+                                $this->emitTranscript(
+                                    id: 'harness-output-' . $nativeOutputId,
+                                    label: $harnessLabel . ' output',
+                                    status: 'completed',
+                                    detail: $nativeOutput,
+                                    capturesContent: false,
+                                    kind: 'diagnostic'
+                                );
+                            }
+                        }
+                        continue;
+                    }
+                    $buffer .= $chunk;
+                    while (($position = strpos($buffer, "\n")) !== false) {
+                        $line = trim(substr($buffer, 0, $position));
+                        $buffer = substr($buffer, $position + 1);
                         if ($line === '' || $line[0] !== '{') {
                             continue;
                         }
@@ -11988,70 +12029,47 @@ abstract class ai_harness extends ai_anthropic
                         if (!is_array($event)) {
                             continue;
                         }
-                        $this->handleNativeEvent($redact($event), $result, $emit);
+                        $event = $redact($event);
+                        $this->handleEvent($event, $result, $emit);
                     }
-                    continue;
                 }
-                if (is_resource($nativeEventProcess) && $stream === ($nativeEventPipes[2] ?? null)) {
-                    continue;
+                // a refreshed token has to reach the shared profile while the run is alive: a run that is
+                // killed later would take the only valid token with it, and every other run fails to refresh
+                if (!$this->isRemote()) {
+                    $this->persistHarnessStoreLinks();
                 }
-                if ($stream === $pipes[2]) {
-                    $errors .= $chunk;
-                    $nativeOutput = $redact($chunk);
-                    if (is_string($nativeOutput)) {
-                        $nativeOutput = preg_replace('/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -\/]*[@-~])/', '', $nativeOutput) ?? $nativeOutput;
-                        $nativeOutput = trim($nativeOutput);
-                        $nativeOutputId = hash('sha256', $nativeOutput);
-                        if ($nativeOutput !== '' && !isset($stderrEntries[$nativeOutputId])) {
-                            $stderrEntries[$nativeOutputId] = true;
-                            $this->emitTranscript(
-                                id: 'harness-output-' . $nativeOutputId,
-                                label: $harnessLabel . ' output',
-                                status: 'completed',
-                                detail: $nativeOutput,
-                                capturesContent: false,
-                                kind: 'diagnostic'
-                            );
-                        }
+                // a lingering grandchild can hold the pipes open after the harness
+                // itself is gone, so the process state ends the loop, not eof
+                if ($drain_until === null) {
+                    $status = proc_get_status($process);
+                    if ($status['running'] === false) {
+                        $exit_code = (int) $status['exitcode'];
+                        $drain_until = microtime(true) + 2;
                     }
-                    continue;
+                } elseif (microtime(true) >= $drain_until) {
+                    break;
                 }
-                $buffer .= $chunk;
-                while (($position = strpos($buffer, "\n")) !== false) {
-                    $line = trim(substr($buffer, 0, $position));
-                    $buffer = substr($buffer, $position + 1);
-                    if ($line === '' || $line[0] !== '{') {
-                        continue;
-                    }
-                    $event = json_decode($line, true);
-                    if (!is_array($event)) {
-                        continue;
-                    }
-                    $event = $redact($event);
-                    $this->handleEvent($event, $result, $emit);
+                if (time() - $last_activity_at >= (int) $this->timeout) {
+                    $this->closeNativeEventProcess($nativeEventProcess, $nativeEventPipes);
+                    $this->terminateProcess($process, $pid);
+                    $this->persistHarnessStoreLinks();
+                    throw new \RuntimeException('harness: inactivity timeout after ' . $this->timeout . ' seconds.');
                 }
             }
-            // a refreshed token has to reach the shared profile while the run is alive: a run that is
-            // killed later would take the only valid token with it, and every other run fails to refresh
-            if (!$this->isRemote()) {
-                $this->persistHarnessStoreLinks();
-            }
-            // a lingering grandchild can hold the pipes open after the harness
-            // itself is gone, so the process state ends the loop, not eof
-            if ($drain_until === null) {
-                $status = proc_get_status($process);
-                if ($status['running'] === false) {
-                    $exit_code = (int) $status['exitcode'];
-                    $drain_until = microtime(true) + 2;
-                }
-            } elseif (microtime(true) >= $drain_until) {
-                break;
-            }
-            if (time() - $last_activity_at >= (int) $this->timeout) {
+            $streamCompleted = true;
+        } finally {
+            if (!$streamCompleted) {
                 $this->closeNativeEventProcess($nativeEventProcess, $nativeEventPipes);
-                $this->terminateProcess($process, $pid);
+                foreach ($pipes as $pipe) {
+                    if (is_resource($pipe)) {
+                        fclose($pipe);
+                    }
+                }
+                $this->harness_stdin_open = false;
+                if (is_resource($process)) {
+                    $this->terminateProcess($process, $pid);
+                }
                 $this->persistHarnessStoreLinks();
-                throw new \RuntimeException('harness: inactivity timeout after ' . $this->timeout . ' seconds.');
             }
         }
 

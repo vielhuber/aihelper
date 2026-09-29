@@ -5003,6 +5003,70 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
+    public function test__harness_stream_exception_stops_the_process(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('The harness process runner requires setsid.');
+        }
+        class_exists(aihelper::class);
+        foreach ([\RuntimeException::class, \Error::class] as $exceptionClass) {
+            $pidFile = tempnam(sys_get_temp_dir(), 'aihelper-abort-');
+            $failure = new $exceptionClass('stream consumer failed');
+            $harness = new class($pidFile, $failure) extends \vielhuber\aihelper\ai_opencode {
+                public function __construct(private string $pidFile, private \Throwable $failure)
+                {
+                    $this->model = 'test';
+                    $this->workdir = sys_get_temp_dir();
+                    $this->timeout = 5;
+                }
+
+                protected function resolveBinary(): ?string
+                {
+                    return PHP_BINARY;
+                }
+
+                protected function harnessEnvironmentOverrides(): array
+                {
+                    return [];
+                }
+
+                protected function buildArgs(): array
+                {
+                    return ['-r', 'file_put_contents(' . var_export($this->pidFile, true) .
+                        ', (string) getmypid()); echo "{\"type\":\"fixture\"}\n"; flush(); sleep(30);'];
+                }
+
+                protected function handleEvent(array $event, object $result, ?\Closure $emit): void
+                {
+                    throw $this->failure;
+                }
+            };
+            $pid = 0;
+            ob_start(static fn(): string => '');
+            try {
+                try {
+                    (new \ReflectionMethod($harness, 'makeApiCall'))->invoke(
+                        $harness,
+                        ['messages' => [['role' => 'user', 'content' => 'Fixture']]]
+                    );
+                    $this->fail('The stream consumer failure must propagate.');
+                } catch (\RuntimeException|\Error $exception) {
+                    $this->assertSame($failure, $exception);
+                }
+                $pid = (int) file_get_contents($pidFile);
+                $this->assertGreaterThan(0, $pid);
+                $this->assertFalse(posix_kill($pid, 0), 'The failed harness must not continue in the background.');
+            } finally {
+                ob_end_clean();
+                $pid = $pid ?: (int) file_get_contents($pidFile);
+                if ($pid > 0 && posix_kill($pid, 0)) {
+                    posix_kill($pid, SIGKILL);
+                }
+                unlink($pidFile);
+            }
+        }
+    }
+
     public function test__codex_stream_reports_success_only_after_retry_completion(): void
     {
         if (PHP_OS_FAMILY === 'Windows') {
