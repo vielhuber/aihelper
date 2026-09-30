@@ -1913,6 +1913,7 @@ class Test extends \PHPUnit\Framework\TestCase
     {
         $expectedEfforts = [
             'codex' => [
+                'gpt-6.1-sol' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
                 'gpt-6-astra' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
                 'gpt-5.6-sol' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
                 'gpt-5.5-codex' => ['minimal', 'low', 'medium', 'high', 'xhigh']
@@ -1940,13 +1941,14 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertContains('model_reasoning_effort="ultra"', $args);
     }
 
-    function test__codex_exposes_astra_as_default_with_vision(): void
+    function test__codex_exposes_sol_as_default_with_vision(): void
     {
         $codex = aihelper::create(provider: 'codex');
         $models = array_column($codex->models, null, 'name');
-        $this->assertArrayHasKey('gpt-6-astra', $models);
-        $this->assertTrue($models['gpt-6-astra']['supports_image_to_text']);
-        $this->assertTrue($models['gpt-6-astra']['default']);
+        $this->assertArrayHasKey('gpt-6.1-sol', $models);
+        $this->assertTrue($models['gpt-6.1-sol']['supports_image_to_text']);
+        $this->assertTrue($models['gpt-6.1-sol']['default']);
+        $this->assertFalse($models['gpt-6-astra']['default']);
         $this->assertFalse($models['gpt-5.6-sol']['default']);
         $this->assertCount(1, array_filter($models, fn(array $model): bool => $model['default']));
     }
@@ -1955,7 +1957,7 @@ class Test extends \PHPUnit\Framework\TestCase
     {
         $directory = sys_get_temp_dir() . '/aihelper-astra-' . bin2hex(random_bytes(8));
         mkdir($directory, 0700);
-        file_put_contents($directory . '/models', json_encode(['data' => [['id' => 'gpt-6-astra']]]));
+        file_put_contents($directory . '/models', json_encode(['data' => [['id' => 'gpt-6-astra'], ['id' => 'gpt-6.1-sol']]]));
         try {
             $proxy = new class ($directory) extends \vielhuber\aihelper\ai_cliproxyapi {
                 public function __construct(string $directory)
@@ -1974,6 +1976,8 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->assertFalse($models['gpt-6-astra']['supports_temperature']);
             $this->assertTrue($models['gpt-6-astra']['supports_effort']);
             $this->assertSame(['low', 'medium', 'high', 'xhigh', 'max'], $models['gpt-6-astra']['efforts']);
+            $this->assertTrue($models['gpt-6.1-sol']['supports_image_to_text'] ?? false);
+            $this->assertSame(['low', 'medium', 'high', 'xhigh', 'max'], $models['gpt-6.1-sol']['efforts']);
         } finally {
             unlink($directory . '/models');
             rmdir($directory);
