@@ -471,6 +471,39 @@ abstract class aihelper
                 abort_callback: $abort_callback
             );
         }
+        if ($provider === 'antigravity') {
+            return new ai_antigravity(
+                model: $model,
+                effort: $effort,
+                temperature: $temperature,
+                timeout: $timeout,
+                api_key: $api_key,
+                log: $log,
+                max_tries: $max_tries,
+                mcp_servers: $mcp_servers,
+                mcp_servers_call_type: $mcp_servers_call_type,
+                session_id: $session_id,
+                history: $history,
+                stream: $stream,
+                url: $url,
+                enable_thinking: $enable_thinking,
+                auto_compact: $auto_compact,
+                cli_workdir: $cli_workdir,
+                cli_ssh_host: $cli_ssh_host,
+                cli_ssh_user: $cli_ssh_user,
+                cli_ssh_port: $cli_ssh_port,
+                cli_ssh_key: $cli_ssh_key,
+                cli_ssh_reverse_tunnel: $cli_ssh_reverse_tunnel,
+                cli_session_id: $cli_session_id,
+                cli_resume_latest: $cli_resume_latest,
+                cli_native_memory: $cli_native_memory,
+                cli_session_home: $cli_session_home,
+                cli_auth_home: $cli_auth_home,
+                system_prompt: $system_prompt,
+                cli_skills: $cli_skills,
+                abort_callback: $abort_callback
+            );
+        }
         if ($provider === 'test') {
             return new ai_test(
                 model: $model,
@@ -516,6 +549,7 @@ abstract class aihelper
                 ai_claudecode::class,
                 ai_codex::class,
                 ai_opencode::class,
+                ai_antigravity::class,
                 ai_test::class
             ]
             as $providerClass
@@ -946,7 +980,8 @@ abstract class aihelper
         }
         if (
             $owned_by === null &&
-            (str_contains($model, 'antigravity') ||
+            ($this->name === 'antigravity' ||
+                str_contains($model, 'antigravity') ||
                 str_contains($model, 'agy') ||
                 ($this->name === 'cliproxyapi' && str_contains($model, 'gemini')))
         ) {
@@ -1318,21 +1353,20 @@ abstract class aihelper
             return $finish($limits);
         }
         if ($tool === 'antigravity') {
-            $auth_files = array_values(
-                array_unique(
-                    array_merge(
-                        ['/root/.gemini/antigravity-cli/antigravity-oauth-token'],
-                        static::getCliProxyAuthFiles('antigravity*.json')
-                    )
-                )
+            $cliAuthHome = $this->cli_auth_home ?? '';
+            $auth_files = $this->getCliAuthFiles(
+                ($cliAuthHome !== '' ? $cliAuthHome . '/antigravity' : '/root') .
+                    '/.gemini/antigravity-cli/antigravity-oauth-token',
+                'antigravity*.json'
             );
             $access_token = null;
             $project = null;
             foreach ($auth_files as $auth_file) {
-                if (!is_file($auth_file)) {
+                $auth_content = $this->readCliAuthFile($auth_file);
+                if ($auth_content === null) {
                     continue;
                 }
-                $auth = json_decode((string) file_get_contents($auth_file), true);
+                $auth = json_decode($auth_content, true);
                 if (!is_array($auth)) {
                     continue;
                 }
@@ -2361,6 +2395,145 @@ abstract class aihelper
                     $request['duration_in_ms'] = $completed_at > $started_at ? $completed_at - $started_at : null;
                     $requests[] = $request;
                 }
+            } catch (\PDOException) {
+            }
+        }
+
+        // antigravity keeps every conversation in its own sqlite file whose rows are protobuf blobs;
+        // one row per model call (step type 15), usage and creation time live in the step metadata
+        $protobuf_fields = function (string $data): ?array {
+            $fields = [];
+            $offset = 0;
+            $length = strlen($data);
+            $varint = function () use ($data, $length, &$offset): ?int {
+                $value = 0;
+                for ($shift = 0; $offset < $length && $shift < 64; $shift += 7) {
+                    $byte = ord($data[$offset++]);
+                    $value |= ($byte & 0x7f) << $shift;
+                    if ($byte < 0x80) {
+                        return $value;
+                    }
+                }
+                return null;
+            };
+            while ($offset < $length) {
+                $key = $varint();
+                if ($key === null || $key >> 3 === 0) {
+                    return null;
+                }
+                $value = match ($key & 7) {
+                    0 => $varint(),
+                    1 => $offset + 8 <= $length ? substr($data, ($offset += 8) - 8, 8) : null,
+                    2 => ($size = $varint()) !== null && $offset + $size <= $length
+                        ? substr($data, ($offset += $size) - $size, $size)
+                        : null,
+                    5 => $offset + 4 <= $length ? substr($data, ($offset += 4) - 4, 4) : null,
+                    default => null
+                };
+                if ($value === null) {
+                    return null;
+                }
+                $fields[$key >> 3][] = $value;
+            }
+            return $fields;
+        };
+        $home = rtrim((string) getenv('HOME'), '/');
+        $antigravity_homes = array_merge(
+            [$home . '/.gemini', '/root/.gemini'],
+            glob($home . '/.gemini/aihelper/*/.gemini', GLOB_ONLYDIR) ?: [],
+            glob('/root/.gemini/aihelper/*/.gemini', GLOB_ONLYDIR) ?: [],
+            array_map(fn(string $session_home): string => $session_home . '/antigravity/.gemini', $session_homes)
+        );
+        $antigravity_databases = [];
+        foreach (array_unique(array_filter(array_map('realpath', $antigravity_homes))) as $antigravity_home) {
+            foreach (glob($antigravity_home . '/antigravity-cli/conversations/*.db') ?: [] as $database) {
+                $antigravity_databases[$database] = $antigravity_home . '/antigravity-cli/conversation_summaries.db';
+            }
+        }
+        foreach ($antigravity_databases as $antigravity_database => $summaries_database) {
+            if ((filemtime($antigravity_database) ?: 0) < $min_mtime) {
+                continue;
+            }
+            try {
+                $connection = new \PDO(
+                    'sqlite:' . $antigravity_database,
+                    options: [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]
+                );
+                $conversation_id = basename($antigravity_database, '.db');
+                // the steps only carry an enum of the model, its name is recorded with the generation
+                $model_names = [];
+                foreach ($connection->query('SELECT data FROM gen_metadata')->fetchAll(\PDO::FETCH_COLUMN) as $blob) {
+                    $generation = $protobuf_fields((string) $blob);
+                    $call = $generation !== null ? $protobuf_fields((string) ($generation[1][0] ?? '')) : null;
+                    $call_usage = $call !== null ? $protobuf_fields((string) ($call[4][0] ?? '')) : null;
+                    if (is_string($call[19][0] ?? null) && is_int($call_usage[1][0] ?? null)) {
+                        $model_names[$call_usage[1][0]] = $call[19][0];
+                    }
+                }
+                $cwd = null;
+                if (is_file($summaries_database)) {
+                    $summaries = new \PDO(
+                        'sqlite:' . $summaries_database,
+                        options: [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]
+                    );
+                    $statement = $summaries->prepare(
+                        'SELECT workspace_uris FROM conversation_summaries WHERE conversation_id = :id'
+                    );
+                    $statement->execute(['id' => $conversation_id]);
+                    $workspace = json_decode((string) $statement->fetchColumn(), true)[0] ?? null;
+                    $cwd = is_string($workspace)
+                        ? rawurldecode((string) preg_replace('#^file://#', '', $workspace))
+                        : null;
+                    $statement = null;
+                    $summaries = null;
+                }
+                $last_user = null;
+                $steps = $connection->query('SELECT step_type, metadata, step_payload FROM steps ORDER BY idx');
+                foreach ($steps as $step) {
+                    // step type 14 is the user input, its text sits in field 19.2 of the payload
+                    if ((int) $step['step_type'] === 14) {
+                        $payload = $protobuf_fields((string) $step['step_payload']);
+                        $input = $payload !== null ? $protobuf_fields((string) ($payload[19][0] ?? '')) : null;
+                        if (is_string($input[2][0] ?? null) && trim($input[2][0]) !== '') {
+                            $last_user = $input[2][0];
+                        }
+                        continue;
+                    }
+                    if ((int) $step['step_type'] !== 15) {
+                        continue;
+                    }
+                    $metadata = $protobuf_fields((string) $step['metadata']);
+                    $created = $metadata !== null ? $protobuf_fields((string) ($metadata[1][0] ?? '')) : null;
+                    $usage = $metadata !== null ? $protobuf_fields((string) ($metadata[9][0] ?? '')) : null;
+                    if (!is_int($created[1][0] ?? null) || $usage === null || !$in_range((float) $created[1][0])) {
+                        continue;
+                    }
+                    $model = is_int($usage[1][0] ?? null) ? $model_names[$usage[1][0]] ?? null : null;
+                    $request = $make_local(
+                        $antigravity_database,
+                        date(\DateTimeInterface::ATOM, $created[1][0]),
+                        $model ?? (array_values($model_names)[0] ?? null),
+                        [
+                            'input_tokens' => (int) ($usage[2][0] ?? 0),
+                            'output_tokens' => (int) ($usage[3][0] ?? 0),
+                            'cache_read_input_tokens' => (int) ($usage[5][0] ?? 0),
+                            'thinking_tokens' => (int) ($usage[9][0] ?? 0)
+                        ],
+                        'antigravity',
+                        $last_user,
+                        $cwd
+                    );
+                    $request['session_id'] = $conversation_id;
+                    // the readable transcript instead of the binary database, where the cli keeps one
+                    $transcript =
+                        dirname($antigravity_database, 2) .
+                        '/brain/' . $conversation_id . '/.system_generated/logs/transcript.jsonl';
+                    if (is_file($transcript)) {
+                        $request['file'] = $transcript;
+                    }
+                    $requests[] = $request;
+                }
+                $connection = null;
             } catch (\PDOException) {
             }
         }
@@ -6632,7 +6805,7 @@ abstract class aihelper
         $this->stream_callback = null;
 
         // the cli harnesses hand over literal anthropic streaming events
-        if (in_array($this->name, ['anthropic', 'test', 'claudecode', 'codex', 'opencode'], true)) {
+        if (in_array($this->name, ['anthropic', 'test', 'claudecode', 'codex', 'opencode', 'antigravity'], true)) {
             // mimic non stream result
             $this->stream_response = (object) [
                 'result' => (object) [
@@ -10891,7 +11064,7 @@ class ai_cliproxyapi extends ai_openrouter
 }
 
 /**
- * Base for the local agentic CLI harnesses (Claude Code, Codex, OpenCode).
+ * Base for the local agentic CLI harnesses (Claude Code, Codex, OpenCode, Antigravity).
  *
  * Unlike every other provider these do not call a chat completion endpoint:
  * they drive a local CLI process that owns its own system prompt, tool
@@ -14990,5 +15163,492 @@ class ai_opencode extends ai_harness
             $this->message_started = false;
         }
         $this->emitHarnessLifecycleEvent($event);
+    }
+}
+
+class ai_antigravity extends ai_harness
+{
+    /**
+     * Map Antigravity session and turn events without exposing the step bookkeeping.
+     */
+    protected function emitHarnessLifecycleEvent(array $event): void
+    {
+        $this->log($event, 'harness event');
+        $type = (string) ($event['event'] ?? '');
+        if ($type === 'init') {
+            $this->emitTranscript('session', 'Session started', 'completed', null, false, 'status');
+            return;
+        }
+        if ($type !== 'result') {
+            return;
+        }
+        $result = is_array($event['result'] ?? null) ? $event['result'] : [];
+        $failed = ($result['status'] ?? null) !== 'SUCCESS';
+        $this->emitTranscript(
+            'turn',
+            $failed ? 'Turn failed' : 'Turn completed',
+            $failed ? 'error' : 'completed',
+            $failed ? $result['error'] ?? 'Harness run failed' : null,
+            false,
+            'status'
+        );
+        $this->emitTranscript(
+            'usage',
+            'Token usage',
+            'completed',
+            [
+                'input_tokens' => $result['usage']['input_tokens'] ?? 0,
+                'output_tokens' => $result['usage']['output_tokens'] ?? 0,
+                'cache_read_input_tokens' => $result['usage']['cache_read_tokens'] ?? 0,
+                'thinking_tokens' => $result['usage']['thinking_tokens'] ?? 0
+            ],
+            false,
+            'usage'
+        );
+    }
+
+    public ?string $provider = 'Google';
+
+    public ?string $title = 'Antigravity';
+
+    public ?string $name = 'antigravity';
+
+    public ?string $icon = <<<'SVG'
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2 2.5 21.5h4.2L12 10.4l5.3 11.1h4.2Zm0 13.3-2.1 4.4h4.2Z"/></svg>
+    SVG;
+
+    protected ?string $url = null;
+
+    protected bool $message_started = false;
+
+    protected int $content_block_index = 0;
+
+    /** @var array<int, array{index: int, text: string}> */
+    protected array $streamed_steps = [];
+
+    /** @var array<string, int> */
+    protected array $turn_usage = [];
+
+    // the subscription bills the calls, so there is no token price to show
+    public array $models = [
+        [
+            'name' => 'gemini-3.8-flash-high',
+            'context_length' => 1048576,
+            'max_output_tokens' => 65536,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
+            'supports_effort' => false,
+            'default' => true
+        ],
+        [
+            'name' => 'gemini-3.8-flash-medium',
+            'context_length' => 1048576,
+            'max_output_tokens' => 65536,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
+            'supports_effort' => false,
+            'default' => false
+        ],
+        [
+            'name' => 'gemini-3.8-flash-low',
+            'context_length' => 1048576,
+            'max_output_tokens' => 65536,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
+            'supports_effort' => false,
+            'default' => false
+        ],
+        [
+            'name' => 'gemini-3.1-pro-high',
+            'context_length' => 1048576,
+            'max_output_tokens' => 65536,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
+            'supports_effort' => false,
+            'default' => false
+        ],
+        [
+            'name' => 'gemini-3.1-pro-low',
+            'context_length' => 1048576,
+            'max_output_tokens' => 65536,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
+            'supports_effort' => false,
+            'default' => false
+        ],
+        [
+            'name' => 'claude-sonnet-4-6',
+            'context_length' => 200000,
+            'max_output_tokens' => 64000,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
+            'supports_effort' => false,
+            'default' => false
+        ],
+        [
+            'name' => 'claude-opus-4-6-thinking',
+            'context_length' => 200000,
+            'max_output_tokens' => 64000,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
+            'supports_effort' => false,
+            'default' => false
+        ],
+        [
+            'name' => 'gpt-oss-120b-medium',
+            'context_length' => 131072,
+            'max_output_tokens' => 32768,
+            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => false,
+            'supports_audio_to_text' => false,
+            'supports_effort' => false,
+            'default' => false
+        ]
+    ];
+
+    protected function binaryName(): string
+    {
+        return 'agy';
+    }
+
+    /**
+     * The run replaces the home directory (see buildArgs), and only "env" can do that after the
+     * shell has found the cli with the user's own PATH.
+     */
+    protected function resolveBinary(): ?string
+    {
+        return parent::resolveBinary() === null ? null : 'env';
+    }
+
+    /**
+     * Antigravity has no option for its configuration directory, so every run gets its own home:
+     * the session store, or one below the native profile like Codex keeps it. The rules, skills and
+     * mcp servers of this run are linked into its config; the login and the ssh and git identity of
+     * the account are shared, because the agent's own commands run with this home as well.
+     */
+    protected function antigravityHome(): string
+    {
+        $userHome = rtrim($this->userHome(), '/');
+        $home =
+            $this->harnessStore('antigravity') ??
+            $userHome . '/.gemini/aihelper/' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', (string) $this->session_id);
+        $native = ($this->harnessAuthStore('antigravity') ?? $userHome) . '/.gemini/antigravity-cli';
+        $links = [];
+        if ($this->isRemote() || is_file($native . '/antigravity-oauth-token')) {
+            $links[$home . '/.gemini/antigravity-cli/antigravity-oauth-token'] = $native . '/antigravity-oauth-token';
+        }
+        foreach (['.ssh', '.gitconfig'] as $identity) {
+            if ($this->isRemote() || file_exists($userHome . '/' . $identity)) {
+                $links[$home . '/' . $identity] = $userHome . '/' . $identity;
+            }
+        }
+        $config = [];
+        if ($this->system_prompt !== null) {
+            // global rules are capped at 24 KB per file by the cli
+            $config['AGENTS.md'] = $this->payloadFile('antigravity/AGENTS.md', $this->system_prompt);
+        }
+        $skills = $this->placeSkills('antigravity/skills');
+        if ($skills !== null) {
+            $config['skills'] = $skills;
+        }
+        $servers = [];
+        foreach ($this->harnessMcpServers() as $name => $server) {
+            $entry = ['serverUrl' => $server['url']];
+            if ($server['token'] !== null && trim((string) $server['token']) !== '') {
+                $entry['headers'] = ['Authorization' => 'Bearer ' . $server['token']];
+            }
+            $servers[$name] = $entry;
+        }
+        if ($servers !== []) {
+            $config['mcp_config.json'] = $this->payloadFile(
+                'antigravity/mcp_config.json',
+                json_encode(['mcpServers' => $servers], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            );
+        }
+        // without isolation the account's own rules, skills and servers fill in what the run does not bring
+        if ($this->isolate_harness_config !== true) {
+            foreach (['AGENTS.md', 'skills', 'mcp_config.json'] as $entry) {
+                if (
+                    !isset($config[$entry]) &&
+                    ($this->isRemote() || file_exists($userHome . '/.gemini/config/' . $entry))
+                ) {
+                    $config[$entry] = $userHome . '/.gemini/config/' . $entry;
+                }
+            }
+        }
+        foreach ($config as $entry => $target) {
+            $links[$home . '/.gemini/config/' . $entry] = $target;
+        }
+        $this->prepareHarnessStore([$native, $home . '/.gemini/antigravity-cli', $home . '/.gemini/config'], $links);
+        return $home;
+    }
+
+    protected function buildArgs(): array
+    {
+        $args = [
+            'HOME=' . $this->antigravityHome(),
+            $this->isRemote() ? $this->binaryName() : (string) parent::resolveBinary(),
+            '--input-format',
+            'stream-json',
+            '--output-format',
+            'stream-json',
+            '--dangerously-skip-permissions'
+        ];
+        if ($this->cli_session_id !== null) {
+            $args[] = '--conversation';
+            $args[] = $this->cli_session_id;
+        }
+        if ($this->cli_session_id === null && $this->cli_resume_latest) {
+            $args[] = '--continue';
+        }
+        if ($this->model !== null) {
+            $args[] = '--model';
+            $args[] = $this->model;
+        }
+        return $args;
+    }
+
+    /**
+     * Skills are linked into the run's config, so the cli reads them below .gemini/config/skills.
+     */
+    protected function isHarnessSkillTool(string $name, mixed $input): bool
+    {
+        $serialized = json_encode($input, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        return parent::isHarnessSkillTool($name, $input) ||
+            (is_string($serialized) &&
+                str_contains($serialized, '/.gemini/config/skills/') &&
+                str_contains($serialized, '/SKILL.md'));
+    }
+
+    protected function harnessInput(string $prompt): string
+    {
+        // the stream input takes text blocks only; files are named, the cli reads them itself
+        return
+            json_encode(
+                [
+                    'event' => 'user',
+                    'message' => ['content' => [['type' => 'text', 'text' => $this->appendFileNote($prompt)]]]
+                ],
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+            ) . "\n";
+    }
+
+    protected function handleEvent(array $event, object $result, ?\Closure $emit): void
+    {
+        $type = $event['event'] ?? null;
+        if ($type === 'init') {
+            if (!empty($event['conversation_id'])) {
+                $sessionId = (string) $event['conversation_id'];
+                $this->log($sessionId, 'harness session');
+                $this->emitHarnessSession($emit, $sessionId);
+            }
+            $this->emitHarnessLifecycleEvent($event);
+            if ($this->message_started === false) {
+                $this->message_started = true;
+                $this->content_block_index = 0;
+                $this->streamed_steps = [];
+                $this->turn_usage = [];
+                $this->emitAnthropicEvent($emit, [
+                    'type' => 'message_start',
+                    'message' => [
+                        'type' => 'message',
+                        'role' => 'assistant',
+                        'model' => (string) $this->model,
+                        'content' => [],
+                        'stop_reason' => null,
+                        'usage' => ['input_tokens' => 0, 'output_tokens' => 0]
+                    ]
+                ]);
+            }
+            return;
+        }
+
+        if ($type === 'step_update') {
+            $update = is_array($event['step_update'] ?? null) ? $event['step_update'] : [];
+            $step = (int) ($update['step_index'] ?? 0);
+            $done = ($update['state'] ?? null) !== 'ACTIVE';
+            if (($update['step_type'] ?? null) === 'agent_response') {
+                // every model call reports its own usage, the result of a resumed conversation its total
+                if ($done && is_array($update['usage'] ?? null)) {
+                    foreach (['input_tokens', 'output_tokens', 'thinking_tokens', 'cache_read_tokens'] as $key) {
+                        $this->turn_usage[$key] = ($this->turn_usage[$key] ?? 0) + (int) ($update['usage'][$key] ?? 0);
+                    }
+                }
+                $delta = (string) ($update['text_delta'] ?? '');
+                if (!isset($this->streamed_steps[$step]) && trim($delta) !== '') {
+                    $this->streamed_steps[$step] = ['index' => $this->content_block_index++, 'text' => ''];
+                    $this->emitAnthropicEvent($emit, [
+                        'type' => 'content_block_start',
+                        'index' => $this->streamed_steps[$step]['index'],
+                        'content_block' => ['type' => 'text', 'text' => '']
+                    ]);
+                }
+                if (!isset($this->streamed_steps[$step])) {
+                    return;
+                }
+                if ($delta !== '') {
+                    $this->streamed_steps[$step]['text'] .= $delta;
+                    $this->emitAnthropicEvent($emit, [
+                        'type' => 'content_block_delta',
+                        'index' => $this->streamed_steps[$step]['index'],
+                        'delta' => ['type' => 'text_delta', 'text' => $delta]
+                    ]);
+                }
+                if ($done) {
+                    $this->emitAnthropicEvent($emit, [
+                        'type' => 'content_block_stop',
+                        'index' => $this->streamed_steps[$step]['index']
+                    ]);
+                    $result->result->content[] = (object) [
+                        'type' => 'text',
+                        'text' => $this->streamed_steps[$step]['text']
+                    ];
+                    unset($this->streamed_steps[$step]);
+                }
+                return;
+            }
+            // the cli runs its tools itself, so the calls only become visible to the
+            // caller when they are written into the session like a native provider does
+            if (($update['step_type'] ?? null) === 'tool') {
+                $info = is_array($update['tool_info'] ?? null) ? $update['tool_info'] : [];
+                $toolName = (string) ($info['name'] ?? ($update['tool_name'] ?? 'tool'));
+                $input = is_array($info['parameters'] ?? null) ? $info['parameters'] : [];
+                $id = (string) ($update['tool_call_id'] ?? (($update['conversation_id'] ?? '') . '-' . $step));
+                $failed = $done && ($update['state'] ?? null) !== 'DONE';
+                $output = $info['output'] ?? ($info['error'] ?? '');
+                if (!is_string($output)) {
+                    $output = json_encode(
+                        $output,
+                        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+                    ) ?: '';
+                }
+                $hiddenSkill = $this->isHarnessSkillTool($toolName, $input);
+                if (!$hiddenSkill) {
+                    $this->emitTranscript(
+                        $id,
+                        $this->toolTranscriptLabel($toolName, $input),
+                        $done ? ($failed ? 'error' : 'completed') : 'running',
+                        $done ? $output : $input
+                    );
+                }
+                if (!$done) {
+                    return;
+                }
+                if ($hiddenSkill) {
+                    $skillInput = json_encode($input, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+                    preg_match('#/skills/([^/]+)/SKILL\.md#', $skillInput, $skillMatch);
+                    $this->emitTranscript(
+                        $id,
+                        'Loaded skill ' . ($skillMatch[1] ?? 'instructions'),
+                        $failed ? 'error' : 'completed',
+                        $failed ? $output : null
+                    );
+                }
+                $result->result->content[] = (object) [
+                    'type' => 'tool_use',
+                    'id' => $id,
+                    'name' => $toolName,
+                    'input' => $input
+                ];
+                $result->result->content[] = (object) [
+                    'type' => 'tool_result',
+                    'tool_use_id' => $id,
+                    'is_error' => $failed,
+                    'content' => $output
+                ];
+            }
+            return;
+        }
+
+        if ($type !== 'result') {
+            $this->emitHarnessLifecycleEvent($event);
+            return;
+        }
+        $this->harness_turn_complete = true;
+        if ($this->turn_usage !== [] && is_array($event['result'] ?? null)) {
+            $event['result']['usage'] = $this->turn_usage;
+        }
+        // a later run that fails before its init must not report this turn's calls
+        $this->turn_usage = [];
+        $this->emitHarnessLifecycleEvent($event);
+        $data = is_array($event['result'] ?? null) ? $event['result'] : [];
+        $success = ($data['status'] ?? null) === 'SUCCESS';
+        // a reply that arrived without deltas still belongs to the turn
+        $hasText = array_filter($result->result->content, fn(object $block): bool => ($block->type ?? null) === 'text');
+        if ($hasText === [] && trim((string) ($data['response'] ?? '')) !== '') {
+            $index = $this->content_block_index++;
+            $this->emitAnthropicEvent($emit, [
+                'type' => 'content_block_start',
+                'index' => $index,
+                'content_block' => ['type' => 'text', 'text' => '']
+            ]);
+            $this->emitAnthropicEvent($emit, [
+                'type' => 'content_block_delta',
+                'index' => $index,
+                'delta' => ['type' => 'text_delta', 'text' => (string) $data['response']]
+            ]);
+            $this->emitAnthropicEvent($emit, ['type' => 'content_block_stop', 'index' => $index]);
+            $result->result->content[] = (object) ['type' => 'text', 'text' => (string) $data['response']];
+        }
+        $result->result->harness_success = $success;
+        $result->result->stop_reason = 'end_turn';
+        $result->result->usage = (object) [
+            'input_tokens' => (int) ($data['usage']['input_tokens'] ?? 0),
+            'cache_creation_input_tokens' => 0,
+            'cache_read_input_tokens' => (int) ($data['usage']['cache_read_tokens'] ?? 0),
+            'output_tokens' => (int) ($data['usage']['output_tokens'] ?? 0)
+        ];
+        $this->harness_costs = 0.0;
+        if (!$success) {
+            $result->result->error = (object) [
+                'message' => trim((string) ($data['error'] ?? '')) ?: 'Antigravity turn failed'
+            ];
+        }
+        $this->emitAnthropicEvent($emit, [
+            'type' => 'message_delta',
+            'delta' => ['stop_reason' => 'end_turn', 'stop_sequence' => null],
+            'usage' => (array) $result->result->usage
+        ]);
+        $this->emitAnthropicEvent($emit, ['type' => 'message_stop']);
+        $this->message_started = false;
     }
 }

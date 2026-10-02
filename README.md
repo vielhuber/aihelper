@@ -22,7 +22,7 @@ composer require vielhuber/aihelper
 use vielhuber\aihelper\aihelper;
 
 $ai = aihelper::create(
-    provider: 'anthropic', // anthropic|google|openai|xai|deepseek|openrouter|cliproxyapi|elevenlabs|typesafe|nvidia|llamacpp|lmstudio|claudecode|codex|opencode
+    provider: 'anthropic', // anthropic|google|openai|xai|deepseek|openrouter|cliproxyapi|elevenlabs|typesafe|nvidia|llamacpp|lmstudio|claudecode|codex|opencode|antigravity
     model: 'claude-opus-4-1', // claude-opus-4-1|gemini-2.5-pro|gpt-5|grok-4|deepseek-chat|qwen/qwen3-coder-next|...
     effort: null, // null|none|minimal|low|medium|high|xhigh|max|ultra — reasoning effort, ignored when the provider/model has no supported reasoning control
     temperature: 1.0, // controls the randomness of the text generated
@@ -244,14 +244,16 @@ with a valid `TYPESAFE_API_KEY` in `.env`, the following live test makes seven p
 
 ### cli harnesses
 
-the providers `claudecode`, `codex` and `opencode` drive the locally installed cli agent instead of a chat completion endpoint. they own their system prompt, tools and history, so only the newest user turn is handed over. install and log them in once:
+the providers `claudecode`, `codex`, `opencode` and `antigravity` drive the locally installed cli agent instead of a chat completion endpoint. they own their system prompt, tools and history, so only the newest user turn is handed over. install and log them in once:
 
 ```
 npm i -g @anthropic-ai/claude-code @openai/codex
 curl -fsSL https://opencode.ai/install | bash
+curl -fsSL https://antigravity.google/cli/install.sh | bash
 claude auth login
 codex login --device-auth
 opencode auth login
+agy
 ```
 
 a successful terminal event followed by exit code `0` may return `success: true` with `response: ''`, including when streaming. missing completion events, aborts and provider errors do not qualify; ordinary empty api responses remain errors and retain their retry behavior.
@@ -262,11 +264,15 @@ set `cli_resume_latest: false` for an explicitly fresh thread, then persist `$ai
 codex keeps injected config and skills isolated per aihelper session while storing its threads in the native
 `~/.codex` state. to include threads originally started by aihelper's non-interactive `codex exec`, resume from
 an interactive terminal with `codex resume --last --include-non-interactive`.
+antigravity has no option for its configuration directory, so every run gets its own home (the session home, or
+`~/.gemini/aihelper/<session>`) that shares the login, `~/.ssh` and `~/.gitconfig` of the account. the system prompt
+becomes the global rule file there, which the cli caps at 24 kb. resume such a conversation by hand with
+`HOME=<that home> agy --conversation <id>`.
 
 pass `cli_session_home` to keep one harness session's native history, configuration and skills in a dedicated
 persistent directory. pass `cli_auth_home` separately to share one authenticated subscription across multiple
-session homes without sharing their histories or configuration. both options work for claude code, codex and
-opencode and can also be changed before the first request with `setCliStorage()`.
+session homes without sharing their histories or configuration. both options work for claude code, codex,
+opencode and antigravity and can also be changed before the first request with `setCliStorage()`.
 
 set `cli_native_memory: false` when the caller supplies its own long-term memory. claude code then disables auto
 memory while retaining `CLAUDE.md`, plugins and skills; codex neither generates nor loads its native memories.

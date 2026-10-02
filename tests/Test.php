@@ -543,6 +543,64 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
+    function test__cli_request_reads_antigravity_conversations(): void
+    {
+        $root = sys_get_temp_dir() . '/aihelper-cli-antigravity-' . bin2hex(random_bytes(8));
+        $directory = $root . '/harness/profiles/fixture/antigravity/.gemini/antigravity-cli';
+        mkdir($directory . '/conversations', recursive: true);
+        $varint = function (int $value): string {
+            $bytes = '';
+            while ($value >= 0x80) {
+                $bytes .= chr(($value & 0x7f) | 0x80);
+                $value >>= 7;
+            }
+            return $bytes . chr($value);
+        };
+        $field = fn(int $number, int|string $value): string => is_int($value)
+            ? $varint($number << 3) . $varint($value)
+            : $varint(($number << 3) | 2) . $varint(strlen($value)) . $value;
+        $connection = new \PDO('sqlite:' . $directory . '/conversations/conversation-1.db');
+        $connection->exec('CREATE TABLE steps (idx INTEGER, step_type INTEGER, metadata BLOB, step_payload BLOB)');
+        $connection->exec('CREATE TABLE gen_metadata (idx INTEGER, data BLOB)');
+        $statement = $connection->prepare('INSERT INTO steps VALUES (:idx, :type, :metadata, :payload)');
+        $statement->execute(['idx' => 0, 'type' => 14, 'metadata' => '', 'payload' => $field(19, $field(2, 'Hallo Antigravity'))]);
+        $statement->execute([
+            'idx' => 1,
+            'type' => 15,
+            'metadata' =>
+                $field(1, $field(1, 2208988801) . $field(2, 5)) .
+                $field(9, $field(1, 7) . $field(2, 120) . $field(3, 30) . $field(5, 50) . $field(9, 20)),
+            'payload' => ''
+        ]);
+        $connection
+            ->prepare('INSERT INTO gen_metadata VALUES (0, :data)')
+            ->execute(['data' => $field(1, $field(4, $field(1, 7)) . $field(19, 'gemini-fixture'))]);
+        $summaries = new \PDO('sqlite:' . $directory . '/conversation_summaries.db');
+        $summaries->exec('CREATE TABLE conversation_summaries (conversation_id TEXT, workspace_uris TEXT)');
+        $summaries->exec("INSERT INTO conversation_summaries VALUES ('conversation-1', '[\"file:///tmp/agy-project\"]')");
+        $statement = $connection = $summaries = null;
+        touch($directory . '/conversations/conversation-1.db', strtotime('2040-01-01T00:00:03Z'));
+        $previousDirectory = getcwd();
+        $helper = $this->cliRequestAihelper();
+        chdir($root);
+        try {
+            $rows = $helper::getCliApiRequests(limit: 10, date_from: '2040-01-01', date_until: '2040-01-02', include_body: true);
+            $this->assertCount(1, $rows);
+            $this->assertSame('antigravity', $rows[0]['source']);
+            $this->assertSame('gemini-fixture', $rows[0]['model']);
+            $this->assertSame('conversation-1', $rows[0]['session_id']);
+            $this->assertSame('agy-project', $rows[0]['project']);
+            $this->assertSame('Hallo Antigravity', $rows[0]['request_body']['messages'][0]['content']);
+            $this->assertSame(
+                ['input_tokens' => 120, 'output_tokens' => 30, 'cache_read_input_tokens' => 50, 'thinking_tokens' => 20],
+                $rows[0]['usage']
+            );
+        } finally {
+            chdir($previousDirectory);
+            __::rrmdir($root);
+        }
+    }
+
     function test__cli_request_complete_histories_and_event_order(): void
     {
         $home = sys_get_temp_dir() . '/aihelper-cli-history-' . bin2hex(random_bytes(8));
@@ -1041,7 +1099,8 @@ class Test extends \PHPUnit\Framework\TestCase
         $cases = [
             'claudecode' => ['type' => 'system', 'subtype' => 'init', 'session_id' => 'claude-session'],
             'codex' => ['type' => 'thread.started', 'thread_id' => 'codex-session'],
-            'opencode' => ['type' => 'step_start', 'sessionID' => 'opencode-session']
+            'opencode' => ['type' => 'step_start', 'sessionID' => 'opencode-session'],
+            'antigravity' => ['event' => 'init', 'conversation_id' => 'antigravity-session']
         ];
 
         foreach ($cases as $provider => $event) {
@@ -1068,6 +1127,7 @@ class Test extends \PHPUnit\Framework\TestCase
             $nativeSessionId = match ($provider) {
                 'claudecode' => 'claude-session',
                 'codex' => 'codex-session',
+                'antigravity' => 'antigravity-session',
                 default => 'opencode-session'
             };
 
@@ -1171,6 +1231,154 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame('call_9b12', $result->result->content[1]->tool_use_id);
         $this->assertSame('{"count":1}', $result->result->content[1]->content);
         $this->assertFalse($result->result->content[1]->is_error);
+    }
+
+    function test__antigravity_runs_in_its_own_home_with_stream_json_input(): void
+    {
+        $this->skipOnCi();
+        $root = sys_get_temp_dir() . '/aihelper-antigravity-' . bin2hex(random_bytes(8));
+        $nativeHome = $root . '/native';
+        mkdir($nativeHome . '/.gemini/antigravity-cli', 0700, true);
+        file_put_contents($nativeHome . '/.gemini/antigravity-cli/antigravity-oauth-token', '{}');
+        file_put_contents($nativeHome . '/.gitconfig', '');
+        $previousHome = getenv('HOME');
+        putenv('HOME=' . $nativeHome);
+        try {
+            $harness = $this->harnessStoreAihelper('antigravity', $root . '/chat');
+            (new \ReflectionProperty(aihelper::class, 'system_prompt'))->setValue($harness, 'Antworte knapp.');
+            (new \ReflectionProperty(aihelper::class, 'cli_skills'))->setValue($harness, [
+                'demo' => "---\nname: demo\ndescription: demo skill\n---\n"
+            ]);
+            $args = (new \ReflectionMethod($harness, 'buildArgs'))->invoke($harness);
+            $input = (new \ReflectionMethod($harness, 'harnessInput'))->invoke($harness, 'Hello');
+            $home = $root . '/chat/antigravity';
+
+            $this->assertSame('HOME=' . $home, $args[0]);
+            foreach (['--input-format', 'stream-json', '--output-format', '--dangerously-skip-permissions', '--continue'] as $argument) {
+                $this->assertContains($argument, $args);
+            }
+            $this->assertSame('test', $args[array_search('--model', $args, true) + 1]);
+            $this->assertSame(
+                $nativeHome . '/.gemini/antigravity-cli/antigravity-oauth-token',
+                readlink($home . '/.gemini/antigravity-cli/antigravity-oauth-token')
+            );
+            $this->assertSame($nativeHome . '/.gitconfig', readlink($home . '/.gitconfig'));
+            $this->assertSame('Antworte knapp.', file_get_contents($home . '/.gemini/config/AGENTS.md'));
+            $this->assertFileExists($home . '/.gemini/config/skills/demo/SKILL.md');
+            $this->assertSame(
+                ['event' => 'user', 'message' => ['content' => [['type' => 'text', 'text' => 'Hello']]]],
+                json_decode(trim($input), true, 512, JSON_THROW_ON_ERROR)
+            );
+
+            $harness = aihelper::create(
+                provider: 'antigravity',
+                model: 'test',
+                cli_session_id: 'native-session',
+                cli_session_home: $root . '/chat'
+            );
+            $args = (new \ReflectionMethod($harness, 'buildArgs'))->invoke($harness);
+            $this->assertSame('native-session', $args[array_search('--conversation', $args, true) + 1]);
+            $this->assertNotContains('--continue', $args);
+        } finally {
+            putenv($previousHome === false ? 'HOME' : 'HOME=' . $previousHome);
+            __::rrmdir($root);
+        }
+    }
+
+    function test__antigravity_maps_stream_json_events_to_harness_result(): void
+    {
+        $this->skipOnCi();
+        $harness = (new \ReflectionClass(\vielhuber\aihelper\ai_antigravity::class))->newInstanceWithoutConstructor();
+        $result = (object) [
+            'result' => (object) [
+                'content' => [],
+                'stop_reason' => null,
+                'usage' => (object) [
+                    'input_tokens' => 0,
+                    'cache_creation_input_tokens' => 0,
+                    'cache_read_input_tokens' => 0,
+                    'output_tokens' => 0
+                ]
+            ]
+        ];
+        $handler = new \ReflectionMethod(\vielhuber\aihelper\ai_antigravity::class, 'handleEvent');
+        $step = fn(array $update): array => ['event' => 'step_update', 'step_update' => ['conversation_id' => 'conversation-1'] + $update];
+        $events = [
+            ['event' => 'init', 'conversation_id' => 'conversation-1', 'init' => ['cwd' => '/tmp', 'tools' => []]],
+            $step(['step_index' => 0, 'state' => 'DONE', 'step_type' => 'user_input']),
+            $step(['step_index' => 1, 'state' => 'DONE', 'step_type' => 'agent_response', 'usage' => ['input_tokens' => 20045]]),
+            $step([
+                'step_index' => 2,
+                'state' => 'ACTIVE',
+                'step_type' => 'tool',
+                'tool_name' => 'run_command',
+                'tool_info' => ['name' => 'run_command', 'parameters' => ['CommandLine' => 'echo hi']]
+            ]),
+            $step([
+                'step_index' => 2,
+                'state' => 'DONE',
+                'step_type' => 'tool',
+                'tool_name' => 'run_command',
+                'tool_info' => ['name' => 'run_command', 'parameters' => ['CommandLine' => 'echo hi'], 'output' => "hi\r\n"]
+            ]),
+            $step(['step_index' => 3, 'state' => 'ACTIVE', 'step_type' => 'agent_response', 'text_delta' => 'ok']),
+            $step([
+                'step_index' => 3,
+                'state' => 'DONE',
+                'step_type' => 'agent_response',
+                'text_delta' => "\n",
+                'usage' => ['input_tokens' => 5122, 'output_tokens' => 564, 'thinking_tokens' => 497, 'cache_read_tokens' => 16289]
+            ]),
+            [
+                'event' => 'result',
+                'result' => [
+                    'conversation_id' => 'conversation-1',
+                    'status' => 'SUCCESS',
+                    'response' => "ok\n",
+                    'usage' => [
+                        'input_tokens' => 144349,
+                        'output_tokens' => 8014,
+                        'thinking_tokens' => 6915,
+                        'cache_read_tokens' => 399083,
+                        'total_tokens' => 152363
+                    ]
+                ]
+            ]
+        ];
+        foreach ($events as $event) {
+            $handler->invoke($harness, $event, $result, null);
+        }
+
+        $this->assertSame('conversation-1', $harness->getCliSessionId());
+        $this->assertCount(3, $result->result->content);
+        $this->assertSame('tool_use', $result->result->content[0]->type);
+        $this->assertSame('conversation-1-2', $result->result->content[0]->id);
+        $this->assertSame('run_command', $result->result->content[0]->name);
+        $this->assertSame(['CommandLine' => 'echo hi'], $result->result->content[0]->input);
+        $this->assertSame("hi\r\n", $result->result->content[1]->content);
+        $this->assertFalse($result->result->content[1]->is_error);
+        $this->assertSame("ok\n", $result->result->content[2]->text);
+        $this->assertTrue($result->result->harness_success);
+        $this->assertSame('end_turn', $result->result->stop_reason);
+        // the result reports the whole conversation, a resumed turn is billed with its own calls only
+        $this->assertSame(25167, $result->result->usage->input_tokens);
+        $this->assertSame(564, $result->result->usage->output_tokens);
+        $this->assertSame(16289, $result->result->usage->cache_read_input_tokens);
+
+        $failed = (object) ['result' => (object) ['content' => []]];
+        $handler->invoke(
+            $harness,
+            ['event' => 'result', 'result' => ['status' => 'ERROR', 'response' => '', 'error' => 'interrupted']],
+            $failed,
+            null
+        );
+        $this->assertFalse($failed->result->harness_success);
+        $this->assertSame('interrupted', $failed->result->error->message);
+        $this->assertSame(0, $failed->result->usage->input_tokens);
+
+        $skill = new \ReflectionMethod(\vielhuber\aihelper\ai_antigravity::class, 'isHarnessSkillTool');
+        $this->assertTrue($skill->invoke($harness, 'view_file', ['AbsolutePath' => '/x/.gemini/config/skills/demo/SKILL.md']));
+        $this->assertFalse($skill->invoke($harness, 'view_file', ['AbsolutePath' => '/x/project/README.md']));
     }
 
     function test__claude_code_records_tool_calls_in_the_session(): void
