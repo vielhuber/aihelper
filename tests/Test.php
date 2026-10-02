@@ -301,6 +301,25 @@ class Test extends \PHPUnit\Framework\TestCase
         };
     }
 
+    function test__sessions_are_released_with_their_last_instance(): void
+    {
+        $sessions = new \ReflectionProperty(aihelper::class, 'sessions');
+        $before = count($sessions->getValue());
+        $ai = aihelper::create(provider: 'openrouter', model: 'test', api_key: 'test');
+        $ai->appendPromptToSession('test');
+        $continued = aihelper::create(provider: 'openrouter', model: 'test', api_key: 'test', session_id: $ai->getSessionId());
+        unset($ai);
+        $this->assertCount(1, $continued->getSessionContent());
+        $copy = clone $continued;
+        unset($continued);
+        $this->assertCount(1, $copy->getSessionContent());
+        unset($copy);
+        for ($i = 0; $i < 3; $i++) {
+            aihelper::create(provider: 'openrouter', model: 'test', api_key: 'test')->appendPromptToSession('test');
+        }
+        $this->assertCount($before, $sessions->getValue());
+    }
+
     function test__abort_callback_stops_the_request_without_retrying(): void
     {
         $ai = $this->abortAihelper(fn(): bool => true);

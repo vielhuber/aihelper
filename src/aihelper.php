@@ -73,6 +73,8 @@ abstract class aihelper
 
     protected ?string $session_id = null;
     protected static array $sessions = [];
+    // a session (with its base64 files) is freed with its last instance,
+    protected static array $session_instances = [];
 
     protected ?bool $auto_compact = null;
     protected ?string $auto_compact_summary = null;
@@ -883,6 +885,7 @@ abstract class aihelper
         if (!array_key_exists($this->session_id, self::$sessions)) {
             self::$sessions[$this->session_id] = [];
         }
+        self::$session_instances[$this->session_id] = (self::$session_instances[$this->session_id] ?? 0) + 1;
         if (__::x($history)) {
             self::$sessions[$this->session_id] = $history;
         }
@@ -6211,6 +6214,24 @@ abstract class aihelper
     public function getSessionId(): ?string
     {
         return $this->session_id;
+    }
+
+    public function __clone()
+    {
+        if ($this->session_id !== null) {
+            self::$session_instances[$this->session_id] = (self::$session_instances[$this->session_id] ?? 0) + 1;
+        }
+    }
+
+    public function __destruct()
+    {
+        if ($this->session_id === null || !isset(self::$session_instances[$this->session_id])) {
+            return;
+        }
+        if (--self::$session_instances[$this->session_id] > 0) {
+            return;
+        }
+        unset(self::$session_instances[$this->session_id], self::$sessions[$this->session_id]);
     }
 
     /**
