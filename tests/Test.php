@@ -2148,6 +2148,10 @@ class Test extends \PHPUnit\Framework\TestCase
             'claudecode' => ['low', 'medium', 'high', 'xhigh', 'max'],
             'opencode' => ['minimal', 'low', 'medium', 'high', 'max']
         ];
+        $antigravity = array_column(aihelper::create(provider: 'antigravity')->models, 'efforts', 'name');
+        $this->assertSame(['low', 'medium', 'high'], $antigravity['gemini-3.8-flash']);
+        $this->assertSame(['low', 'high'], $antigravity['gemini-3.1-pro']);
+        $this->assertArrayNotHasKey('gemini-3.8-flash-high', $antigravity);
 
         foreach ($expectedEfforts as $provider => $efforts) {
             $harness = aihelper::create(provider: $provider);
@@ -2166,6 +2170,30 @@ class Test extends \PHPUnit\Framework\TestCase
         $codex = aihelper::create(provider: 'codex', model: 'gpt-5.6-sol', effort: 'ultra');
         $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_codex::class, 'buildArgs'))->invoke($codex);
         $this->assertContains('model_reasoning_effort="ultra"', $args);
+
+        $antigravityHome = sys_get_temp_dir() . '/aihelper-antigravity-effort-' . bin2hex(random_bytes(8));
+        foreach (
+            [
+                ['gemini-3.8-flash', 'medium', 'medium'],
+                ['gemini-3.8-flash', null, 'high'],
+                ['gemini-3.8-flash', 'none', 'low'],
+                ['gemini-3.8-flash', 'max', 'high'],
+                ['gemini-3.1-pro', 'medium', 'low'],
+                ['claude-sonnet-4-6', 'high', null]
+            ]
+            as [$model, $effort, $expected]
+        ) {
+            $antigravity = aihelper::create(
+                provider: 'antigravity',
+                model: $model,
+                effort: $effort,
+                cli_session_home: $antigravityHome
+            );
+            $args = (new \ReflectionMethod(\vielhuber\aihelper\ai_antigravity::class, 'buildArgs'))->invoke($antigravity);
+            $position = array_search('--effort', $args, true);
+            $this->assertSame($expected, $position === false ? null : $args[$position + 1], $model . ' ' . $effort);
+        }
+        __::rrmdir($antigravityHome);
     }
 
     function test__codex_exposes_sol_as_default_with_vision(): void

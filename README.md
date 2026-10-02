@@ -266,7 +266,8 @@ codex keeps injected config and skills isolated per aihelper session while stori
 an interactive terminal with `codex resume --last --include-non-interactive`.
 antigravity has no option for its configuration directory, so every run gets its own home (the session home, or
 `~/.gemini/aihelper/<session>`) that shares the login, `~/.ssh` and `~/.gitconfig` of the account. the system prompt
-becomes the global rule file there, which the cli caps at 24 kb. resume such a conversation by hand with
+becomes the global rule file there, which the cli caps at 24 kb. its models are base models whose
+`effort` becomes `--effort`; a level the model lacks takes the next lower one. resume such a conversation by hand with
 `HOME=<that home> agy --conversation <id>`.
 
 pass `cli_session_home` to keep one harness session's native history, configuration and skills in a dedicated

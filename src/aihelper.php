@@ -15232,7 +15232,7 @@ class ai_antigravity extends ai_harness
     // the subscription bills the calls, so there is no token price to show
     public array $models = [
         [
-            'name' => 'gemini-3.8-flash-high',
+            'name' => 'gemini-3.8-flash',
             'context_length' => 1048576,
             'max_output_tokens' => 65536,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
@@ -15242,11 +15242,12 @@ class ai_antigravity extends ai_harness
             'supports_text_to_audio' => false,
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
-            'supports_effort' => false,
+            'supports_effort' => true,
+            'efforts' => ['low', 'medium', 'high'],
             'default' => true
         ],
         [
-            'name' => 'gemini-3.8-flash-medium',
+            'name' => 'gemini-3.1-pro',
             'context_length' => 1048576,
             'max_output_tokens' => 65536,
             'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
@@ -15256,49 +15257,8 @@ class ai_antigravity extends ai_harness
             'supports_text_to_audio' => false,
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
-            'supports_effort' => false,
-            'default' => false
-        ],
-        [
-            'name' => 'gemini-3.8-flash-low',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'supports_effort' => false,
-            'default' => false
-        ],
-        [
-            'name' => 'gemini-3.1-pro-high',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'supports_effort' => false,
-            'default' => false
-        ],
-        [
-            'name' => 'gemini-3.1-pro-low',
-            'context_length' => 1048576,
-            'max_output_tokens' => 65536,
-            'costs' => ['input' => 0, 'input_cached' => 0, 'output' => 0],
-            'supports_temperature' => false,
-            'supports_tools' => true,
-            'supports_text_to_image' => false,
-            'supports_text_to_audio' => false,
-            'supports_image_to_text' => true,
-            'supports_audio_to_text' => false,
-            'supports_effort' => false,
+            'supports_effort' => true,
+            'efforts' => ['low', 'high'],
             'default' => false
         ],
         [
@@ -15443,6 +15403,19 @@ class ai_antigravity extends ai_harness
         if ($this->model !== null) {
             $args[] = '--model';
             $args[] = $this->model;
+        }
+        // agy rejects a base model without --effort; a level the model lacks takes the next lower one
+        $efforts = array_column($this->models, 'efforts', 'name')[$this->model] ?? [];
+        if ($efforts !== []) {
+            $rank = array_flip($this->getEffortValues());
+            $effort = $efforts[0];
+            foreach ($efforts as $candidate) {
+                if ($rank[$candidate] <= ($rank[$this->effort ?? ''] ?? PHP_INT_MAX)) {
+                    $effort = $candidate;
+                }
+            }
+            $args[] = '--effort';
+            $args[] = $effort;
         }
         return $args;
     }
