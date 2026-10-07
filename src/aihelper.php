@@ -11107,6 +11107,9 @@ abstract class ai_harness extends ai_anthropic
 
     protected ?float $harness_turn_complete_at = null;
 
+    /** @var array<string, float> */
+    protected array $harness_background_tasks = [];
+
     protected ?string $harness_steer_pending = null;
 
     /** @var array<string, string> */
@@ -11143,9 +11146,7 @@ abstract class ai_harness extends ai_anthropic
     }
 
     /**
-     * Whether the process outlives the finished turn and has to be taken down.
-     * True only for a protocol server, never for a cli that ends by itself once
-     * its input stream is closed.
+     * Whether closing stdin can leave the process alive after its final turn.
      */
     protected function harnessOutlivesTurn(): bool
     {
@@ -11996,6 +11997,7 @@ abstract class ai_harness extends ai_anthropic
 
         $this->harness_turn_complete = false;
         $this->harness_turn_complete_at = null;
+        $this->harness_background_tasks = [];
         $this->harness_steer_pending = null;
         $this->harness_stdin_open = true;
         stream_set_blocking($pipes[1], false);
@@ -12033,6 +12035,7 @@ abstract class ai_harness extends ai_anthropic
         ];
 
         $last_activity_at = time();
+        $last_heartbeat_at = microtime(true);
         $buffer = '';
         $errors = '';
         $exit_code = null;
@@ -12113,13 +12116,15 @@ abstract class ai_harness extends ai_anthropic
                 }
                 if (
                     $this->harnessOutlivesTurn() &&
+                    $drain_until === null &&
                     $this->harness_turn_complete === true &&
+                    ($this->harness_background_tasks === [] || ($result->result->harness_success ?? null) === false) &&
                     $this->harness_turn_complete_at !== null &&
                     microtime(true) - $this->harness_turn_complete_at > 20
                 ) {
-                    // a protocol server keeps running after a finished turn; once the
-                    // result is in and closing stdin did not end it, it is taken down
+                    // preserve the terminal result when stdin closure did not stop the process
                     $this->terminateProcess($process, $pid);
+                    $exit_code = ($result->result->harness_success ?? false) === true ? 0 : 1;
                     break;
                 }
                 foreach ($this->harnessPendingEvents() as $pendingEvent) {
@@ -12236,6 +12241,14 @@ abstract class ai_harness extends ai_anthropic
                         $this->handleEvent($event, $result, $emit);
                     }
                 }
+                if ($this->stream === true && microtime(true) - $last_heartbeat_at >= 1) {
+                    echo ": keepalive\n\n";
+                    if (ob_get_level() > 0) {
+                        ob_flush();
+                    }
+                    flush();
+                    $last_heartbeat_at = microtime(true);
+                }
                 // a refreshed token has to reach the shared profile while the run is alive: a run that is
                 // killed later would take the only valid token with it, and every other run fails to refresh
                 if (!$this->isRemote()) {
@@ -12252,10 +12265,40 @@ abstract class ai_harness extends ai_anthropic
                 } elseif (microtime(true) >= $drain_until) {
                     break;
                 }
-                if (time() - $last_activity_at >= (int) $this->timeout) {
+                $expiredTasks = array_keys(
+                    array_filter($this->harness_background_tasks, fn(float $deadline): bool => microtime(true) >= $deadline)
+                );
+                if (
+                    $drain_until === null &&
+                    ($expiredTasks !== [] ||
+                        ($this->harness_background_tasks === [] &&
+                            (!$this->harness_turn_complete || !$this->harnessOutlivesTurn()) &&
+                            time() - $last_activity_at >= (int) $this->timeout))
+                ) {
+                    if ($expiredTasks !== []) {
+                        $this->emitTranscript(
+                            'background-timeout',
+                            'Background task runtime limit reached',
+                            'error',
+                            ['task_ids' => $expiredTasks],
+                            false,
+                            'warning'
+                        );
+                    }
                     $this->closeNativeEventProcess($nativeEventProcess, $nativeEventPipes);
                     $this->terminateProcess($process, $pid);
                     $this->persistHarnessStoreLinks();
+                    if (
+                        $this->harness_turn_complete &&
+                        ($result->result->harness_success ?? false) === true &&
+                        ($result->result->error ?? null) === null
+                    ) {
+                        $exit_code = 0;
+                        break;
+                    }
+                    if ($expiredTasks !== []) {
+                        throw new \RuntimeException('harness: background task runtime limit reached.');
+                    }
                     throw new \RuntimeException('harness: inactivity timeout after ' . $this->timeout . ' seconds.');
                 }
             }
@@ -12846,6 +12889,14 @@ class ai_claudecode extends ai_harness
         return $this->input_callback !== null;
     }
 
+    /**
+     * Claude can stay alive for background notifications after closing stdin.
+     */
+    protected function harnessOutlivesTurn(): bool
+    {
+        return true;
+    }
+
     protected function harnessInput(string $prompt): string
     {
         // claude code has no attachment flag, but it can read any path itself —
@@ -12867,6 +12918,37 @@ class ai_claudecode extends ai_harness
     protected function handleEvent(array $event, object $result, ?\Closure $emit): void
     {
         $type = $event['type'] ?? null;
+
+        if (
+            empty($event['parent_tool_use_id']) &&
+            ($type === 'assistant' ||
+                ($type === 'stream_event' && ($event['event']['type'] ?? '') === 'message_start') ||
+                ($type === 'system' && ($event['subtype'] ?? '') === 'status' && ($event['status'] ?? '') === 'requesting'))
+        ) {
+            $this->harness_turn_complete = false;
+            $this->harness_turn_complete_at = null;
+            $result->result->stop_reason = null;
+            $result->result->harness_success = false;
+        }
+        $taskId = (string) ($event['task_id'] ?? '');
+        if ($type === 'system' && $taskId !== '' && ($event['subtype'] ?? '') === 'task_started') {
+            $taskTimeout = (int) $this->timeout;
+            foreach ($result->result->content as $block) {
+                if (
+                    ($block->type ?? '') === 'tool_use' &&
+                    ($block->name ?? '') === 'Bash' &&
+                    ($block->id ?? '') === ($event['tool_use_id'] ?? null)
+                ) {
+                    $taskTimeout = max($taskTimeout, (int) ceil((float) ($block->input['timeout'] ?? 0) / 1000));
+                    break;
+                }
+            }
+            $this->harness_background_tasks[$taskId] ??= microtime(true) + $taskTimeout;
+        }
+        if ($type === 'system' && $taskId !== '' && ($event['subtype'] ?? '') === 'task_notification') {
+            unset($this->harness_background_tasks[$taskId]);
+            $this->harness_turn_complete_at = microtime(true);
+        }
 
         // the cli reports "requesting" for every api call but only sends an
         // empty status on permission mode changes, so the reply ends the wait
@@ -12968,6 +13050,7 @@ class ai_claudecode extends ai_harness
         // the turn is over: with stdin still open the cli would wait for the next
         // one, so the loop closes it once this is set
         $this->harness_turn_complete = true;
+        $this->harness_turn_complete_at = microtime(true);
         $this->emitHarnessLifecycleEvent($event);
         $result->result->stop_reason = $event['stop_reason'] ?? 'end_turn';
         $result->result->harness_success =

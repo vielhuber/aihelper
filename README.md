@@ -258,6 +258,14 @@ agy
 
 a successful terminal event followed by exit code `0` may return `success: true` with `response: ''`, including when streaming. missing completion events, aborts and provider errors do not qualify; ordinary empty api responses remain errors and retain their retry behavior.
 
+claude code's tracked background tasks may remain active after a successful turn. aihelper waits for their
+completion notifications and subsequent replies instead of treating their lack of stdout as inactivity.
+each task has an absolute runtime limit: `timeout` seconds, or the longer explicit bash `timeout` (milliseconds).
+progress does not extend that limit. reaching it terminates the harness and emits a separate background warning;
+a completed reply stays successful, while an unfinished reply still fails. a completed harness without pending
+tasks is closed after a 20-second exit grace period. streamed harnesses send SSE keepalive comments once a second
+so consumers can persist pending text even when no further model event arrives; keepalives do not reset inactivity.
+
 by default every turn continues the newest thread of `cli_workdir` and opens a new one only when that directory has none yet.
 set `cli_resume_latest: false` for an explicitly fresh thread, then persist `$ai->getCliSessionId()` and pass it as
 `cli_session_id` on later calls to resume that exact native thread. an explicit `cli_session_id` always takes precedence.
