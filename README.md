@@ -345,6 +345,8 @@ aihelper::purgeCliApiRequestLogs(
 );
 ```
 
+`getCliUsageLimits()` renews expired native Codex, Claude Code and Antigravity OAuth credentials through the installed CLI before querying usage. No prompt is sent, no model response is generated, and no chat session is persisted. The CLI keeps ownership of token rotation and credential storage. A missing or revoked refresh token still requires signing in again; existing cached usage remains available on failure. OpenCode Go, proxy-managed credentials, normal chats and reset-credit operations are unchanged.
+
 ### streaming
 
 aihelper streams model output as server-sent events (sse). see [/tests/stream/index.html](tests/stream/index.html) for an example.

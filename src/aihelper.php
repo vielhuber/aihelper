@@ -997,6 +997,118 @@ abstract class aihelper
         return is_file($path) ? (string) file_get_contents($path) : null;
     }
 
+    /**
+     * Let the native CLI renew expired statistics credentials without sending a prompt.
+     */
+    protected function readCliUsageAuthFile(string $tool, string $path): ?string
+    {
+        $content = $this->readCliAuthFile($path);
+        $auth = $content === null ? null : json_decode($content, true);
+        if (!is_array($auth) || $this->name === 'cliproxyapi') {
+            return $content;
+        }
+        $home = $this->cli_auth_home !== null
+            ? rtrim($this->cli_auth_home, '/') . '/' . $tool
+            : match ($tool) {
+                'codex' => '/root/.codex',
+                'claude' => '/root/.claude',
+                'antigravity' => '/root'
+            };
+        $nativePath = $home . match ($tool) {
+            'codex' => '/auth.json',
+            'claude' => '/.credentials.json',
+            'antigravity' => '/.gemini/antigravity-cli/antigravity-oauth-token'
+        };
+        $refreshToken = $auth['claudeAiOauth']['refreshToken'] ??
+            $auth['token']['refresh_token'] ?? $auth['tokens']['refresh_token'] ?? $auth['refresh_token'] ?? null;
+        if ($path !== $nativePath || !is_string($refreshToken) || $refreshToken === '') {
+            return $content;
+        }
+        $expiresAt = $auth['token']['expiry'] ?? $auth['expired'] ?? $auth['expires_at'] ?? null;
+        if (is_numeric($auth['claudeAiOauth']['expiresAt'] ?? null)) {
+            $expiresAt = (int) floor((float) $auth['claudeAiOauth']['expiresAt'] / 1000);
+        }
+        if ($tool === 'codex') {
+            $parts = explode('.', (string) ($auth['tokens']['access_token'] ?? $auth['access_token'] ?? ''));
+            $claims = json_decode((string) base64_decode(strtr($parts[1] ?? '', '-_', '+/'), true), true);
+            $expiresAt = $claims['exp'] ?? $expiresAt;
+        }
+        $expiresAt = is_numeric($expiresAt) ? (int) $expiresAt : strtotime((string) $expiresAt);
+        if ($expiresAt === false || $expiresAt > time() + 60) {
+            return $content;
+        }
+        $arguments = match ($tool) {
+            'codex' => ['env', 'CODEX_HOME=' . $home, 'codex', 'app-server'],
+            'claude' => [
+                'env', 'CLAUDE_CONFIG_DIR=' . $home, 'claude', '--print',
+                '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+                '--no-session-persistence', '--setting-sources', '',
+                '--settings', '{"disableAllHooks":true}',
+                '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}'
+            ],
+            'antigravity' => ['env', 'HOME=' . $home, 'agy', 'models']
+        };
+        if ($this instanceof ai_harness && $this->isRemote()) {
+            $arguments = [...$this->sshCommand(), implode(' ', array_map('escapeshellarg', $arguments))];
+        }
+        $process = proc_open(
+            $arguments,
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']],
+            $pipes,
+            sys_get_temp_dir()
+        );
+        if (!is_resource($process)) {
+            return $content;
+        }
+        try {
+            stream_set_blocking($pipes[1], false);
+            if ($tool === 'codex') {
+                fwrite($pipes[0], json_encode([
+                    'id' => 1,
+                    'method' => 'initialize',
+                    'params' => ['clientInfo' => ['name' => 'aihelper-usage', 'version' => '1.0.0']]
+                ]) . "\n");
+            }
+            if ($tool !== 'codex') {
+                fclose($pipes[0]);
+            }
+            $buffer = '';
+            $deadline = microtime(true) + 20;
+            while (microtime(true) < $deadline) {
+                $chunk = fread($pipes[1], 65536);
+                if ($tool === 'codex') {
+                    $buffer .= $chunk === false ? '' : $chunk;
+                    while (($position = strpos($buffer, "\n")) !== false) {
+                        $event = json_decode(substr($buffer, 0, $position), true);
+                        $buffer = substr($buffer, $position + 1);
+                        if (isset($event['error']) || ($event['id'] ?? null) === 2) {
+                            break 2;
+                        }
+                        if (($event['id'] ?? null) === 1) {
+                            fwrite($pipes[0], "{\"method\":\"initialized\"}\n" .
+                                "{\"id\":2,\"method\":\"account/read\",\"params\":{\"refreshToken\":true}}\n");
+                        }
+                    }
+                }
+                if (!proc_get_status($process)['running']) {
+                    break;
+                }
+                usleep(20000);
+            }
+        } finally {
+            foreach ($pipes as $pipe) {
+                if (is_resource($pipe)) {
+                    fclose($pipe);
+                }
+            }
+            if (proc_get_status($process)['running']) {
+                proc_terminate($process, 9);
+            }
+            proc_close($process);
+        }
+        return $this->readCliAuthFile($path);
+    }
+
     protected static function getCliProxyDirs(): array
     {
         $dirs = [];
@@ -1042,7 +1154,7 @@ abstract class aihelper
         return $files ?: $proxyFiles;
     }
 
-    protected function getCodexAuthentication(): ?array
+    protected function getCodexAuthentication(bool $refreshUsage = false): ?array
     {
         $cliAuthHome = $this->cli_auth_home ?? '';
         $auth_files = $this->getCliAuthFiles(
@@ -1050,7 +1162,9 @@ abstract class aihelper
             'codex*.json'
         );
         foreach ($auth_files as $auth_file) {
-            $auth_content = $this->readCliAuthFile($auth_file);
+            $auth_content = $refreshUsage
+                ? $this->readCliUsageAuthFile('codex', $auth_file)
+                : $this->readCliAuthFile($auth_file);
             if ($auth_content === null) {
                 continue;
             }
@@ -1282,7 +1396,7 @@ abstract class aihelper
             return $store;
         };
         if ($tool === 'codex') {
-            $auth = $this->getCodexAuthentication();
+            $auth = $this->getCodexAuthentication(refreshUsage: true);
             if ($auth === null) {
                 return $finish([]);
             }
@@ -1362,7 +1476,7 @@ abstract class aihelper
             $access_token = null;
             $project = null;
             foreach ($auth_files as $auth_file) {
-                $auth_content = $this->readCliAuthFile($auth_file);
+                $auth_content = $this->readCliUsageAuthFile('antigravity', $auth_file);
                 if ($auth_content === null) {
                     continue;
                 }
@@ -1466,7 +1580,7 @@ abstract class aihelper
         );
         $access_token = null;
         foreach ($auth_files as $auth_file) {
-            $auth_content = $this->readCliAuthFile($auth_file);
+            $auth_content = $this->readCliUsageAuthFile('claude', $auth_file);
             if ($auth_content === null) {
                 continue;
             }
