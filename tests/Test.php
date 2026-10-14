@@ -3804,7 +3804,7 @@ class Test extends \PHPUnit\Framework\TestCase
         ]);
         if ($supported === true) {
             $expectedSessionCount = count($ai->getSessionContent()) + 2;
-            $return = $ai->ask('Was habe ich vorher gefragt?');
+            $return = $ai->ask($provider === 'xai' ? 'Wiederhole das genannte Land.' : 'Was habe ich vorher gefragt?');
             //$this->log($return);
             $success_this =
                 $return['success'] &&
