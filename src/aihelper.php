@@ -12850,7 +12850,8 @@ class ai_claudecode extends ai_harness
             'IS_SANDBOX' => '1',
             'ENABLE_TOOL_SEARCH' => 'auto:5',
             'MCP_TIMEOUT' => '300000',
-            'CLAUDE_CODE_DISABLE_BUNDLED_SKILLS' => '1'
+            'CLAUDE_CODE_DISABLE_BUNDLED_SKILLS' => '1',
+            'CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS' => '0'
         ];
         if ($this->cli_native_memory === false) {
             $overrides['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1';
