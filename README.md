@@ -248,15 +248,17 @@ the providers `claudecode`, `codex`, `opencode` and `antigravity` drive the loca
 
 ```
 npm i -g @anthropic-ai/claude-code @openai/codex
-curl -fsSL https://opencode.ai/install | bash
+curl -fsSL https://opencode.ai/v2/install | bash
 curl -fsSL https://antigravity.google/cli/install.sh | bash
 claude auth login
 codex login --device-auth
-opencode auth login
+opencode auth login --standalone
 agy
 ```
 
 a successful terminal event followed by exit code `0` may return `success: true` with `response: ''`, including when streaming. missing completion events, aborts and provider errors do not qualify; ordinary empty api responses remain errors and retain their retry behavior.
+
+opencode requires v2. each invocation uses a standalone server. isolated chats read the active go api key from their shared profile's credential database; session databases remain separate. existing v1 message logs and legacy `auth.json` keys remain readable. if opencode omits its final cli event after returning content, aihelper verifies the exact assistant message and successful turn completion in its native database. an unverified turn returns an error instead of replaying the prompt.
 
 claude code's tracked background tasks may remain active after a successful turn. aihelper waits for their
 completion notifications and subsequent replies instead of treating their lack of stdout as inactivity.

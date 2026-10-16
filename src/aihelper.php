@@ -1716,6 +1716,27 @@ abstract class aihelper
         return null;
     }
 
+    /**
+     * Normalize stored v2 messages for both usage reporting and request history.
+     */
+    protected static function openCodeMessageTable(bool $v2): string
+    {
+        if (!$v2) {
+            return 'message';
+        }
+        return "(SELECT id, session_id, time_created, seq,
+            json_set(data, '$.role', type,
+                '$.providerID', json_extract(data, '$.model.providerID'),
+                '$.modelID', json_extract(data, '$.model.id'),
+                '$.tokens.total',
+                    coalesce(json_extract(data, '$.tokens.input'), 0) +
+                    coalesce(json_extract(data, '$.tokens.output'), 0) +
+                    coalesce(json_extract(data, '$.tokens.reasoning'), 0) +
+                    coalesce(json_extract(data, '$.tokens.cache.read'), 0) +
+                    coalesce(json_extract(data, '$.tokens.cache.write'), 0)) AS data
+            FROM session_message)";
+    }
+
     protected function parseCliUsageLimits(string $tool, string $output): array
     {
         $output = preg_replace('/\x1B(?:[@-Z\\\\-_]|\[[0-?]*[ -\/]*[@-~])/', '', $output) ?? $output;
@@ -2448,6 +2469,17 @@ abstract class aihelper
                     'sqlite:' . $opencode_database,
                     options: [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]
                 );
+                $v2 = $connection->query("SELECT 1 FROM sqlite_master WHERE name = 'session_message'")->fetchColumn() !== false;
+                $messages = self::openCodeMessageTable($v2);
+                $sessions = $v2 ? 'session_v2' : 'session';
+                $userPart = $v2
+                    ? "SELECT u.data FROM session_message u
+                       WHERE u.session_id = m.session_id AND u.seq < m.seq AND u.type = 'user'
+                       ORDER BY u.seq DESC LIMIT 1"
+                    : "SELECT p.data FROM part p
+                       WHERE p.message_id = json_extract(m.data, '$.parentID')
+                         AND json_extract(p.data, '$.type') = 'text'
+                       ORDER BY p.time_created ASC LIMIT 1";
                 $where = [
                     "json_extract(m.data, '$.role') = 'assistant'",
                     "json_extract(m.data, '$.providerID') = 'opencode-go'"
@@ -2469,14 +2501,15 @@ abstract class aihelper
                 $row_order = $source_limit !== null ? 'DESC' : 'ASC';
                 $statement = $connection->prepare(
                     "SELECT m.id, m.session_id, m.time_created, m.data, s.directory,
-                        (SELECT p.data FROM part p
-                         WHERE p.message_id = json_extract(m.data, '$.parentID')
-                           AND json_extract(p.data, '$.type') = 'text'
-                         ORDER BY p.time_created ASC LIMIT 1) AS user_part
-                     FROM message m
-                     INNER JOIN session s ON s.id = m.session_id
-                     WHERE " . implode(' AND ', $where) . '
-                     ORDER BY m.time_created ' . $row_order . $row_limit
+                        ({$userPart}) AS user_part
+                     FROM {$messages} m
+                     INNER JOIN {$sessions} s ON s.id = m.session_id
+                     WHERE " .
+                        implode(' AND ', $where) .
+                        '
+                     ORDER BY m.time_created ' .
+                        $row_order .
+                        $row_limit
                 );
                 $statement->execute($parameters);
                 foreach ($statement->fetchAll(\PDO::FETCH_ASSOC) as $entry) {
@@ -11205,6 +11238,8 @@ abstract class ai_harness extends ai_anthropic
 
     protected ?float $harness_costs = null;
 
+    protected ?int $harness_exit_code = null;
+
     protected ?string $harness_run_id = null;
 
     protected ?string $harness_remote_pid_file = null;
@@ -11979,6 +12014,7 @@ abstract class ai_harness extends ai_anthropic
     protected function makeApiCall(?array $args = null): mixed
     {
         $this->harness_empty_response_allowed = false;
+        $this->harness_exit_code = null;
         $binary = $this->resolveBinary();
         if ($binary === null) {
             throw new \RuntimeException('harness: binary "' . $this->binaryName() . '" not found.');
@@ -12155,7 +12191,13 @@ abstract class ai_harness extends ai_anthropic
         $exit_code = null;
         $drain_until = null;
         $stderrEntries = [];
-        $sensitiveValues = array_values($this->harnessMcpTokenEnvironment());
+        $sensitiveValues = array_values(
+            array_filter(
+                $this->harnessEnvironmentOverrides(),
+                fn(string $name): bool => preg_match('/TOKEN|KEY|SECRET|PASSWORD/i', $name) === 1,
+                ARRAY_FILTER_USE_KEY
+            )
+        );
         $redact = function (mixed $value) use (&$redact, $sensitiveValues): mixed {
             if (is_array($value)) {
                 foreach ($value as $key => $item) {
@@ -12456,6 +12498,7 @@ abstract class ai_harness extends ai_anthropic
         if ($exit_code === null) {
             $exit_code = $closed;
         }
+        $this->harness_exit_code = $exit_code;
         $this->emitTranscript(
             id: $harnessTranscriptId,
             label: '',
@@ -14479,6 +14522,114 @@ class ai_codex extends ai_harness
 
 class ai_opencode extends ai_harness
 {
+    protected ?string $openCodeMessageId = null;
+
+    /**
+     * Verify a persisted terminal turn when the CLI omits its final event.
+     */
+    protected function makeApiCall(?array $args = null): mixed
+    {
+        $this->openCodeMessageId = null;
+        $this->message_started = false;
+        $result = parent::makeApiCall($args);
+        if (($result->result->error ?? null) !== null) {
+            return $result;
+        }
+        if (!$this->aborted && $this->harness_exit_code === 0 && $result->result->stop_reason === 'end_turn') {
+            return $result;
+        }
+        $completion = null;
+        if (
+            !$this->aborted &&
+            $this->harness_exit_code === 0 &&
+            $this->openCodeMessageId !== null &&
+            $this->cli_session_id !== null
+        ) {
+            $session = "'" . str_replace("'", "''", $this->cli_session_id) . "'";
+            $message = "'" . str_replace("'", "''", $this->openCodeMessageId) . "'";
+            $query = <<<SQL
+            WITH answer AS (SELECT seq FROM session_message WHERE session_id = $session AND id = $message),
+            turn AS (
+                SELECT id, type, seq, data FROM session_message WHERE session_id = $session
+                AND seq > (SELECT MAX(seq) FROM session_message WHERE session_id = $session
+                    AND type = 'user' AND seq < (SELECT seq FROM answer))
+                AND seq < COALESCE((SELECT MIN(seq) FROM session_message WHERE session_id = $session
+                    AND type = 'user' AND seq > (SELECT seq FROM answer)), 9223372036854775807)
+            )
+            SELECT json_object(
+                'reason', (SELECT json_extract(data, '$.finish') FROM turn WHERE id = $message AND type = 'assistant'),
+                'completed', (SELECT json_extract(data, '$.time.completed') FROM turn WHERE id = $message),
+                'outcome', (SELECT json_extract(data, '$.outcome') FROM turn WHERE type = 'idle'
+                    AND seq > (SELECT seq FROM answer) ORDER BY seq LIMIT 1),
+                'cost', SUM(COALESCE(json_extract(data, '$.cost'), 0)),
+                'tokens', json_object(
+                    'input', SUM(COALESCE(json_extract(data, '$.tokens.input'), 0)),
+                    'output', SUM(COALESCE(json_extract(data, '$.tokens.output'), 0)),
+                    'cache', json_object(
+                        'read', SUM(COALESCE(json_extract(data, '$.tokens.cache.read'), 0)),
+                        'write', SUM(COALESCE(json_extract(data, '$.tokens.cache.write'), 0)))))
+            FROM turn WHERE type = 'assistant'
+            SQL;
+            if ($this->isRemote()) {
+                $home = $this->cli_session_home ?? $this->cli_auth_home;
+                $candidates =
+                    $home !== null
+                        ? escapeshellarg(rtrim($home, '/') . '/opencode/data/opencode/opencode.db')
+                        : '"$XDG_DATA_HOME/opencode/opencode.db" "$HOME/.local/share/opencode/opencode.db"';
+                $command = array_merge($this->sshCommand(), [
+                    'for candidate in ' .
+                    $candidates .
+                    '; do if [ -f "$candidate" ]; then ' .
+                    'exec sqlite3 -readonly "$candidate" ' .
+                    escapeshellarg($query) .
+                    '; fi; done; exit 1'
+                ]);
+                exec(implode(' ', array_map('escapeshellarg', $command)) . ' 2>/dev/null', $output, $status);
+                if ($status === 0) {
+                    $completion = json_decode(implode(PHP_EOL, $output), true);
+                }
+            } else {
+                $database = self::getOpenCodeDatabasePath($this->cli_session_home ?? $this->cli_auth_home);
+                if ($database !== null) {
+                    try {
+                        $connection = new \PDO(
+                            'sqlite:' . $database,
+                            options: [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]
+                        );
+                        $completion = json_decode((string) $connection->query($query)->fetchColumn(), true);
+                    } catch (\PDOException) {
+                        $completion = null;
+                    }
+                }
+            }
+        }
+        if (
+            ($completion['reason'] ?? null) === 'stop' &&
+            !empty($completion['completed']) &&
+            ($completion['outcome'] ?? null) === 'succeeded'
+        ) {
+            $this->harness_costs = 0.0;
+            foreach ($result->result->usage as &$tokens) {
+                $tokens = 0;
+            }
+            unset($tokens);
+            $this->handleEvent(['type' => 'step_finish', 'part' => $completion], $result, $this->stream_callback);
+            $this->harness_empty_response_allowed = true;
+        } else {
+            $this->harness_empty_response_allowed = false;
+            $result->result->error = (object) [
+                'message' => 'OpenCode exited without a verified successful turn; the prompt was not replayed.'
+            ];
+        }
+        if ($this->stream === true && ($this->stream_response?->result ?? null) !== null) {
+            $this->stream_response->result->stop_reason = $result->result->stop_reason;
+            if (($result->result->error ?? null) !== null) {
+                $this->stream_response->result->error = $result->result->error;
+            }
+        }
+        return $result;
+    }
+
     /**
      * Map OpenCode step and usage events without exposing session metadata.
      */
@@ -14553,7 +14704,7 @@ class ai_opencode extends ai_harness
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
             'supports_effort' => true,
-            'efforts' => ['minimal', 'low', 'medium', 'high', 'max'],
+            'efforts' => ['max'],
             'default' => true
         ],
         [
@@ -14583,7 +14734,7 @@ class ai_opencode extends ai_harness
             'supports_image_to_text' => false,
             'supports_audio_to_text' => false,
             'supports_effort' => true,
-            'efforts' => ['minimal', 'low', 'medium', 'high', 'max'],
+            'efforts' => ['high', 'max'],
             'default' => false
         ],
         [
@@ -14612,8 +14763,8 @@ class ai_opencode extends ai_harness
             'supports_text_to_audio' => false,
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
-            'supports_effort' => true,
-            'efforts' => ['minimal', 'low', 'medium', 'high', 'max'],
+            'supports_effort' => false,
+            'efforts' => [],
             'default' => false
         ],
         [
@@ -14628,7 +14779,7 @@ class ai_opencode extends ai_harness
             'supports_image_to_text' => false,
             'supports_audio_to_text' => false,
             'supports_effort' => true,
-            'efforts' => ['minimal', 'low', 'medium', 'high', 'max'],
+            'efforts' => ['high', 'max'],
             'default' => false
         ],
         [
@@ -14657,8 +14808,8 @@ class ai_opencode extends ai_harness
             'supports_text_to_audio' => false,
             'supports_image_to_text' => false,
             'supports_audio_to_text' => false,
-            'supports_effort' => true,
-            'efforts' => ['minimal', 'low', 'medium', 'high', 'max'],
+            'supports_effort' => false,
+            'efforts' => [],
             'default' => false
         ],
         [
@@ -14672,8 +14823,8 @@ class ai_opencode extends ai_harness
             'supports_text_to_audio' => false,
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
-            'supports_effort' => true,
-            'efforts' => ['minimal', 'low', 'medium', 'high', 'max'],
+            'supports_effort' => false,
+            'efforts' => [],
             'default' => false
         ],
         [
@@ -14688,7 +14839,7 @@ class ai_opencode extends ai_harness
             'supports_image_to_text' => false,
             'supports_audio_to_text' => false,
             'supports_effort' => true,
-            'efforts' => ['minimal', 'low', 'medium', 'high', 'max'],
+            'efforts' => ['low', 'high'],
             'default' => false
         ],
         [
@@ -14748,7 +14899,7 @@ class ai_opencode extends ai_harness
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
             'supports_effort' => true,
-            'efforts' => ['minimal', 'low', 'medium', 'high', 'max'],
+            'efforts' => ['high', 'max'],
             'default' => false
         ],
         [
@@ -14777,8 +14928,8 @@ class ai_opencode extends ai_harness
             'supports_text_to_audio' => false,
             'supports_image_to_text' => true,
             'supports_audio_to_text' => false,
-            'supports_effort' => true,
-            'efforts' => ['minimal', 'low', 'medium', 'high', 'max'],
+            'supports_effort' => false,
+            'efforts' => [],
             'default' => false
         ]
     ];
@@ -14793,7 +14944,7 @@ class ai_opencode extends ai_harness
      */
     protected function harnessUpdate(): ?array
     {
-        return ['package' => 'opencode-ai', 'command' => 'opencode upgrade'];
+        return ['package' => '@opencode/cli', 'command' => 'opencode upgrade'];
     }
 
     public function fetchModels(): array
@@ -14899,19 +15050,29 @@ class ai_opencode extends ai_harness
      */
     protected function readOpenCodeUsageMessages(int $from): ?array
     {
-        $query =
-            "SELECT time_created, data FROM message
-             WHERE json_extract(data, '$.role') = 'assistant'
+        $where = "WHERE json_extract(data, '$.role') = 'assistant'
                AND json_extract(data, '$.providerID') = 'opencode-go'
                AND time_created >= {$from}
              ORDER BY time_created ASC";
+        $schema = "SELECT 1 FROM sqlite_master WHERE name = 'session_message'";
         if ($this->isRemote()) {
+            $home = $this->cli_session_home ?? $this->cli_auth_home;
+            $candidates =
+                $home !== null
+                    ? escapeshellarg(rtrim($home, '/') . '/opencode/data/opencode/opencode.db')
+                    : '"$XDG_DATA_HOME/opencode/opencode.db" "$HOME/.local/share/opencode/opencode.db" /root/.local/share/opencode/opencode.db';
             $command = array_merge($this->sshCommand(), [
-                'for candidate in "$XDG_DATA_HOME/opencode/opencode.db" "$HOME/.local/share/opencode/opencode.db" ' .
-                '/root/.local/share/opencode/opencode.db; do if [ -f "$candidate" ]; then ' .
+                'for candidate in ' .
+                $candidates .
+                '; do if [ -f "$candidate" ]; then ' .
+                'if [ "$(sqlite3 -readonly "$candidate" ' .
+                escapeshellarg($schema) .
+                ')" = 1 ]; then ' .
                 'exec sqlite3 -readonly -json "$candidate" ' .
-                escapeshellarg($query) .
-                '; fi; done; exit 1'
+                escapeshellarg('SELECT time_created, data FROM ' . self::openCodeMessageTable(true) . ' ' . $where) .
+                '; else exec sqlite3 -readonly -json "$candidate" ' .
+                escapeshellarg('SELECT time_created, data FROM message ' . $where) .
+                '; fi; fi; done; exit 1'
             ]);
             exec(implode(' ', array_map('escapeshellarg', $command)) . ' 2>/dev/null', $output, $status);
             if ($status !== 0) {
@@ -14926,6 +15087,8 @@ class ai_opencode extends ai_harness
         }
         try {
             $connection = new \PDO('sqlite:' . $database, options: [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+            $v2 = $connection->query($schema)->fetchColumn() !== false;
+            $query = 'SELECT time_created, data FROM ' . self::openCodeMessageTable($v2) . ' ' . $where;
             return $connection->query($query)->fetchAll(\PDO::FETCH_ASSOC);
         } catch (\PDOException) {
             return null;
@@ -15011,24 +15174,7 @@ class ai_opencode extends ai_harness
             return $cached['limits'];
         }
 
-        $key = null;
-        $cliAuthHome = $this->cli_auth_home ?? '';
-        $authBases = $cliAuthHome !== ''
-            ? [$cliAuthHome . '/opencode/data']
-            : [getenv('XDG_DATA_HOME') ?: null, (getenv('HOME') ?: '/root') . '/.local/share', '/root/.local/share'];
-        foreach (
-            $authBases as $base
-        ) {
-            // a remote harness keeps its credentials on the other machine
-            $auth = $base === null ? null : $this->readCliAuthFile(rtrim($base, '/') . '/opencode/auth.json');
-            if ($auth === null) {
-                continue;
-            }
-            $key = json_decode($auth, true)['opencode-go']['key'] ?? null;
-            if (is_string($key) && trim($key) !== '') {
-                break;
-            }
-        }
+        $key = $this->openCodeApiKey();
         if (!is_string($key) || trim($key) === '') {
             return [];
         }
@@ -15118,6 +15264,46 @@ class ai_opencode extends ai_harness
         return $data;
     }
 
+    /**
+     * Read the active Go key without sharing the profile's session database.
+     */
+    protected function openCodeApiKey(): ?string
+    {
+        $base = $this->cli_auth_home !== null
+            ? rtrim($this->cli_auth_home, '/') . '/opencode/data/opencode'
+            : ($this->isRemote() ? $this->userHome() . '/.local/share' : (getenv('XDG_DATA_HOME') ?: $this->userHome() . '/.local/share')) . '/opencode';
+        $query = "SELECT json_extract(value, '$.key') FROM credential
+                  WHERE integration_id = 'opencode-go'
+                    AND json_extract(value, '$.type') = 'key'
+                  ORDER BY active DESC, time_created DESC, id DESC LIMIT 1";
+        $key = null;
+        if ($this->isRemote()) {
+            $command = array_merge($this->sshCommand(), [
+                'sqlite3 -readonly ' . escapeshellarg($base . '/opencode.db') . ' ' . escapeshellarg($query)
+            ]);
+            exec(implode(' ', array_map('escapeshellarg', $command)) . ' 2>/dev/null', $output, $status);
+            if ($status === 0) {
+                $key = trim(implode(PHP_EOL, $output));
+            }
+        }
+        if (!$this->isRemote() && is_file($base . '/opencode.db')) {
+            try {
+                $connection = new \PDO(
+                    'sqlite:' . $base . '/opencode.db',
+                    options: [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]
+                );
+                $key = $connection->query($query)->fetchColumn();
+            } catch (\PDOException) {
+            }
+        }
+        if (is_string($key) && trim($key) !== '') {
+            return $key;
+        }
+        $auth = $this->readCliAuthFile($base . '/auth.json');
+        $key = $auth !== null ? (json_decode($auth, true)['opencode-go']['key'] ?? null) : null;
+        return is_string($key) && trim($key) !== '' ? $key : null;
+    }
+
     protected function harnessEnvironmentOverrides(): array
     {
         $overrides = array_merge(
@@ -15129,17 +15315,17 @@ class ai_opencode extends ai_harness
             $this->harnessMcpTokenEnvironment()
         );
         $store = $this->harnessStore('opencode');
+        $key = $this->openCodeApiKey();
+        if ($key !== null) {
+            $overrides['OPENCODE_API_KEY'] = $key;
+        }
         if ($store !== null) {
             $authStore = $this->harnessAuthStore('opencode');
-            $native = $authStore !== null
-                ? $authStore . '/data/opencode'
-                : rtrim($this->userHome(), '/') . '/.local/share/opencode';
-            $this->prepareHarnessStore(
-                [$native, $store . '/data/opencode', $store . '/config'],
-                $this->isRemote() || is_file($native . '/auth.json')
-                    ? [$store . '/data/opencode/auth.json' => $native . '/auth.json']
-                    : []
-            );
+            $native =
+                $authStore !== null
+                    ? $authStore . '/data/opencode'
+                    : rtrim($this->userHome(), '/') . '/.local/share/opencode';
+            $this->prepareHarnessStore([$native, $store . '/data/opencode', $store . '/config'], []);
             $overrides['XDG_DATA_HOME'] = $store . '/data';
             $overrides['XDG_CONFIG_HOME'] = $store . '/config';
         }
@@ -15152,23 +15338,32 @@ class ai_opencode extends ai_harness
 
         $config = [];
         foreach ($this->harnessMcpServers() as $name => $server) {
-            $entry = ['type' => 'remote', 'url' => $server['url'], 'enabled' => true, 'timeout' => 300000];
+            $entry = [
+                'type' => 'remote',
+                'url' => $server['url'],
+                'disabled' => false,
+                'timeout' => ['catalog' => 300000, 'execution' => 300000]
+            ];
             if ($server['token'] !== null && trim((string) $server['token']) !== '') {
                 // opencode interpolates "{env:VAR}" itself, so the token stays
                 // out of the config string that is passed on the command line
                 $entry['headers'] = ['Authorization' => 'Bearer {env:' . $this->harnessMcpTokenVariable($name) . '}'];
             }
-            $config['mcp'][$name] = $entry;
+            $config['mcp']['servers'][$name] = $entry;
+        }
+        if ($key !== null) {
+            $config['providers']['opencode-go']['settings']['apiKey'] = '{env:OPENCODE_API_KEY}';
         }
         if ($this->isolate_harness_config === true) {
             $config['instructions'] = [];
+            $config['plugins'] = ['-opencode.config.compatibility'];
         }
         if ($this->system_prompt !== null) {
-            $config['agent']['build']['prompt'] = $this->system_prompt;
+            $config['agents']['build']['system'] = $this->system_prompt;
         }
         $skills = $this->placeSkills('skills');
         if ($skills !== null) {
-            $config['skills']['paths'] = [$skills];
+            $config['skills'] = [$skills];
         }
         if ($config !== []) {
             $config['$schema'] = 'https://opencode.ai/config.json';
@@ -15189,7 +15384,7 @@ class ai_opencode extends ai_harness
 
     protected function buildArgs(): array
     {
-        $args = ['run'];
+        $args = ['run', '--standalone'];
         if ($this->cli_session_id !== null) {
             $args[] = '--session';
             $args[] = $this->cli_session_id;
@@ -15197,18 +15392,31 @@ class ai_opencode extends ai_harness
         if ($this->cli_session_id === null && $this->cli_resume_latest) {
             $args[] = '--continue';
         }
-        $args = array_merge($args, ['--format', 'json', '--auto', '--thinking', '--print-logs', '--log-level', 'ERROR']);
+        $args = array_merge($args, [
+            '--format',
+            'json',
+            '--auto',
+            '--thinking',
+            '--print-logs',
+            '--log-level',
+            'error'
+        ]);
         foreach ($this->harnessFilePaths() as $path) {
             $args[] = '--file';
             $args[] = $path;
         }
         if ($this->model !== null) {
+            $effort = $this->effort;
+            foreach ($this->models as $model) {
+                if ($model['name'] === $this->model && !in_array($effort, $model['efforts'], true)) {
+                    // v1 ignored unknown variants; retain that behavior for saved preferences.
+                    $effort = null;
+                }
+            }
             $args[] = '--model';
-            $args[] = $this->model;
-        }
-        if (in_array($this->effort, ['minimal', 'low', 'medium', 'high', 'max'], true)) {
-            $args[] = '--variant';
-            $args[] = $this->effort;
+            $args[] =
+                $this->model .
+                (in_array($effort, ['minimal', 'low', 'medium', 'high', 'max'], true) ? '#' . $effort : '');
         }
         return $args;
     }
@@ -15217,6 +15425,7 @@ class ai_opencode extends ai_harness
     {
         $type = $event['type'] ?? null;
         if ($type === 'step_start') {
+            $this->openCodeMessageId = isset($event['part']['messageID']) ? (string) $event['part']['messageID'] : null;
             if (!empty($event['sessionID'])) {
                 $sessionId = (string) $event['sessionID'];
                 $this->log($sessionId, 'harness session');
@@ -15272,7 +15481,7 @@ class ai_opencode extends ai_harness
         // the cli runs its tools itself, so the calls only become visible to the
         // caller when they are written into the session like a native provider does
         if (in_array($type, ['tool', 'tool_use'], true)) {
-            $call_id = (string) ($event['part']['callID'] ?? '');
+            $call_id = (string) ($event['part']['callID'] ?? ($event['part']['id'] ?? ''));
             $state = is_array($event['part']['state'] ?? null) ? $event['part']['state'] : [];
             $status = (string) ($state['status'] ?? '');
             $toolName = (string) ($event['part']['tool'] ?? 'tool');

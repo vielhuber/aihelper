@@ -1147,7 +1147,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $environment = (new \ReflectionMethod(\vielhuber\aihelper\ai_opencode::class, 'harnessEnvironmentOverrides'))->invoke($harness);
 
         $this->assertSame(
-            ['run', '--continue', '--format', 'json', '--auto', '--thinking', '--print-logs', '--log-level', 'ERROR', '--model', 'opencode-go/glm-5.2', '--variant', 'high'],
+            ['run', '--standalone', '--continue', '--format', 'json', '--auto', '--thinking', '--print-logs', '--log-level', 'error', '--model', 'opencode-go/glm-5.2#high'],
             $args
         );
         $this->assertSame('true', $environment['OPENCODE_DISABLE_CLAUDE_CODE']);
@@ -1231,6 +1231,433 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame('call_9b12', $result->result->content[1]->tool_use_id);
         $this->assertSame('{"count":1}', $result->result->content[1]->content);
         $this->assertFalse($result->result->content[1]->is_error);
+    }
+
+    public function testMissingCompletionEventNeverReplaysThePrompt(): void
+    {
+        class_exists(aihelper::class);
+        foreach ([false, true] as $stream) {
+            foreach (
+                [
+                    'succeeded',
+                    'interrupted',
+                    'failed',
+                    'missing',
+                    'other-message',
+                    'incomplete',
+                    'later-turn',
+                    'failed-exit',
+                    'aborted',
+                    'aborted-event',
+                    'remote-succeeded',
+                    'remote-missing'
+                ]
+                as $scenario
+            ) {
+                $home = sys_get_temp_dir() . '/aihelper-opencode-v2-' . bin2hex(random_bytes(8));
+                mkdir($home . '/opencode/data/opencode', 0700, true);
+                $connection = new PDO('sqlite:' . $home . '/opencode/data/opencode/opencode.db');
+                $connection->exec(
+                    'CREATE TABLE session_message (id TEXT, session_id TEXT, type TEXT, seq INTEGER, data TEXT)'
+                );
+                $insert = $connection->prepare('INSERT INTO session_message VALUES (?, ?, ?, ?, ?)');
+                $insert->execute(['user', 'fixture-session', 'user', 0, '{}']);
+                $insert->execute([
+                    'first-answer',
+                    'fixture-session',
+                    'assistant',
+                    1,
+                    json_encode([
+                        'finish' => 'tool-calls',
+                        'cost' => 0.1,
+                        'tokens' => ['input' => 50, 'output' => 5]
+                    ])
+                ]);
+                $insert->execute([
+                    'answer',
+                    'fixture-session',
+                    'assistant',
+                    2,
+                    json_encode([
+                        'finish' => $scenario === 'incomplete' ? 'length' : 'stop',
+                        'time' => ['completed' => 1],
+                        'cost' => 0.25,
+                        'tokens' => ['input' => 100, 'output' => 20, 'cache' => ['read' => 40, 'write' => 10]]
+                    ])
+                ]);
+                if ($scenario === 'later-turn') {
+                    $insert->execute(['next-user', 'fixture-session', 'user', 3, '{}']);
+                }
+                if (!in_array($scenario, ['missing', 'remote-missing'], true)) {
+                    $insert->execute([
+                        'idle',
+                        'fixture-session',
+                        'idle',
+                        4,
+                        json_encode([
+                            'outcome' => in_array($scenario, ['interrupted', 'failed'], true) ? $scenario : 'succeeded'
+                        ])
+                    ]);
+                }
+                $connection = null;
+                $helper = new class ($home, $stream, $scenario) extends \vielhuber\aihelper\ai_opencode {
+                    public function __construct(private string $fixtureHome, bool $stream, private string $scenario)
+                    {
+                        $this->model = 'test';
+                        $this->session_id = bin2hex(random_bytes(8));
+                        $this->cli_session_home = $fixtureHome;
+                        $this->workdir = $fixtureHome;
+                        $this->timeout = 5;
+                        $this->stream = $stream;
+                        $this->ssh_host = str_starts_with($scenario, 'remote-') ? 'fixture' : null;
+                    }
+
+                    protected function resolveBinary(): ?string
+                    {
+                        return PHP_BINARY;
+                    }
+
+                    protected function harnessEnvironmentOverrides(): array
+                    {
+                        return [];
+                    }
+
+                    protected function harnessUpdate(): ?array
+                    {
+                        return null;
+                    }
+
+                    protected function sshCommand(bool $withReverseTunnel = false): array
+                    {
+                        return ['bash', '-c'];
+                    }
+
+                    protected function remoteShell(string $command): string
+                    {
+                        return $command;
+                    }
+
+                    protected function handleEvent(array $event, object $result, ?Closure $emit): void
+                    {
+                        parent::handleEvent($event, $result, $emit);
+                        if (in_array($this->scenario, ['aborted', 'aborted-event'], true)) {
+                            $this->aborted = true;
+                        }
+                    }
+
+                    protected function buildArgs(): array
+                    {
+                        $messageId = $this->scenario === 'other-message' ? 'not-this-turn' : 'answer';
+                        $events = [
+                            [
+                                'type' => 'step_start',
+                                'sessionID' => 'fixture-session',
+                                'part' => ['messageID' => 'first-answer']
+                            ],
+                            [
+                                'type' => 'step_finish',
+                                'part' => [
+                                    'reason' => 'tool-calls',
+                                    'cost' => 0.1,
+                                    'tokens' => ['input' => 50, 'output' => 5]
+                                ]
+                            ],
+                            [
+                                'type' => 'step_start',
+                                'sessionID' => 'fixture-session',
+                                'part' => ['messageID' => $messageId]
+                            ],
+                            ['type' => 'text', 'part' => ['text' => 'Done.']]
+                        ];
+                        if ($this->scenario === 'aborted-event') {
+                            $events[] = ['type' => 'step_finish', 'part' => ['reason' => 'stop']];
+                        }
+                        return [
+                            '-r',
+                            '$counter = ' .
+                            var_export($this->fixtureHome . '/calls', true) .
+                            '; ' .
+                            '$calls = is_file($counter) ? (int) file_get_contents($counter) : 0; ' .
+                            'file_put_contents($counter, (string) ($calls + 1)); ' .
+                            'if ($calls > 0) { echo "{\"type\":\"error\",\"error\":\"Unexpected replay\"}\n"; exit(1); } ' .
+                            'echo ' .
+                            var_export(implode("\n", array_map('json_encode', $events)) . "\n", true) .
+                            '; ' .
+                            'exit(' .
+                            ($this->scenario === 'failed-exit' ? '1' : '0') .
+                            ');'
+                        ];
+                    }
+                };
+                ob_start(static fn(): string => '');
+                try {
+                    $result = (new ReflectionMethod($helper, 'askThis'))->invoke($helper, 'Fixture');
+                    $this->assertSame('1', file_get_contents($home . '/calls'), $scenario);
+                    $successful = in_array($scenario, ['succeeded', 'remote-succeeded'], true);
+                    $this->assertSame($successful, $result['success'], $scenario);
+                    if ($successful) {
+                        $this->assertSame('Done.', $result['response']);
+                        $this->assertSame(0.35, $result['costs']);
+                        $this->assertSame(25, $result['output_tokens']);
+                    }
+                } finally {
+                    ob_end_clean();
+                    __::rrmdir($home);
+                }
+            }
+        }
+    }
+
+    public function testSavedUnsupportedEffortUsesTheModelDefault(): void
+    {
+        $helper = aihelper::create(provider: 'opencode', model: 'opencode-go/glm-5.2', effort: 'minimal');
+        $args = (new ReflectionMethod($helper, 'buildArgs'))->invoke($helper);
+        $this->assertSame('opencode-go/glm-5.2', $args[array_search('--model', $args, true) + 1]);
+    }
+
+    public function testConsecutiveRunsStartNewStreamsAfterAnUnverifiedTurn(): void
+    {
+        class_exists(aihelper::class);
+        $helper = new class extends \vielhuber\aihelper\ai_opencode {
+            public int $starts = 0;
+
+            public function __construct()
+            {
+                $this->model = 'test';
+                $this->workdir = sys_get_temp_dir();
+                $this->timeout = 5;
+                $this->stream = true;
+            }
+
+            protected function resolveBinary(): ?string
+            {
+                return PHP_BINARY;
+            }
+
+            protected function harnessEnvironmentOverrides(): array
+            {
+                return [];
+            }
+
+            protected function harnessUpdate(): ?array
+            {
+                return null;
+            }
+
+            protected function buildArgs(): array
+            {
+                return [
+                    '-r',
+                    'echo "{\"type\":\"step_start\"}\n{\"type\":\"text\",\"part\":{\"text\":\"Partial\"}}\n";'
+                ];
+            }
+
+            protected function emitAnthropicEvent(?Closure $emit, array $event): void
+            {
+                if ($event['type'] === 'message_start') {
+                    $this->starts++;
+                }
+                parent::emitAnthropicEvent($emit, $event);
+            }
+        };
+        ob_start(static fn(): string => '');
+        try {
+            $call = new ReflectionMethod($helper, 'makeApiCall');
+            foreach ([1, 2] as $run) {
+                $result = $call->invoke($helper, ['messages' => [['role' => 'user', 'content' => 'Fixture']]]);
+                $this->assertNotNull($result->result->error ?? null);
+                $this->assertSame($run, $helper->starts);
+            }
+        } finally {
+            ob_end_clean();
+        }
+    }
+
+    public function testActiveProfileKeyIsIndependentFromChatStorage(): void
+    {
+        class_exists(aihelper::class);
+        $home = sys_get_temp_dir() . '/aihelper-opencode-v2-' . bin2hex(random_bytes(8));
+        mkdir($home . '/profile/opencode/data/opencode', 0700, true);
+        $connection = new PDO('sqlite:' . $home . '/profile/opencode/data/opencode/opencode.db');
+        $connection->exec(
+            'CREATE TABLE credential (id TEXT, integration_id TEXT, value TEXT, active INTEGER, time_created INTEGER)'
+        );
+        $statement = $connection->prepare('INSERT INTO credential VALUES (?, ?, ?, ?, ?)');
+        $statement->execute([
+            'first',
+            'opencode-go',
+            json_encode(['type' => 'key', 'key' => 'active-fixture-key']),
+            1,
+            1
+        ]);
+        $statement->execute([
+            'second',
+            'opencode-go',
+            json_encode(['type' => 'key', 'key' => 'inactive-fixture-key']),
+            0,
+            2
+        ]);
+        file_put_contents(
+            $home . '/profile/opencode/data/opencode/auth.json',
+            json_encode(['opencode-go' => ['key' => 'legacy-fixture-key']])
+        );
+        try {
+            $helper = aihelper::create(
+                provider: 'opencode',
+                cli_session_home: $home . '/chat',
+                cli_auth_home: $home . '/profile'
+            );
+            $environment = (new ReflectionMethod($helper, 'harnessEnvironmentOverrides'))->invoke($helper);
+            $this->assertSame('active-fixture-key', $environment['OPENCODE_API_KEY']);
+            $this->assertSame($home . '/chat/opencode/data', $environment['XDG_DATA_HOME']);
+            $this->assertFileDoesNotExist($home . '/chat/opencode/data/opencode/auth.json');
+            $this->assertFileDoesNotExist($home . '/chat/opencode/data/opencode/opencode.db');
+            $config = file_get_contents($environment['OPENCODE_CONFIG']);
+            $this->assertStringNotContainsString('active-fixture-key', $config);
+            $this->assertStringContainsString('{env:OPENCODE_API_KEY}', $config);
+            $this->assertSame(['-opencode.config.compatibility'], json_decode($config, true)['plugins']);
+            $connection->exec('UPDATE credential SET active = NULL');
+            $environment = (new ReflectionMethod($helper, 'harnessEnvironmentOverrides'))->invoke($helper);
+            $this->assertSame('inactive-fixture-key', $environment['OPENCODE_API_KEY']);
+            $connection = null;
+        } finally {
+            __::rrmdir($home);
+        }
+    }
+
+    public function testV2MessagesPopulateUsageAndRequestHistory(): void
+    {
+        class_exists(aihelper::class);
+        $home = sys_get_temp_dir() . '/aihelper-opencode-v2-' . bin2hex(random_bytes(8));
+        mkdir($home . '/opencode/data/opencode', 0700, true);
+        $connection = new PDO('sqlite:' . $home . '/opencode/data/opencode/opencode.db');
+        $connection->exec('CREATE TABLE session_v2 (id TEXT, directory TEXT)');
+        $connection->exec(
+            'CREATE TABLE session_message (id TEXT, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, data TEXT)'
+        );
+        $connection->exec("INSERT INTO session_v2 VALUES ('fixture-session', '/fixture-project')");
+        $insert = $connection->prepare('INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?)');
+        $created = (time() - 60) * 1000;
+        $insert->execute([
+            'user',
+            'fixture-session',
+            'user',
+            0,
+            $created - 1,
+            json_encode(['text' => 'fixture question'])
+        ]);
+        $insert->execute([
+            'answer',
+            'fixture-session',
+            'assistant',
+            1,
+            $created,
+            json_encode([
+                'model' => ['providerID' => 'opencode-go', 'id' => 'glm-5.2'],
+                'cost' => 0.25,
+                'time' => ['created' => $created, 'completed' => $created + 1500],
+                'tokens' => [
+                    'input' => 100,
+                    'output' => 20,
+                    'reasoning' => 30,
+                    'cache' => ['read' => 40, 'write' => 10]
+                ]
+            ])
+        ]);
+        $insert->execute([
+            'other',
+            'fixture-session',
+            'assistant',
+            2,
+            $created,
+            json_encode([
+                'model' => ['providerID' => 'other', 'id' => 'ignored'],
+                'cost' => 99
+            ])
+        ]);
+        $previous = getenv('XDG_DATA_HOME');
+        try {
+            $helper = new class ($home) extends \vielhuber\aihelper\ai_opencode {
+                public function __construct(string $home)
+                {
+                    $this->cli_auth_home = $home;
+                }
+                protected function fetchOpenCodeServerLimits(): array
+                {
+                    return [];
+                }
+            };
+            $limits = $helper->getCliUsageLimits();
+            $this->assertSame(1, $limits[0]['requests']);
+            $this->assertSame(0.25, $limits[0]['used_usd']);
+            $this->assertSame(200, $limits[0]['tokens']['total']);
+            $this->assertSame(['glm-5.2'], $limits[0]['models']);
+            $remote = new class ($home) extends \vielhuber\aihelper\ai_opencode {
+                public function __construct(string $home)
+                {
+                    $this->cli_auth_home = $home;
+                    $this->ssh_host = 'fixture';
+                }
+
+                protected function sshCommand(bool $withReverseTunnel = false): array
+                {
+                    return ['bash', '-c'];
+                }
+
+                protected function fetchOpenCodeServerLimits(): array
+                {
+                    return [];
+                }
+            };
+            $remoteLimits = $remote->getCliUsageLimits();
+            $this->assertSame(1, $remoteLimits[0]['requests']);
+            $this->assertSame(0.25, $remoteLimits[0]['used_usd']);
+            putenv('XDG_DATA_HOME=' . $home . '/opencode/data');
+            $requests = aihelper::getCliApiRequests(include_body: true);
+            $requests = array_values(
+                array_filter(
+                    $requests,
+                    fn(array $request): bool => ($request['session_id'] ?? '') === 'fixture-session'
+                )
+            );
+            $this->assertCount(1, $requests);
+            $this->assertSame('glm-5.2', $requests[0]['model']);
+            $this->assertSame(100, $requests[0]['usage']['input_tokens']);
+            $this->assertSame(1500, $requests[0]['duration_in_ms']);
+            $this->assertSame('fixture question', $requests[0]['request_body']['messages'][0]['content']);
+            $connection = null;
+        } finally {
+            $previous === false ? putenv('XDG_DATA_HOME') : putenv('XDG_DATA_HOME=' . $previous);
+            __::rrmdir($home);
+        }
+    }
+
+    public function testV2ToolIdentifierIsRecorded(): void
+    {
+        class_exists(aihelper::class);
+        $helper = (new ReflectionClass(\vielhuber\aihelper\ai_opencode::class))->newInstanceWithoutConstructor();
+        $result = (object) ['result' => (object) ['content' => []]];
+        (new ReflectionMethod($helper, 'handleEvent'))->invoke(
+            $helper,
+            [
+                'type' => 'tool_use',
+                'part' => [
+                    'id' => 'fixture-call',
+                    'tool' => 'read',
+                    'state' => [
+                        'status' => 'completed',
+                        'input' => ['path' => '/fixture.txt'],
+                        'output' => 'fixture result'
+                    ]
+                ]
+            ],
+            $result,
+            null
+        );
+        $this->assertCount(2, $result->result->content);
+        $this->assertSame('fixture-call', $result->result->content[0]->id);
+        $this->assertSame('fixture-call', $result->result->content[1]->tool_use_id);
+        $this->assertSame('fixture result', $result->result->content[1]->content);
     }
 
     function test__antigravity_runs_in_its_own_home_with_stream_json_input(): void
@@ -2156,8 +2583,21 @@ class Test extends \PHPUnit\Framework\TestCase
         foreach ($expectedEfforts as $provider => $efforts) {
             $harness = aihelper::create(provider: $provider);
             foreach ($harness->models as $model) {
-                $this->assertTrue($model['supports_effort'] ?? false, (string) ($model['name'] ?? 'unknown'));
                 $modelEfforts = $provider === 'codex' ? ($efforts[$model['name']] ?? null) : $efforts;
+                if ($provider === 'opencode') {
+                    $modelEfforts = [
+                        'opencode-go/kimi-k3' => ['max'],
+                        'opencode-go/glm-5.2' => ['high', 'max'],
+                        'opencode-go/minimax-m3' => [],
+                        'opencode-go/deepseek-v4-pro' => ['high', 'max'],
+                        'opencode-go/mimo-v2.5-pro' => [],
+                        'opencode-go/kimi-k2.7-code' => [],
+                        'opencode-go/hy3' => ['low', 'high'],
+                        'opencode-go/qwen3.7-plus' => ['high', 'max'],
+                        'opencode-go/mimo-v2.5' => []
+                    ][$model['name']] ?? $efforts;
+                }
+                $this->assertSame($modelEfforts !== [], $model['supports_effort'] ?? false, (string) ($model['name'] ?? 'unknown'));
                 $this->assertNotNull($modelEfforts, (string) ($model['name'] ?? 'unknown'));
                 $this->assertSame($modelEfforts, $model['efforts'] ?? [], (string) ($model['name'] ?? 'unknown'));
             }
@@ -2701,9 +3141,9 @@ class Test extends \PHPUnit\Framework\TestCase
             $config = json_decode((string) file_get_contents($configPath), true, 512, JSON_THROW_ON_ERROR);
             $server = $provider === 'claudecode'
                 ? $config['mcpServers']['spotify']
-                : $config['mcp']['spotify'];
+                : $config['mcp']['servers']['spotify'];
 
-            $this->assertSame(300000, $server['timeout']);
+            $this->assertSame($provider === 'claudecode' ? 300000 : ['catalog' => 300000, 'execution' => 300000], $server['timeout']);
         }
     }
 
@@ -4877,7 +5317,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $expected = [
             'codex' => ['@openai/codex', 'codex update'],
             'claudecode' => ['@anthropic-ai/claude-code', 'claude update'],
-            'opencode' => ['opencode-ai', 'opencode upgrade']
+            'opencode' => ['@opencode/cli', 'opencode upgrade']
         ];
         foreach ($expected as $provider => [$package, $command]) {
             $harness = $this->harnessStoreAihelper($provider, null);
@@ -5149,10 +5589,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 $normalizePath($home . '/auth/claude/.credentials.json'),
                 $normalizePath((string) readlink($home . '/chat-a/claude/.credentials.json'))
             );
-            $this->assertSame(
-                $normalizePath($home . '/auth/opencode/data/opencode/auth.json'),
-                $normalizePath((string) readlink($home . '/chat-b/opencode/data/opencode/auth.json'))
-            );
+            $this->assertFileDoesNotExist($home . '/chat-b/opencode/data/opencode/auth.json');
             $this->assertSame(
                 $normalizePath($home . '/auth/codex/auth.json'),
                 $normalizePath((string) readlink($home . '/chat-c/codex/auth.json'))
