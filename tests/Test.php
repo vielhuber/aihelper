@@ -1235,6 +1235,9 @@ class Test extends \PHPUnit\Framework\TestCase
 
     public function testMissingCompletionEventNeverReplaysThePrompt(): void
     {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('The harness process runner requires setsid.');
+        }
         class_exists(aihelper::class);
         foreach ([false, true] as $stream) {
             foreach (
@@ -1299,6 +1302,7 @@ class Test extends \PHPUnit\Framework\TestCase
                         ])
                     ]);
                 }
+                $insert = null;
                 $connection = null;
                 $helper = new class ($home, $stream, $scenario) extends \vielhuber\aihelper\ai_opencode {
                     public function __construct(private string $fixtureHome, bool $stream, private string $scenario)
@@ -1417,6 +1421,9 @@ class Test extends \PHPUnit\Framework\TestCase
 
     public function testConsecutiveRunsStartNewStreamsAfterAnUnverifiedTurn(): void
     {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('The harness process runner requires setsid.');
+        }
         class_exists(aihelper::class);
         $helper = new class extends \vielhuber\aihelper\ai_opencode {
             public int $starts = 0;
@@ -1497,6 +1504,7 @@ class Test extends \PHPUnit\Framework\TestCase
             0,
             2
         ]);
+        $statement = null;
         file_put_contents(
             $home . '/profile/opencode/data/opencode/auth.json',
             json_encode(['opencode-go' => ['key' => 'legacy-fixture-key']])
@@ -1519,8 +1527,8 @@ class Test extends \PHPUnit\Framework\TestCase
             $connection->exec('UPDATE credential SET active = NULL');
             $environment = (new ReflectionMethod($helper, 'harnessEnvironmentOverrides'))->invoke($helper);
             $this->assertSame('inactive-fixture-key', $environment['OPENCODE_API_KEY']);
-            $connection = null;
         } finally {
+            $connection = null;
             __::rrmdir($home);
         }
     }
@@ -1575,6 +1583,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 'cost' => 99
             ])
         ]);
+        $insert = null;
         $previous = getenv('XDG_DATA_HOME');
         try {
             $helper = new class ($home) extends \vielhuber\aihelper\ai_opencode {
@@ -1592,26 +1601,28 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->assertSame(0.25, $limits[0]['used_usd']);
             $this->assertSame(200, $limits[0]['tokens']['total']);
             $this->assertSame(['glm-5.2'], $limits[0]['models']);
-            $remote = new class ($home) extends \vielhuber\aihelper\ai_opencode {
-                public function __construct(string $home)
-                {
-                    $this->cli_auth_home = $home;
-                    $this->ssh_host = 'fixture';
-                }
+            if (PHP_OS_FAMILY !== 'Windows') {
+                $remote = new class ($home) extends \vielhuber\aihelper\ai_opencode {
+                    public function __construct(string $home)
+                    {
+                        $this->cli_auth_home = $home;
+                        $this->ssh_host = 'fixture';
+                    }
 
-                protected function sshCommand(bool $withReverseTunnel = false): array
-                {
-                    return ['bash', '-c'];
-                }
+                    protected function sshCommand(bool $withReverseTunnel = false): array
+                    {
+                        return ['bash', '-c'];
+                    }
 
-                protected function fetchOpenCodeServerLimits(): array
-                {
-                    return [];
-                }
-            };
-            $remoteLimits = $remote->getCliUsageLimits();
-            $this->assertSame(1, $remoteLimits[0]['requests']);
-            $this->assertSame(0.25, $remoteLimits[0]['used_usd']);
+                    protected function fetchOpenCodeServerLimits(): array
+                    {
+                        return [];
+                    }
+                };
+                $remoteLimits = $remote->getCliUsageLimits();
+                $this->assertSame(1, $remoteLimits[0]['requests']);
+                $this->assertSame(0.25, $remoteLimits[0]['used_usd']);
+            }
             putenv('XDG_DATA_HOME=' . $home . '/opencode/data');
             $requests = aihelper::getCliApiRequests(include_body: true);
             $requests = array_values(
@@ -1625,8 +1636,8 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->assertSame(100, $requests[0]['usage']['input_tokens']);
             $this->assertSame(1500, $requests[0]['duration_in_ms']);
             $this->assertSame('fixture question', $requests[0]['request_body']['messages'][0]['content']);
-            $connection = null;
         } finally {
+            $connection = null;
             $previous === false ? putenv('XDG_DATA_HOME') : putenv('XDG_DATA_HOME=' . $previous);
             __::rrmdir($home);
         }
