@@ -12015,10 +12015,6 @@ abstract class ai_harness extends ai_anthropic
     {
         $this->harness_empty_response_allowed = false;
         $this->harness_exit_code = null;
-        $binary = $this->resolveBinary();
-        if ($binary === null) {
-            throw new \RuntimeException('harness: binary "' . $this->binaryName() . '" not found.');
-        }
 
         $prompt = '';
         foreach (array_reverse($args['messages'] ?? []) as $message) {
@@ -12073,6 +12069,10 @@ abstract class ai_harness extends ai_anthropic
         }
 
         $this->runHarnessUpdate();
+        $binary = $this->resolveBinary();
+        if ($binary === null) {
+            throw new \RuntimeException('harness: binary "' . $this->binaryName() . '" not found.');
+        }
         $this->harness_run_id = md5(uniqid('', true));
         $this->harness_remote_pid_file = null;
         $this->resetNativeEventStream();
