@@ -1037,74 +1037,159 @@ abstract class aihelper
         if ($expiresAt === false || $expiresAt > time() + 60) {
             return $content;
         }
-        $arguments = match ($tool) {
-            'codex' => ['env', 'CODEX_HOME=' . $home, 'codex', 'app-server'],
-            'claude' => [
-                'env', 'CLAUDE_CONFIG_DIR=' . $home, 'claude', '--print',
-                '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
-                '--no-session-persistence', '--setting-sources', '',
-                '--settings', '{"disableAllHooks":true}',
-                '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}'
-            ],
-            'antigravity' => ['env', 'HOME=' . $home, 'agy', 'models']
-        };
-        if ($this instanceof ai_harness && $this->isRemote()) {
-            $arguments = [...$this->sshCommand(), implode(' ', array_map('escapeshellarg', $arguments))];
-        }
-        $process = proc_open(
-            $arguments,
+        $remote = $this instanceof ai_harness && $this->isRemote();
+        $lockScript =
+            'umask 077; locks="${TMPDIR:-/tmp}/aihelper-refresh-$(id -u)"; ' .
+            'mkdir -p "$locks" && [ ! -L "$locks" ] && [ -O "$locks" ] && chmod 700 "$locks" || exit 1; ' .
+            'exec 9>"$locks/' .
+            hash('sha256', $path) .
+            '.lock"; ' .
+            'flock -w 20 9 || exit 1; printf "ready\n"; read -r release';
+        $lockCommand = $remote ? [...$this->sshCommand(), $lockScript] : ['bash', '-c', $lockScript];
+        $lockProcess = proc_open(
+            $lockCommand,
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']],
-            $pipes,
-            sys_get_temp_dir()
+            $lockPipes
         );
-        if (!is_resource($process)) {
+        if (!is_resource($lockProcess)) {
             return $content;
         }
+        $temporaryHome = ($remote ? '/tmp' : sys_get_temp_dir()) . '/aihelper-usage-' . bin2hex(random_bytes(16));
+        $temporaryPath = $temporaryHome . substr($nativePath, strlen($home));
+        $store = new HarnessStore(
+            $remote
+                ? fn(string $command): string => $this->captureRemoteCommand(
+                    $command,
+                    '',
+                    'synchronize usage credentials'
+                )
+                : null
+        );
+        $temporaryCreated = false;
         try {
-            stream_set_blocking($pipes[1], false);
-            if ($tool === 'codex') {
-                fwrite($pipes[0], json_encode([
-                    'id' => 1,
-                    'method' => 'initialize',
-                    'params' => ['clientInfo' => ['name' => 'aihelper-usage', 'version' => '1.0.0']]
-                ]) . "\n");
+            stream_set_timeout($lockPipes[1], seconds: 25);
+            if (trim((string) fgets($lockPipes[1])) !== 'ready') {
+                return $content;
             }
-            if ($tool !== 'codex') {
-                fclose($pipes[0]);
+            $temporaryCreated = true;
+            $store->prepare([dirname($temporaryPath)], [$temporaryPath => $nativePath]);
+            $store->isolateAuthentication();
+            $home = $temporaryHome;
+            $arguments = match ($tool) {
+                'codex' => ['env', 'CODEX_HOME=' . $home, 'codex', 'app-server'],
+                'claude' => [
+                    'env',
+                    'CLAUDE_CONFIG_DIR=' . $home,
+                    'claude',
+                    '--print',
+                    '--input-format',
+                    'stream-json',
+                    '--output-format',
+                    'stream-json',
+                    '--verbose',
+                    '--no-session-persistence',
+                    '--setting-sources',
+                    '',
+                    '--settings',
+                    '{"disableAllHooks":true}',
+                    '--strict-mcp-config',
+                    '--mcp-config',
+                    '{"mcpServers":{}}'
+                ],
+                'antigravity' => ['env', 'HOME=' . $home, 'agy', 'models']
+            };
+            if ($remote) {
+                $arguments = [...$this->sshCommand(), implode(' ', array_map('escapeshellarg', $arguments))];
             }
-            $buffer = '';
-            $deadline = microtime(true) + 20;
-            while (microtime(true) < $deadline) {
-                $chunk = fread($pipes[1], 65536);
+            $process = proc_open(
+                $arguments,
+                [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']],
+                $pipes,
+                sys_get_temp_dir()
+            );
+            if (!is_resource($process)) {
+                return $content;
+            }
+            try {
+                stream_set_blocking($pipes[1], false);
                 if ($tool === 'codex') {
-                    $buffer .= $chunk === false ? '' : $chunk;
-                    while (($position = strpos($buffer, "\n")) !== false) {
-                        $event = json_decode(substr($buffer, 0, $position), true);
-                        $buffer = substr($buffer, $position + 1);
-                        if (isset($event['error']) || ($event['id'] ?? null) === 2) {
-                            break 2;
-                        }
-                        if (($event['id'] ?? null) === 1) {
-                            fwrite($pipes[0], "{\"method\":\"initialized\"}\n" .
-                                "{\"id\":2,\"method\":\"account/read\",\"params\":{\"refreshToken\":true}}\n");
+                    fwrite(
+                        $pipes[0],
+                        json_encode([
+                            'id' => 1,
+                            'method' => 'initialize',
+                            'params' => ['clientInfo' => ['name' => 'aihelper-usage', 'version' => '1.0.0']]
+                        ]) . "\n"
+                    );
+                }
+                if ($tool !== 'codex') {
+                    fclose($pipes[0]);
+                }
+                $buffer = '';
+                $deadline = microtime(true) + 20;
+                while (microtime(true) < $deadline) {
+                    $chunk = fread($pipes[1], 65536);
+                    if ($tool === 'codex') {
+                        $buffer .= $chunk === false ? '' : $chunk;
+                        while (($position = strpos($buffer, "\n")) !== false) {
+                            $event = json_decode(substr($buffer, 0, $position), true);
+                            $buffer = substr($buffer, $position + 1);
+                            if (isset($event['error']) || ($event['id'] ?? null) === 2) {
+                                break 2;
+                            }
+                            if (($event['id'] ?? null) === 1) {
+                                fwrite(
+                                    $pipes[0],
+                                    "{\"method\":\"initialized\"}\n" .
+                                        "{\"id\":2,\"method\":\"account/read\",\"params\":{\"refreshToken\":true}}\n"
+                                );
+                            }
                         }
                     }
+                    if (!proc_get_status($process)['running']) {
+                        break;
+                    }
+                    usleep(20000);
                 }
-                if (!proc_get_status($process)['running']) {
-                    break;
+            } finally {
+                foreach ($pipes as $pipe) {
+                    if (is_resource($pipe)) {
+                        fclose($pipe);
+                    }
                 }
-                usleep(20000);
+                if (proc_get_status($process)['running']) {
+                    proc_terminate($process, 9);
+                }
+                proc_close($process);
             }
         } finally {
-            foreach ($pipes as $pipe) {
-                if (is_resource($pipe)) {
-                    fclose($pipe);
+            try {
+                $store->persist();
+            } finally {
+                try {
+                    if ($remote && $temporaryCreated) {
+                        $this->remoteCommand(
+                            'rm -rf ' . escapeshellarg($temporaryHome),
+                            '',
+                            'remove usage credential store'
+                        );
+                    }
+                    if (!$remote && is_dir($temporaryHome)) {
+                        if (is_link($temporaryPath)) {
+                            unlink($temporaryPath);
+                        }
+                        __::rrmdir($temporaryHome);
+                    }
+                } finally {
+                    foreach (array_filter($lockPipes, callback: 'is_resource') as $pipe) {
+                        fclose($pipe);
+                    }
+                    if (proc_get_status($lockProcess)['running']) {
+                        proc_terminate($lockProcess);
+                    }
+                    proc_close($lockProcess);
                 }
             }
-            if (proc_get_status($process)['running']) {
-                proc_terminate($process, 9);
-            }
-            proc_close($process);
         }
         return $this->readCliAuthFile($path);
     }
@@ -11261,8 +11346,7 @@ abstract class ai_harness extends ai_anthropic
 
     protected ?string $harness_steer_pending = null;
 
-    /** @var array<string, string> */
-    protected array $harness_store_links = [];
+    protected ?HarnessStore $harness_store = null;
 
     abstract protected function binaryName(): string;
 
@@ -11627,6 +11711,14 @@ abstract class ai_harness extends ai_anthropic
 
     protected function remoteCommand(string $command, string $stdin, string $description): void
     {
+        $this->captureRemoteCommand($command, $stdin, $description);
+    }
+
+    /**
+     * Keep credential snapshots inside the caller instead of writing them to logs.
+     */
+    protected function captureRemoteCommand(string $command, string $stdin, string $description): string
+    {
         $process = proc_open(
             array_merge($this->sshCommand(), [$command]),
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
@@ -11637,6 +11729,7 @@ abstract class ai_harness extends ai_anthropic
         }
         fwrite($pipes[0], $stdin);
         fclose($pipes[0]);
+        $output = stream_get_contents($pipes[1]);
         fclose($pipes[1]);
         $error = stream_get_contents($pipes[2]);
         fclose($pipes[2]);
@@ -11645,6 +11738,7 @@ abstract class ai_harness extends ai_anthropic
                 'harness: failed to ' . $description . ': ' . (trim((string) $error) ?: 'unknown SSH error')
             );
         }
+        return (string) $output;
     }
 
     protected function isRemote(): bool
@@ -11783,97 +11877,20 @@ abstract class ai_harness extends ai_anthropic
      */
     protected function prepareHarnessStore(array $directories, array $links): void
     {
-        $this->harness_store_links = array_merge($this->harness_store_links, $links);
-        if ($this->isRemote()) {
-            $commands = [
-                'umask 077 && mkdir -p ' .
-                implode(' ', array_map('escapeshellarg', $directories)) .
-                ' && chmod 700 ' .
-                implode(' ', array_map('escapeshellarg', $directories))
-            ];
-            foreach ($links as $link => $target) {
-                // a run that was killed after a token refresh left the refreshed file here instead of the link
-                $commands[] =
-                    'if [ -f ' . escapeshellarg($link) . ' ] && [ ! -L ' . escapeshellarg($link) . ' ]; then ' .
-                    'if [ -s ' . escapeshellarg($link) . ' ] && [ ' . escapeshellarg($link) . ' -nt ' . escapeshellarg($target) . ' ]; then ' .
-                    'cat ' . escapeshellarg($link) . ' > ' . escapeshellarg($target) . '; fi; rm -f ' . escapeshellarg($link) . '; fi';
-                $commands[] =
-                    'if [ -L ' . escapeshellarg($link) . ' ]; then ln -sfn ' .
-                    escapeshellarg($target) . ' ' . escapeshellarg($link) .
-                    '; elif [ -e ' . escapeshellarg($link) . ' ]; then exit 1; else ln -s ' .
-                    escapeshellarg($target) . ' ' . escapeshellarg($link) . '; fi';
-            }
-            $this->remoteCommand(implode(' && ', $commands), '', 'prepare harness store');
-            return;
-        }
-        foreach ($directories as $directory) {
-            if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
-                throw new \RuntimeException('harness: failed to create ' . $directory);
-            }
-            chmod($directory, 0700);
-        }
-        foreach ($links as $link => $target) {
-            if (is_link($link) && readlink($link) === $target) {
-                continue;
-            }
-            if (is_link($link)) {
-                unlink($link);
-            }
-            // a run that was killed after a token refresh left the refreshed file here instead of the link
-            if (is_file($link)) {
-                $contents = file_get_contents($link);
-                if (is_string($contents) && trim($contents) !== '' && (!is_file($target) || filemtime($link) > filemtime($target))) {
-                    file_put_contents($target, $contents);
-                    chmod($target, 0600);
-                }
-                unlink($link);
-            }
-            if (file_exists($link)) {
-                throw new \RuntimeException('harness: refusing to replace ' . $link);
-            }
-            if (!symlink($target, $link)) {
-                throw new \RuntimeException('harness: failed to link ' . $link);
-            }
-        }
+        $this->harness_store ??= new HarnessStore(
+            $this->isRemote()
+                ? fn(string $command): string => $this->captureRemoteCommand($command, '', 'synchronize harness store')
+                : null
+        );
+        $this->harness_store->prepare($directories, $links);
     }
 
     /**
-     * A cli that refreshes its token writes the new file atomically, and the
-     * rename replaces the link instead of following it. Without writing it back
-     * the refreshed credentials would stay in this run's store while the shared
-     * profile keeps the token the server has already rotated away.
+     * Preserve refreshed credentials even when the CLI atomically replaces a symlink.
      */
     protected function persistHarnessStoreLinks(): void
     {
-        if ($this->harness_store_links === []) {
-            return;
-        }
-        if ($this->isRemote()) {
-            $commands = [];
-            foreach ($this->harness_store_links as $link => $target) {
-                $commands[] =
-                    'if [ -f ' . escapeshellarg($link) . ' ] && [ ! -L ' . escapeshellarg($link) . ' ]; then ' .
-                    'cat ' . escapeshellarg($link) . ' > ' . escapeshellarg($target) . ' && rm -f ' .
-                    escapeshellarg($link) . ' && ln -s ' . escapeshellarg($target) . ' ' . escapeshellarg($link) . '; fi';
-            }
-            $this->remoteCommand(implode(' && ', $commands), '', 'persist harness store');
-            return;
-        }
-        foreach ($this->harness_store_links as $link => $target) {
-            if (is_link($link) || !is_file($link)) {
-                continue;
-            }
-            $contents = file_get_contents($link);
-            if ($contents === false || trim($contents) === '') {
-                continue;
-            }
-            if (file_put_contents($target, $contents) === false) {
-                continue;
-            }
-            chmod($target, 0600);
-            unlink($link);
-            symlink($target, $link);
-        }
+        $this->harness_store?->persist();
     }
 
     public function ask(?string $prompt = null, mixed $files = null): array
@@ -12133,6 +12150,8 @@ abstract class ai_harness extends ai_anthropic
         }
         $this->log($loggable, 'harness command');
 
+        $this->harness_store?->isolateAuthentication();
+
         $process = proc_open(
             $command,
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
@@ -12186,6 +12205,7 @@ abstract class ai_harness extends ai_anthropic
 
         $last_activity_at = time();
         $last_heartbeat_at = microtime(true);
+        $last_store_sync_at = 0.0;
         $buffer = '';
         $errors = '';
         $exit_code = null;
@@ -12407,8 +12427,16 @@ abstract class ai_harness extends ai_anthropic
                 }
                 // a refreshed token has to reach the shared profile while the run is alive: a run that is
                 // killed later would take the only valid token with it, and every other run fails to refresh
-                if (!$this->isRemote()) {
-                    $this->persistHarnessStoreLinks();
+                if (!$this->isRemote() || microtime(true) - $last_store_sync_at >= 1) {
+                    try {
+                        $this->persistHarnessStoreLinks();
+                    } catch (\RuntimeException $exception) {
+                        if (!$this->isRemote()) {
+                            throw $exception;
+                        }
+                        $this->log('harness: credential synchronization will be retried.');
+                    }
+                    $last_store_sync_at = microtime(true);
                 }
                 // a lingering grandchild can hold the pipes open after the harness
                 // itself is gone, so the process state ends the loop, not eof
