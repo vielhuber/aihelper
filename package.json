@@ -1,7 +1,7 @@
 {
     "name": "",
     "description": "",
-    "version": "5.4.23",
+    "version": "5.4.24",
     "devDependencies": {
         "@prettier/plugin-php": ">=0.26",
         "prettier": "^3.9.10",

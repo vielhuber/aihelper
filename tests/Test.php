@@ -3433,7 +3433,18 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame('weekly', $claudeLimits[1]['type']);
         $this->assertNull($claudeLimits[1]['scope']);
         $this->assertSame(69, $claudeLimits[1]['percent used']);
-        $this->assertMatchesRegularExpression('/T17:59:00\\+02:00/', $claudeLimits[0]['resets_at']);
+        $sessionReset = new \DateTimeImmutable($claudeLimits[0]['resets_at']);
+        $this->assertSame('17:59:00', $sessionReset->format('H:i:s'));
+        $this->assertSame((new \DateTimeZone('Europe/Berlin'))->getOffset($sessionReset), $sessionReset->getOffset());
+
+        foreach (['Jun 30, 5:59pm' => '+02:00', 'Dec 30, 5:59pm' => '+01:00'] as $resetDescription => $expectedOffset) {
+            $seasonalLimits = $parser->invoke(
+                $ai,
+                'claude',
+                "Current week (all models)\n69% used\nResets $resetDescription (Europe/Berlin)"
+            );
+            $this->assertStringEndsWith('T17:59:00' . $expectedOffset, $seasonalLimits[0]['resets_at']);
+        }
     }
 
     function test__opencode_usage_reads_local_messages(): void
