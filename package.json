@@ -1,10 +1,10 @@
 {
     "name": "",
     "description": "",
-    "version": "5.4.22",
+    "version": "5.4.23",
     "devDependencies": {
-        "@prettier/plugin-php": ">=0.25",
-        "prettier": "^3.8.3",
-        "prettier-plugin-sh": "^0.18.1"
+        "@prettier/plugin-php": ">=0.26",
+        "prettier": "^3.9.10",
+        "prettier-plugin-sh": "^0.20.2"
     }
 }
