@@ -1600,62 +1600,45 @@ abstract class aihelper
                 return $finish([]);
             }
             $response = __::curl(
-                url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
+                url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
                 data: json_encode(['project' => $project]),
                 method: 'POST',
                 headers: $headers,
                 timeout: 15
             );
-            $groups = $response?->result?->groups ?? null;
-            if (!is_array($groups)) {
+            $models = $response?->result?->models ?? null;
+            if (!is_object($models)) {
                 return $finish([]);
             }
-            $limits = [];
-            foreach ($groups as $group) {
-                if (!is_object($group) || !is_array($group->buckets ?? null)) {
+            foreach ($models as $modelId => $model) {
+                $quota = $model->quotaInfo ?? null;
+                if (
+                    !str_starts_with((string) $modelId, 'gemini-') ||
+                    !is_object($quota) ||
+                    !is_numeric($quota->remainingFraction ?? null)
+                ) {
                     continue;
                 }
-                if (stripos((string) ($group->displayName ?? ''), 'Claude and GPT') !== false) {
-                    continue;
+                $resets_at = null;
+                if (($quota->resetTime ?? null) !== null) {
+                    try {
+                        $resets_at = (new \DateTimeImmutable((string) $quota->resetTime))->format(
+                            \DateTimeInterface::ATOM
+                        );
+                    } catch (\Exception) {
+                    }
                 }
-                foreach ($group->buckets as $bucket) {
-                    if (!is_object($bucket) || !is_numeric($bucket->remainingFraction ?? null)) {
-                        continue;
-                    }
-                    $window = strtolower(trim((string) ($bucket->window ?? '')));
-                    $type = match (true) {
-                        in_array($window, ['session', '5h', '5-hour', 'five_hour'], true),
-                        str_contains($window, '5-hour'),
-                        str_contains($window, '5 hour') => '5-hour',
-                        str_contains($window, 'weekly'),
-                        str_contains($window, 'seven_day'),
-                        str_contains($window, '7-day'),
-                        str_contains($window, '7 day') => 'weekly',
-                        str_contains($window, 'monthly'), str_contains($window, 'month') => 'monthly',
-                        str_contains($window, 'daily'), str_contains($window, 'day') => 'daily',
-                        default => null
-                    };
-                    if ($type === null) {
-                        continue;
-                    }
-                    $resets_at = null;
-                    if (($bucket->resetTime ?? null) !== null) {
-                        try {
-                            $resets_at = (new \DateTimeImmutable((string) $bucket->resetTime))->format(
-                                \DateTimeInterface::ATOM
-                            );
-                        } catch (\Exception) {
-                        }
-                    }
-                    $limits[] = [
-                        'type' => $type,
+                // Gemini models share one weekly quota.
+                return $finish([
+                    [
+                        'type' => 'weekly',
                         'scope' => null,
-                        'percent used' => (int) round(100 - max(0, min(1, (float) $bucket->remainingFraction)) * 100),
+                        'percent used' => (int) round(100 - max(0, min(1, (float) $quota->remainingFraction)) * 100),
                         'resets_at' => $resets_at
-                    ];
-                }
+                    ]
+                ]);
             }
-            return $finish($limits);
+            return $finish([]);
         }
 
         $cliAuthHome = $this->cli_auth_home ?? '';
