@@ -5663,13 +5663,17 @@ abstract class aihelper
 
         if (self::$artificial_analysis_models === null) {
             self::$artificial_analysis_models = [];
-            $response = __::curl(
-                url: 'https://artificialanalysis.ai/api/v2/data/llms/models',
-                method: 'GET',
-                headers: ['x-api-key' => $artificial_analysis_api_key],
-                timeout: $this->timeout
-            );
-            if (__::x($response?->result?->data ?? null) && is_array($response->result->data)) {
+            $page = 1;
+            do {
+                $response = __::curl(
+                    url: 'https://artificialanalysis.ai/api/v2/language/models/free?page=' . $page,
+                    method: 'GET',
+                    headers: ['x-api-key' => $artificial_analysis_api_key],
+                    timeout: $this->timeout
+                );
+                if (($response->status ?? null) !== 200 || !is_array($response->result->data ?? null)) {
+                    break;
+                }
                 foreach ($response->result->data as $model_data) {
                     foreach ([$model_data->slug ?? '', $model_data->name ?? ''] as $value) {
                         foreach ($this->getModelMatchingKeys((string) $value) as $model_key) {
@@ -5679,7 +5683,8 @@ abstract class aihelper
                         }
                     }
                 }
-            }
+                $page++;
+            } while (($response->result->pagination->has_more ?? false) === true);
         }
 
         foreach ($normalized_models as $model_key => $model) {
@@ -5695,17 +5700,13 @@ abstract class aihelper
                 $normalized_models[$model_key]['artificial_analysis_agentic_index'] =
                     $artificial_analysis_model->evaluations->artificial_analysis_agentic_index ?? null;
                 $normalized_models[$model_key]['artificial_analysis_output_speed'] =
-                    $artificial_analysis_model->median_output_tokens_per_second ??
-                    ($artificial_analysis_model->performance->median_output_tokens_per_second ?? null);
+                    $artificial_analysis_model->performance->median_output_tokens_per_second ?? null;
                 $normalized_models[$model_key]['artificial_analysis_time_to_first_token'] =
-                    $artificial_analysis_model->median_time_to_first_token_seconds ??
-                    ($artificial_analysis_model->performance->median_time_to_first_token_seconds ?? null);
+                    $artificial_analysis_model->performance->median_time_to_first_token_seconds ?? null;
                 $normalized_models[$model_key]['artificial_analysis_time_to_first_answer_token'] =
-                    $artificial_analysis_model->median_time_to_first_answer_token ??
-                    ($artificial_analysis_model->performance->median_time_to_first_answer_token_seconds ?? null);
+                    $artificial_analysis_model->performance->median_time_to_first_answer_token_seconds ?? null;
                 $normalized_models[$model_key]['artificial_analysis_response_time'] =
-                    $artificial_analysis_model->median_end_to_end_response_time_seconds ??
-                    ($artificial_analysis_model->performance->median_end_to_end_response_time_seconds ?? null);
+                    $artificial_analysis_model->performance->median_end_to_end_response_time_seconds ?? null;
                 $normalized_models[$model_key]['artificial_analysis_index_cost'] =
                     $artificial_analysis_model->artificial_analysis_intelligence_index_cost->total_cost ?? null;
                 break;
