@@ -142,6 +142,8 @@ aihelper::callMcpTool(
 // ['jsonrpc' => '2.0', 'id' => 123, 'result' => ['content' => [['type' => 'text', 'text' => '...']]]]
 ```
 
+when `ARTIFICIAL_ANALYSIS_API_KEY` is set, model catalogs include Artificial Analysis benchmarks. complete benchmark datasets are cached for 24 hours in the system temporary directory, shared by PHP processes using the same API key and local user. a file lock prevents duplicate concurrent fetches. fetch failures keep the last successful dataset, or leave benchmark fields empty without interrupting normal model discovery. failed fetches wait five minutes before retrying; HTTP 429 respects `Retry-After` and `X-RateLimit-Reset` instead.
+
 ### typesafe / jev evaluations
 
 [typesafe](https://docs.typesafe.ai/introduction) evaluates text or structured data with Jev instead of generating a chat response. use the existing factory and `evaluate(state:, questions:)`, without additional question classes:

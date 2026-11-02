@@ -80,7 +80,7 @@ abstract class aihelper
     protected ?string $auto_compact_summary = null;
     protected ?string $auto_compact_cache = null;
     protected array $auto_compact_removed_messages = [];
-    protected static ?array $artificial_analysis_models = null;
+    protected static array $artificial_analysis_cache = [];
     protected static array $cli_usage_limits_cache = [];
     protected static array $cli_usage_reset_credits_cache = [];
 
@@ -5644,38 +5644,81 @@ abstract class aihelper
             return $normalized_models;
         }
 
-        if (self::$artificial_analysis_models === null) {
-            self::$artificial_analysis_models = [];
-            $page = 1;
-            do {
-                $response = __::curl(
-                    url: 'https://artificialanalysis.ai/api/v2/language/models/free?page=' . $page,
-                    method: 'GET',
-                    headers: ['x-api-key' => $artificial_analysis_api_key],
-                    timeout: $this->timeout
-                );
-                if (($response->status ?? null) !== 200 || !is_array($response->result->data ?? null)) {
-                    break;
+        $cache_key =
+            hash('sha256', $artificial_analysis_api_key) .
+            '-' .
+            (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid());
+        if ((self::$artificial_analysis_cache[$cache_key]['expires_at'] ?? 0) <= time()) {
+            self::$artificial_analysis_cache[$cache_key] = ['expires_at' => time() + 300, 'models' => []];
+            $cache_file = sys_get_temp_dir() . '/aihelper-artificial-analysis-' . $cache_key . '.json';
+            $lock = fopen($cache_file, 'c+');
+            if ($lock === false) {
+                return $normalized_models;
+            }
+            try {
+                if (!flock($lock, LOCK_EX)) {
+                    return $normalized_models;
                 }
-                foreach ($response->result->data as $model_data) {
-                    foreach ([$model_data->slug ?? '', $model_data->name ?? ''] as $value) {
-                        foreach ($this->getModelMatchingKeys((string) $value) as $model_key) {
-                            if (!isset(self::$artificial_analysis_models[$model_key])) {
-                                self::$artificial_analysis_models[$model_key] = $model_data;
+                $cached = json_decode(stream_get_contents($lock));
+                $models = (array) ($cached->models ?? []);
+                $expires_at = (int) ($cached->expires_at ?? 0);
+                if ($expires_at <= time()) {
+                    $fresh_models = [];
+                    $complete = false;
+                    $expires_at = time() + 300;
+                    $page = 1;
+                    do {
+                        $response = __::curl(
+                            url: 'https://artificialanalysis.ai/api/v2/language/models/free?page=' . $page,
+                            method: 'GET',
+                            headers: ['x-api-key' => $artificial_analysis_api_key],
+                            timeout: $this->timeout
+                        );
+                        if (($response->status ?? null) !== 200 || !is_array($response->result->data ?? null)) {
+                            if (($response->status ?? null) === 429) {
+                                $retry_after = (int) ($response->headers['retry-after'][0] ?? 0);
+                                $expires_at = max(
+                                    time() + ($retry_after > 0 ? $retry_after : 300),
+                                    (int) ($response->headers['x-ratelimit-reset'][0] ?? 0)
+                                );
+                            }
+                            break;
+                        }
+                        foreach ($response->result->data as $model_data) {
+                            foreach ([$model_data->slug ?? '', $model_data->name ?? ''] as $value) {
+                                foreach ($this->getModelMatchingKeys((string) $value) as $model_key) {
+                                    if (!isset($fresh_models[$model_key])) {
+                                        $fresh_models[$model_key] = $model_data;
+                                    }
+                                }
                             }
                         }
+                        $complete = ($response->result->pagination->has_more ?? false) !== true;
+                        $page++;
+                    } while (!$complete);
+                    if ($complete) {
+                        $models = $fresh_models;
+                        $expires_at = time() + 86400;
                     }
+                    rewind($lock);
+                    ftruncate($lock, 0);
+                    fwrite($lock, json_encode(['expires_at' => $expires_at, 'models' => $models]));
+                    fflush($lock);
                 }
-                $page++;
-            } while (($response->result->pagination->has_more ?? false) === true);
+                self::$artificial_analysis_cache[$cache_key] = ['expires_at' => $expires_at, 'models' => $models];
+            } finally {
+                flock($lock, LOCK_UN);
+                fclose($lock);
+            }
         }
 
+        $artificial_analysis_models = self::$artificial_analysis_cache[$cache_key]['models'];
         foreach ($normalized_models as $model_key => $model) {
             foreach ($this->getModelMatchingKeys((string) ($model['name'] ?? '')) as $matching_key) {
-                if (!isset(self::$artificial_analysis_models[$matching_key])) {
+                if (!isset($artificial_analysis_models[$matching_key])) {
                     continue;
                 }
-                $artificial_analysis_model = self::$artificial_analysis_models[$matching_key];
+                $artificial_analysis_model = $artificial_analysis_models[$matching_key];
                 $normalized_models[$model_key]['artificial_analysis_intelligence_index'] =
                     $artificial_analysis_model->evaluations->artificial_analysis_intelligence_index ?? null;
                 $normalized_models[$model_key]['artificial_analysis_coding_index'] =
