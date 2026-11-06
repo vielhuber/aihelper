@@ -262,6 +262,8 @@ a successful terminal event followed by exit code `0` may return `success: true`
 
 opencode requires v2. each invocation uses a standalone server. isolated chats read the active go api key from their shared profile's credential database; session databases remain separate. existing v1 message logs and legacy `auth.json` keys remain readable. if opencode omits its final cli event after returning content, aihelper verifies the exact assistant message and successful turn completion in its native database. an unverified turn returns an error instead of replaying the prompt.
 
+`setInputCallback()` supplies follow-up text while any of the four harnesses is running; return `null` when no input is waiting. codex uses its app server, claude code its streaming input, opencode its native session steering API and antigravity its ACP server (agy 1.5 or newer). opencode and antigravity use small Node.js bridges without additional npm packages; opencode's private server is authenticated and bound to loopback. without an input callback, their existing single-prompt transports remain unchanged.
+
 claude code's tracked background tasks may remain active after a successful turn. aihelper waits for their
 completion notifications and subsequent replies instead of treating their lack of stdout as inactivity.
 each task has an absolute runtime limit: `timeout` seconds, or the longer explicit bash `timeout` (milliseconds).

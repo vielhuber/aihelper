@@ -15793,9 +15793,52 @@ class ai_opencode extends ai_harness
         return [];
     }
 
+    /**
+     * Run the bridge while OpenCode retains ownership of its tools and session.
+     */
+    protected function resolveBinary(): ?string
+    {
+        $binary = parent::resolveBinary();
+        return $binary !== null && $this->harnessSupportsSteering() ? 'node' : $binary;
+    }
+
+    /**
+     * Let the bridge accept follow-ups until its native run exits.
+     */
+    protected function harnessKeepsStdinOpen(): bool
+    {
+        return $this->harnessSupportsSteering();
+    }
+
+    /**
+     * Activate native session steering only for callers supplying follow-up input.
+     */
+    protected function harnessSupportsSteering(): bool
+    {
+        return $this->input_callback !== null;
+    }
+
+    /**
+     * Frame multiline prompts independently on the bridge's shared input pipe.
+     */
+    protected function harnessInput(string $prompt): string
+    {
+        $prompt = parent::harnessInput($prompt);
+        return $this->harnessSupportsSteering()
+            ? json_encode(['text' => $prompt], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) . "\n"
+            : $prompt;
+    }
+
     protected function buildArgs(): array
     {
         $args = ['run', '--standalone'];
+        if ($this->harnessSupportsSteering()) {
+            $args = [
+                $this->payloadFile('opencode.mjs', (string) file_get_contents(__DIR__ . '/harness/opencode.mjs')),
+                (string) parent::resolveBinary(),
+                'run'
+            ];
+        }
         if ($this->cli_session_id !== null) {
             $args[] = '--session';
             $args[] = $this->cli_session_id;
@@ -16199,8 +16242,44 @@ class ai_antigravity extends ai_harness
         return $home;
     }
 
+    /**
+     * Keep concurrent ACP prompts on the same conversation.
+     */
+    protected function harnessKeepsStdinOpen(): bool
+    {
+        return $this->harnessSupportsSteering();
+    }
+
+    /**
+     * Use ACP when the caller needs to inject messages before the turn finishes.
+     */
+    protected function harnessSupportsSteering(): bool
+    {
+        return $this->input_callback !== null;
+    }
+
     protected function buildArgs(): array
     {
+        if ($this->harnessSupportsSteering()) {
+            $efforts = array_column($this->models, 'efforts', 'name')[$this->model] ?? [];
+            $effort = '';
+            $rank = array_flip($this->getEffortValues());
+            foreach ($efforts as $candidate) {
+                if ($rank[$candidate] <= ($rank[$this->effort ?? ''] ?? PHP_INT_MAX)) {
+                    $effort = $candidate;
+                }
+            }
+            return [
+                'HOME=' . $this->antigravityHome(),
+                'node',
+                $this->payloadFile('antigravity.mjs', (string) file_get_contents(__DIR__ . '/harness/antigravity.mjs')),
+                $this->isRemote() ? $this->binaryName() : (string) parent::resolveBinary(),
+                $this->cli_session_id ?? '',
+                $this->model ?? '',
+                $effort,
+                $this->cli_resume_latest ? '1' : '0'
+            ];
+        }
         $args = [
             'HOME=' . $this->antigravityHome(),
             $this->isRemote() ? $this->binaryName() : (string) parent::resolveBinary(),
@@ -16251,6 +16330,12 @@ class ai_antigravity extends ai_harness
 
     protected function harnessInput(string $prompt): string
     {
+        if ($this->harnessSupportsSteering()) {
+            return json_encode(
+                ['text' => $this->appendFileNote($prompt)],
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE
+            ) . "\n";
+        }
         // the stream input takes text blocks only; files are named, the cli reads them itself
         return
             json_encode(
