@@ -5726,13 +5726,12 @@ abstract class aihelper
                 $normalized_models[$model_key]['artificial_analysis_agentic_index'] =
                     $artificial_analysis_model->evaluations->artificial_analysis_agentic_index ?? null;
                 $normalized_models[$model_key]['artificial_analysis_output_speed'] =
-                    $artificial_analysis_model->performance->median_output_tokens_per_second ?? null;
+                    $artificial_analysis_model->performance_v3->mean_output_tokens_per_second ?? null;
                 $normalized_models[$model_key]['artificial_analysis_time_to_first_token'] =
-                    $artificial_analysis_model->performance->median_time_to_first_token_seconds ?? null;
+                    $artificial_analysis_model->performance_v3->mean_time_to_first_token_seconds ?? null;
                 $normalized_models[$model_key]['artificial_analysis_time_to_first_answer_token'] =
-                    $artificial_analysis_model->performance->median_time_to_first_answer_token_seconds ?? null;
-                $normalized_models[$model_key]['artificial_analysis_response_time'] =
-                    $artificial_analysis_model->performance->median_end_to_end_response_time_seconds ?? null;
+                    $artificial_analysis_model->performance_v3->mean_time_to_first_answer_token_seconds ?? null;
+                $normalized_models[$model_key]['artificial_analysis_response_time'] = null;
                 $normalized_models[$model_key]['artificial_analysis_index_cost'] =
                     $artificial_analysis_model->artificial_analysis_intelligence_index_cost->total_cost ?? null;
                 break;

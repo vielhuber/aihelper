@@ -144,6 +144,10 @@ aihelper::callMcpTool(
 
 when `ARTIFICIAL_ANALYSIS_API_KEY` is set, model catalogs include Artificial Analysis benchmarks. complete benchmark datasets are cached for 24 hours in the system temporary directory, shared by PHP processes using the same API key and local user. a file lock prevents duplicate concurrent fetches. fetch failures keep the last successful dataset, or leave benchmark fields empty without interrupting normal model discovery. failed fetches wait five minutes before retrying; HTTP 429 respects `Retry-After` and `X-RateLimit-Reset` instead.
 
+performance fields use `performance_v3` means rather than the deprecated medians: output speed is measured in tokens per second, first-token and first-answer-token latency in seconds. `artificial_analysis_response_time` stays `null` because the Free API has no equivalent v3 end-to-end metric. missing measurements stay `null`, not zero; the discontinued Coding and Agentic Index fields also stay `null`.
+
+applications displaying benchmark data must visibly credit [Artificial Analysis](https://artificialanalysis.ai/), for example with a source link, as required by the [API documentation](https://artificialanalysis.ai/data-api/docs#attribution-and-licensing).
+
 ### typesafe / jev evaluations
 
 [typesafe](https://docs.typesafe.ai/introduction) evaluates text or structured data with Jev instead of generating a chat response. use the existing factory and `evaluate(state:, questions:)`, without additional question classes:
