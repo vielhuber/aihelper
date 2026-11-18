@@ -2578,6 +2578,8 @@ class Test extends \PHPUnit\Framework\TestCase
     {
         $expectedEfforts = [
             'codex' => [
+                'gpt-6.2-sol' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+                'gpt-6.2-astra' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
                 'gpt-6.1-sol' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
                 'gpt-6-astra' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
                 'gpt-5.6-sol' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
@@ -2651,9 +2653,11 @@ class Test extends \PHPUnit\Framework\TestCase
     {
         $codex = aihelper::create(provider: 'codex');
         $models = array_column($codex->models, null, 'name');
-        $this->assertArrayHasKey('gpt-6.1-sol', $models);
-        $this->assertTrue($models['gpt-6.1-sol']['supports_image_to_text']);
-        $this->assertTrue($models['gpt-6.1-sol']['default']);
+        $this->assertArrayHasKey('gpt-6.2-sol', $models);
+        $this->assertTrue($models['gpt-6.2-sol']['supports_image_to_text']);
+        $this->assertTrue($models['gpt-6.2-sol']['default']);
+        $this->assertFalse($models['gpt-6.2-astra']['default']);
+        $this->assertFalse($models['gpt-6.1-sol']['default']);
         $this->assertFalse($models['gpt-6-astra']['default']);
         $this->assertFalse($models['gpt-5.6-sol']['default']);
         $this->assertCount(1, array_filter($models, fn(array $model): bool => $model['default']));
@@ -2684,6 +2688,40 @@ class Test extends \PHPUnit\Framework\TestCase
             $this->assertSame(['low', 'medium', 'high', 'xhigh', 'max'], $models['gpt-6-astra']['efforts']);
             $this->assertTrue($models['gpt-6.1-sol']['supports_image_to_text'] ?? false);
             $this->assertSame(['low', 'medium', 'high', 'xhigh', 'max'], $models['gpt-6.1-sol']['efforts']);
+        } finally {
+            unlink($directory . '/models');
+            rmdir($directory);
+        }
+    }
+
+    function test__gpt62_api_metadata_is_available_without_external_catalogs(): void
+    {
+        $directory = sys_get_temp_dir() . '/aihelper-gpt62-' . bin2hex(random_bytes(8));
+        mkdir($directory, 0700);
+        file_put_contents(
+            $directory . '/models',
+            json_encode(['data' => [['id' => 'gpt-6.2-sol'], ['id' => 'gpt-6.2-astra']]])
+        );
+        try {
+            class_exists(\vielhuber\aihelper\ai_openai::class);
+            foreach ([\vielhuber\aihelper\ai_openai::class, \vielhuber\aihelper\ai_cliproxyapi::class] as $class) {
+                $provider = new $class();
+                (new \ReflectionProperty(aihelper::class, 'url'))->setValue($provider, 'file://' . $directory);
+                $models = array_column($provider->fetchModelsFromProvider(), null, 'name');
+                foreach (
+                    ['gpt-6.2-sol' => [0.000002, 0.0000001, 0.00001], 'gpt-6.2-astra' => [0.000008, 0.0000004, 0.00004]]
+                    as $name => $costs
+                ) {
+                    $model = $models[$name];
+                    $this->assertSame(1050000, $model['context_length'], $class . ' ' . $name);
+                    $this->assertSame(128000, $model['max_output_tokens']);
+                    $this->assertTrue($model['supports_tools']);
+                    $this->assertTrue($model['supports_image_to_text']);
+                    $this->assertFalse($model['supports_temperature']);
+                    $this->assertSame(['low', 'medium', 'high', 'xhigh', 'max'], $model['efforts']);
+                    $this->assertSame(array_combine(['input', 'input_cached', 'output'], $costs), $model['costs']);
+                }
+            }
         } finally {
             unlink($directory . '/models');
             rmdir($directory);

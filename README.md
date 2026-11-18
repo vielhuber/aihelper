@@ -250,6 +250,8 @@ with a valid `TYPESAFE_API_KEY` in `.env`, the following live test makes seven p
 
 ### cli harnesses
 
+Codex defaults to `gpt-6.2-sol` and also exposes `gpt-6.2-astra`, including vision and all native reasoning efforts through `ultra`. Previous models remain selectable. OpenAI API and CLIProxyAPI discovery include release metadata for both 6.2 models even before external catalogs update: vision, tool support, supported API reasoning efforts and [standard token rates](https://developers.openai.com/api/docs/pricing).
+
 the providers `claudecode`, `codex`, `opencode` and `antigravity` drive the locally installed cli agent instead of a chat completion endpoint. they own their system prompt, tools and history, so only the newest user turn is handed over. install and log them in once:
 
 ```

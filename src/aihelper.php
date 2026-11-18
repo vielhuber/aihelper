@@ -5852,6 +5852,31 @@ abstract class aihelper
         return $args;
     }
 
+    /**
+     * Keep new releases usable before external model catalogs are updated.
+     */
+    protected function openAiReleaseMetadata(string $name): array
+    {
+        $costs = match ($name) {
+            'gpt-6.2-sol' => ['input' => 0.000002, 'input_cached' => 0.0000001, 'output' => 0.00001],
+            'gpt-6.2-astra' => ['input' => 0.000008, 'input_cached' => 0.0000004, 'output' => 0.00004],
+            default => []
+        };
+        if ($costs === []) {
+            return [];
+        }
+        return [
+            'context_length' => 1050000,
+            'max_output_tokens' => 128000,
+            'costs' => $costs,
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_image_to_text' => true,
+            'supports_effort' => true,
+            'efforts' => ['low', 'medium', 'high', 'xhigh', 'max']
+        ];
+    }
+
     protected function getEffortValues(): array
     {
         return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
@@ -8473,12 +8498,15 @@ class ai_openai extends aihelper
                         continue;
                     }
                     $supports_effort = preg_match('/^(gpt-5|o1|o3|o4)(-|\.|$)/', strtolower($name)) === 1;
-                    $models[] = [
-                        'name' => $name,
-                        'context_length' => 128000,
-                        'supports_effort' => $supports_effort,
-                        'efforts' => $supports_effort ? $this->getEffortValues() : []
-                    ];
+                    $models[] = array_replace(
+                        [
+                            'name' => $name,
+                            'context_length' => 128000,
+                            'supports_effort' => $supports_effort,
+                            'efforts' => $supports_effort ? $this->getEffortValues() : []
+                        ],
+                        $this->openAiReleaseMetadata($name)
+                    );
                 }
             }
         }
@@ -11287,6 +11315,7 @@ class ai_cliproxyapi extends ai_openrouter
                 $models[$model_key]['supports_effort'] = true;
                 $models[$model_key]['efforts'] = ['low', 'medium', 'high', 'xhigh', 'max'];
             }
+            $models[$model_key] = array_replace($models[$model_key], $this->openAiReleaseMetadata($model['name']));
             if (!str_starts_with((string) $model['name'], 'gpt-5')) {
                 continue;
             }
@@ -13754,6 +13783,36 @@ class ai_codex extends ai_harness
 
     public array $models = [
         [
+            'name' => 'gpt-6.2-sol',
+            'context_length' => 272000,
+            'max_output_tokens' => 128000,
+            'costs' => ['input' => 0.000002, 'input_cached' => 0.0000001, 'output' => 0.00001],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
+            'supports_effort' => true,
+            'efforts' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+            'default' => true
+        ],
+        [
+            'name' => 'gpt-6.2-astra',
+            'context_length' => 272000,
+            'max_output_tokens' => 128000,
+            'costs' => ['input' => 0.000008, 'input_cached' => 0.0000004, 'output' => 0.00004],
+            'supports_temperature' => false,
+            'supports_tools' => true,
+            'supports_text_to_image' => false,
+            'supports_text_to_audio' => false,
+            'supports_image_to_text' => true,
+            'supports_audio_to_text' => false,
+            'supports_effort' => true,
+            'efforts' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+            'default' => false
+        ],
+        [
             'name' => 'gpt-6.1-sol',
             'context_length' => 272000,
             'max_output_tokens' => 128000,
@@ -13766,7 +13825,7 @@ class ai_codex extends ai_harness
             'supports_audio_to_text' => false,
             'supports_effort' => true,
             'efforts' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
-            'default' => true
+            'default' => false
         ],
         [
             'name' => 'gpt-6-astra',
