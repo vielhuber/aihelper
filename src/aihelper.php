@@ -15594,158 +15594,70 @@ class ai_opencode extends ai_harness
     }
 
     /**
-     * Read exact dashboard limits when configured, otherwise ask the gateway whether a window is spent.
+     * Read the current account limits using the Go key from the harness profile.
      *
-     * Without a console cookie, the reset time comes from the "Retry-After" header of the
-     * 429 the completions endpoint answers with. The limit is checked before the payload is
-     * validated, so an intentionally invalid zero-token request is enough to trigger it and nothing is ever generated.
-     *
-     * @return array<string,array{'percent used': float, resets_at: ?string}>
+     * @return array<string, array{'percent used': float, resets_at: string}>
      */
     protected function fetchOpenCodeServerLimits(): array
     {
-        $authCookie = trim((string) getenv('OPENCODE_GO_AUTH_COOKIE'));
-        if ($authCookie !== '') {
-            if (preg_match('/[\r\n;]/', $authCookie)) {
-                throw new \RuntimeException('OpenCode Go requires the value of the __Host-console_session cookie.');
-            }
-            $organizations = $this->requestOpenCodeConsole('/api/orgs', $authCookie);
-            if (!is_array($organizations) || !array_is_list($organizations) || count($organizations) !== 1) {
-                throw new \RuntimeException('OpenCode Go requires exactly one console organization for usage reporting.');
-            }
-            $organizationId = $organizations[0]['id'] ?? null;
-            if (!is_string($organizationId) || preg_match('/^(org_|wrk_)[a-zA-Z0-9]+$/D', $organizationId) !== 1) {
-                throw new \RuntimeException('OpenCode Go returned an invalid console organization.');
-            }
-            $subscription = $this->requestOpenCodeConsole('/api/go/status', $authCookie, $organizationId);
-            $access = $subscription['access'] ?? null;
-            if (!is_array($access)) {
-                throw new \RuntimeException('OpenCode Go has no active subscription access.');
-            }
-            $limits = [];
-            foreach (['fiveHour' => '5-hour', 'week' => 'weekly', 'month' => 'monthly'] as $source => $type) {
-                $meter = $access['meters'][$source] ?? [];
-                $limit = $meter['limitMicroCents'] ?? null;
-                $used = $meter['usedMicroCents'] ?? null;
-                $reset = $source === 'month' ? $access['endsAt'] ?? null : $meter['resetsAt'] ?? null;
-                if (
-                    !is_numeric($limit) ||
-                    !is_numeric($used) ||
-                    !is_finite((float) $limit) ||
-                    !is_finite((float) $used) ||
-                    (float) $limit <= 0 ||
-                    (float) $used < 0 ||
-                    ($reset === null && ($source !== 'fiveHour' || (float) $used !== 0.0)) ||
-                    ($reset !== null && (!is_string($reset) || strtotime($reset) === false))
-                ) {
-                    throw new \RuntimeException('OpenCode Go returned invalid console usage meters.');
-                }
-                $limits[$type] = [
-                    'percent used' => min(100.0, ((float) $used / (float) $limit) * 100),
-                    'resets_at' => $reset === null ? null : date('c', strtotime($reset))
-                ];
-            }
-            return $limits;
-        }
-
-        $cache_file =
-            rtrim(sys_get_temp_dir(), '/') .
-            '/aihelper-opencode-console-limit-' .
-            (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid()) .
-            '-local' . ($this->cli_auth_home !== null ? '-' . hash('sha256', $this->cli_auth_home) : '') . '.json';
-        $cached = is_file($cache_file) ? json_decode((string) file_get_contents($cache_file), true) : null;
-        if (is_array($cached['limits'] ?? null) && ($cached['checked_at'] ?? 0) > time() - 60) {
-            return $cached['limits'];
-        }
-
         $key = $this->openCodeApiKey();
-        if (!is_string($key) || trim($key) === '') {
+        if ($key === null) {
             return [];
         }
-
-        $curl = curl_init('https://opencode.ai/zen/go/v1/chat/completions');
-        curl_setopt_array($curl, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HEADER => true,
-            CURLOPT_POST => true,
-            CURLOPT_CONNECTTIMEOUT => 10,
-            CURLOPT_TIMEOUT => 20,
-            CURLOPT_HTTPHEADER => [
-                'Authorization: Bearer ' . $key,
-                'Content-Type: application/json',
-                ...$this->openCodeRequestHeaders('aihelper')
-            ],
-            // the models carry an "opencode-go/" prefix internally, the gateway rejects it
-            CURLOPT_POSTFIELDS => json_encode([
-                'model' => basename($this->model ?? '') ?: 'glm-5.2',
-                'messages' => [['role' => 'user', 'content' => '']],
-                'max_tokens' => 0
-            ])
-        ]);
-        $raw = curl_exec($curl);
-        $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        $header_size = (int) curl_getinfo($curl, CURLINFO_HEADER_SIZE);
-
-        $limits = [];
-        if ($status === 429 && is_string($raw)) {
-            $body = json_decode(substr($raw, $header_size), true);
-            $type = trim((string) ($body['metadata']['limitName'] ?? ''));
-            preg_match('/^retry-after:\s*(\d+)/mi', substr($raw, 0, $header_size), $match);
-            if ($type !== '' && isset($match[1])) {
-                $limits[$type] = [
-                    'percent used' => 100.0,
-                    'resets_at' => date('c', time() + (int) $match[1])
-                ];
-            }
+        if (preg_match('/[[:space:][:cntrl:]]/', $key) === 1) {
+            throw new \RuntimeException('OpenCode Go requires a valid API key.');
         }
-        // a failed probe must not be cached as "not exhausted" — only a conclusive answer counts
-        if ($status !== 0) {
-            @file_put_contents(
-                $cache_file,
-                json_encode(['checked_at' => time(), 'limits' => $limits]),
-                LOCK_EX
-            );
-            @chmod($cache_file, 0600);
+
+        $usage = $this->requestOpenCodeUsage($key)->usage ?? null;
+        $limits = [];
+        foreach (['rolling' => '5-hour', 'weekly' => 'weekly', 'monthly' => 'monthly'] as $window => $type) {
+            $meter = $usage->{$window} ?? null;
+            $percent = $meter->percent ?? null;
+            $status = $meter->status ?? null;
+            $reset = $meter->resetsAt ?? null;
+            if (
+                (!is_int($percent) && !is_float($percent)) ||
+                !is_finite((float) $percent) ||
+                $percent < 0 ||
+                !in_array($status, ['ok', 'rate-limited'], strict: true) ||
+                !is_string($reset) ||
+                ($resetAt = strtotime($reset)) === false
+            ) {
+                throw new \RuntimeException('OpenCode Go returned invalid usage meters.');
+            }
+            $limits[$type] = [
+                'percent used' => $status === 'rate-limited' ? 100.0 : min(100.0, (float) $percent),
+                'resets_at' => date('c', $resetAt)
+            ];
         }
         return $limits;
     }
 
     /**
-     * Keep the console cookie on its origin and reject authentication and protocol failures.
+     * Keep the profile key on the OpenCode origin and reject failed quota responses.
      */
-    protected function requestOpenCodeConsole(string $path, string $authCookie, ?string $organizationId = null): ?array
+    protected function requestOpenCodeUsage(#[\SensitiveParameter] string $key): object
     {
-        $headers = [
-            'Accept: application/json',
-            'Cookie: __Host-console_session=' . $authCookie,
-            ...$this->openCodeRequestHeaders('aihelper')
-        ];
-        if ($organizationId !== null) {
-            $headers[] = 'x-org-id: ' . $organizationId;
+        $response = __::curl(
+            url: 'https://opencode.ai/zen/go/v1/usage',
+            method: 'GET',
+            headers: ['Authorization' => 'Bearer ' . $key, 'Accept' => 'application/json'],
+            timeout: 15,
+            follow_redirects: false,
+            ssl_verify: true
+        );
+        $status = (int) ($response->status ?? 0);
+        if (in_array($status, [401, 403], strict: true)) {
+            throw new \RuntimeException('OpenCode Go rejected usage access for the profile API key.');
         }
-        $curl = curl_init('https://opencode.ai/console' . $path);
-        curl_setopt_array($curl, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => false,
-            CURLOPT_CONNECTTIMEOUT => 10,
-            CURLOPT_TIMEOUT => 20,
-            CURLOPT_HTTPHEADER => $headers
-        ]);
-        $body = curl_exec($curl);
-        $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        if (in_array($status, [401, 403], true)) {
-            throw new \RuntimeException(
-                'OpenCode Go rejected its console authentication. Renew the __Host-console_session cookie.'
-            );
+        if ($status !== 200) {
+            throw new \RuntimeException(sprintf('OpenCode Go usage is not available (HTTP %d).', $status));
         }
-        if ($status !== 200 || !is_string($body)) {
-            throw new \RuntimeException(sprintf('OpenCode Go console is not available (HTTP %d).', $status));
+        $payload = $response->result ?? null;
+        if (!is_object($payload)) {
+            throw new \RuntimeException('OpenCode Go returned invalid usage JSON.');
         }
-        $data = json_decode($body, true);
-        if (json_last_error() !== JSON_ERROR_NONE || ($data !== null && !is_array($data))) {
-            throw new \RuntimeException('OpenCode Go console returned invalid JSON.');
-        }
-        return $data;
+        return $payload;
     }
 
     /**

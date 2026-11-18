@@ -3598,24 +3598,18 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertTrue($limits[0]['estimated']);
     }
 
-    private function opencodeConsoleAihelper(array $responses, string $cookie = 'test-cookie'): object
+    private function opencodeQuotaAihelper(array $responses, string $key = 'test-key'): object
     {
         class_exists(aihelper::class);
-        return new class ($responses, $cookie) extends \vielhuber\aihelper\ai_opencode {
+        return new class ($responses, $key) extends \vielhuber\aihelper\ai_opencode {
             public array $requests = [];
             public ?array $messages = null;
 
-            public function __construct(private array $responses, private string $cookie) {}
+            public function __construct(private array $responses, private string $key) {}
 
-            public function getCliUsageLimits(): ?array
+            protected function openCodeApiKey(): ?string
             {
-                $previous = getenv('OPENCODE_GO_AUTH_COOKIE');
-                putenv('OPENCODE_GO_AUTH_COOKIE=' . $this->cookie);
-                try {
-                    return parent::getCliUsageLimits();
-                } finally {
-                    putenv($previous === false ? 'OPENCODE_GO_AUTH_COOKIE' : 'OPENCODE_GO_AUTH_COOKIE=' . $previous);
-                }
+                return $this->key;
             }
 
             protected function readOpenCodeUsageMessages(int $from): ?array
@@ -3623,42 +3617,32 @@ class Test extends \PHPUnit\Framework\TestCase
                 return $this->messages;
             }
 
-            protected function requestOpenCodeConsole(
-                string $path,
-                string $authCookie,
-                ?string $organizationId = null
-            ): ?array {
-                $this->requests[] = [$path, $authCookie, $organizationId];
+            protected function requestOpenCodeUsage(string $key): object
+            {
+                $this->requests[] = $key;
                 $response = array_shift($this->responses);
                 if ($response instanceof \RuntimeException) {
                     throw $response;
                 }
-                return $response;
+                return json_decode(json_encode($response, JSON_THROW_ON_ERROR), flags: JSON_THROW_ON_ERROR);
             }
         };
     }
 
-    private function opencodeConsoleSubscription(): array
+    private function opencodeQuotaResponse(): array
     {
         return [
-            'access' => [
-                'endsAt' => '2026-10-01T00:00:00Z',
-                'meters' => [
-                    'fiveHour' => ['limitMicroCents' => '1200000000', 'usedMicroCents' => '0', 'resetsAt' => null],
-                    'week' => [
-                        'limitMicroCents' => '3000000000',
-                        'usedMicroCents' => '150000000',
-                        'resetsAt' => '2026-09-28T00:00:00Z'
-                    ],
-                    'month' => ['limitMicroCents' => '6000000000', 'usedMicroCents' => '3120000000']
-                ]
+            'usage' => [
+                'rolling' => ['percent' => 0, 'status' => 'ok', 'resetsAt' => '2026-09-21T14:20:00.123Z'],
+                'weekly' => ['percent' => 5, 'status' => 'ok', 'resetsAt' => '2026-09-28T00:00:00.000Z'],
+                'monthly' => ['percent' => 52, 'status' => 'ok', 'resetsAt' => '2026-10-01T00:00:00.000Z']
             ]
         ];
     }
 
-    function test__opencode_usage_reads_console_limits(): void
+    function test__opencode_usage_reads_server_limits(): void
     {
-        $ai = $this->opencodeConsoleAihelper([[['id' => 'wrk_example']], $this->opencodeConsoleSubscription()]);
+        $ai = $this->opencodeQuotaAihelper([$this->opencodeQuotaResponse()]);
         $result = $ai->getCliUsageLimits();
         $this->assertTrue(array_is_list($result));
         $this->assertSame([false, false, false], array_column($result, 'estimated'));
@@ -3667,67 +3651,51 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame(0.0, $limits['5-hour']['percent used']);
         $this->assertSame(5.0, $limits['weekly']['percent used']);
         $this->assertSame(52.0, $limits['monthly']['percent used']);
-        $this->assertNull($limits['5-hour']['resets_at']);
+        $this->assertSame(strtotime('2026-09-21T14:20:00Z'), strtotime($limits['5-hour']['resets_at']));
         $this->assertSame(strtotime('2026-09-28T00:00:00Z'), strtotime($limits['weekly']['resets_at']));
         $this->assertSame(strtotime('2026-10-01T00:00:00Z'), strtotime($limits['monthly']['resets_at']));
-        $this->assertSame(
-            [['/api/orgs', 'test-cookie', null], ['/api/go/status', 'test-cookie', 'wrk_example']],
-            $ai->requests
-        );
+        $this->assertSame(['test-key'], $ai->requests);
     }
 
-    function test__opencode_console_clamps_exhausted_limits(): void
+    function test__opencode_quota_clamps_exhausted_limits(): void
     {
-        $subscription = $this->opencodeConsoleSubscription();
-        $subscription['access']['meters']['fiveHour'] = [
-            'limitMicroCents' => '1200000000',
-            'usedMicroCents' => '1300000000',
-            'resetsAt' => '2026-09-21T14:20:00Z'
-        ];
-        $ai = $this->opencodeConsoleAihelper([[['id' => 'org_example']], $subscription]);
-        $limits = array_column($ai->getCliUsageLimits(), null, 'type');
+        $response = $this->opencodeQuotaResponse();
+        $response['usage']['rolling']['percent'] = 108.33;
+        $response['usage']['weekly']['status'] = 'rate-limited';
+        $limits = array_column($this->opencodeQuotaAihelper([$response])->getCliUsageLimits(), null, 'type');
         $this->assertSame(100.0, $limits['5-hour']['percent used']);
+        $this->assertSame(100.0, $limits['weekly']['percent used']);
         $this->assertSame(strtotime('2026-09-21T14:20:00Z'), strtotime($limits['5-hour']['resets_at']));
     }
 
-    function test__opencode_console_rejects_invalid_responses(): void
+    function test__opencode_quota_rejects_invalid_responses(): void
     {
-        $subscription = $this->opencodeConsoleSubscription();
-        $responses = [
-            [null],
-            [[]],
-            [[['id' => 'wrk_a'], ['id' => 'wrk_b']]],
-            [[['id' => "bad\r\nheader"]]],
-            [[['id' => 'wrk_a']], null],
-            [[['id' => 'wrk_a']], ['access' => null]]
-        ];
-        foreach (['limitMicroCents' => '0', 'usedMicroCents' => '-1', 'resetsAt' => 'invalid'] as $field => $value) {
-            $invalid = $subscription;
-            $invalid['access']['meters']['week'][$field] = $value;
-            $responses[] = [[['id' => 'wrk_a']], $invalid];
+        $responses = [['usage' => null], ['usage' => []]];
+        foreach (['percent' => -1, 'status' => 'unknown', 'resetsAt' => 'invalid'] as $field => $value) {
+            $invalid = $this->opencodeQuotaResponse();
+            $invalid['usage']['weekly'][$field] = $value;
+            $responses[] = $invalid;
         }
-        $responses[] = [[['id' => 'wrk_a']], ['access' => ['meters' => []]]];
         foreach ($responses as $response) {
             try {
-                $this->opencodeConsoleAihelper($response)->getCliUsageLimits();
-                $this->fail('Invalid console responses must not pass startup validation.');
+                $this->opencodeQuotaAihelper([$response])->getCliUsageLimits();
+                $this->fail('Invalid responses must not produce exact Go limits.');
             } catch (\RuntimeException $exception) {
                 $this->assertStringContainsString('OpenCode Go', $exception->getMessage());
             }
         }
     }
 
-    function test__opencode_console_propagates_authentication_and_transport_failures(): void
+    function test__opencode_quota_propagates_authentication_and_transport_failures(): void
     {
         foreach (['authentication rejected', 'HTTP 503', 'invalid JSON'] as $message) {
-            foreach ([0, 1] as $request) {
+            foreach ([null, []] as $messages) {
                 $error = new \RuntimeException($message);
-                $responses = $request === 0 ? [$error] : [[['id' => 'wrk_a']], $error];
                 try {
-                    $ai = $this->opencodeConsoleAihelper($responses);
-                    $ai->messages = [];
+                    $ai = $this->opencodeQuotaAihelper([$error]);
+                    $ai->messages = $messages;
                     $ai->getCliUsageLimits();
-                    $this->fail('Console failures must reach the startup caller.');
+                    $this->fail('Quota failures must reach the caller.');
                 } catch (\RuntimeException $exception) {
                     $this->assertSame($error, $exception);
                 }
@@ -3735,29 +3703,29 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function test__opencode_console_does_not_hide_revoked_authentication_behind_cached_limits(): void
+    function test__opencode_quota_does_not_hide_revoked_authentication_behind_cached_limits(): void
     {
         $error = new \RuntimeException('authentication rejected');
-        $ai = $this->opencodeConsoleAihelper([[['id' => 'wrk_a']], $this->opencodeConsoleSubscription(), $error]);
+        $ai = $this->opencodeQuotaAihelper([$this->opencodeQuotaResponse(), $error]);
         $this->assertCount(3, $ai->getCliUsageLimits());
         try {
             $ai->getCliUsageLimits();
             $this->fail('A cached success must not hide revoked authentication.');
         } catch (\RuntimeException $exception) {
             $this->assertSame($error, $exception);
-            $this->assertCount(3, $ai->requests);
+            $this->assertCount(2, $ai->requests);
         }
     }
 
-    function test__opencode_console_rejects_injected_cookies(): void
+    function test__opencode_quota_rejects_injected_api_keys(): void
     {
-        foreach (["cookie\r\nInjected: header", 'cookie; other=secret'] as $cookie) {
-            $ai = $this->opencodeConsoleAihelper([], $cookie);
+        foreach (["key\r\nInjected: header", 'key other'] as $key) {
+            $ai = $this->opencodeQuotaAihelper([], $key);
             try {
                 $ai->getCliUsageLimits();
-                $this->fail('Invalid cookie must be rejected before making a request.');
+                $this->fail('Invalid key must be rejected before making a request.');
             } catch (\RuntimeException $exception) {
-                $this->assertStringContainsString('__Host-console_session', $exception->getMessage());
+                $this->assertStringContainsString('API key', $exception->getMessage());
                 $this->assertSame([], $ai->requests);
             }
         }
