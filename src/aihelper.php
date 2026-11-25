@@ -15582,7 +15582,31 @@ class ai_opencode extends ai_harness
             );
         }
         if ($provider === 'synthetic') {
-            $usage = $this->requestOpenCodeUsage($key, $provider)->subscription ?? null;
+            $quota = $this->requestOpenCodeUsage($key, $provider);
+            if (isset($quota->planWeeklyLimit)) {
+                $remaining = $quota->planWeeklyLimit->percentRemaining ?? null;
+                if (
+                    (!is_int($remaining) && !is_float($remaining)) ||
+                    !is_finite((float) $remaining) ||
+                    $remaining < 0 ||
+                    $remaining > 100
+                ) {
+                    throw new \RuntimeException('Synthetic returned an invalid weekly credit quota.');
+                }
+                $nextRegen = $quota->planWeeklyLimit->nextRegenAt ?? null;
+                $nextRegen = is_string($nextRegen) ? strtotime($nextRegen) : false;
+                return [
+                    [
+                        'type' => 'weekly',
+                        'scope' => null,
+                        'percent used' => $remaining <= 0 ? 100.0 : min(99.99, round(100 - $remaining, 2)),
+                        'resets_at' => $nextRegen !== false && $nextRegen > time() ? date('c', $nextRegen) : null,
+                        'regenerates' => true,
+                        'estimated' => false
+                    ]
+                ];
+            }
+            $usage = $quota->subscription ?? null;
             if ($usage === null) {
                 return [];
             }

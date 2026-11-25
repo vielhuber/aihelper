@@ -334,7 +334,7 @@ $opencode = aihelper::create(provider: 'opencode', cli_auth_home: '/path/to/prof
 $opencode->getCliUsageLimits();
 // [
 //     ['provider' => 'opencode-go', 'type' => '5-hour', 'scope' => null, 'percent used' => 20, ...],
-//     ['provider' => 'synthetic', 'type' => 'subscription', 'scope' => null, 'percent used' => 33.33, ...]
+//     ['provider' => 'synthetic', 'type' => 'weekly', 'scope' => null, 'percent used' => 21.47, 'regenerates' => true, ...]
 // ]
 
 // get manually redeemable codex reset credits
@@ -361,7 +361,7 @@ aihelper::purgeCliApiRequestLogs(
 );
 ```
 
-aihelper maps the [Synthetic quota response](https://dev.synthetic.new/docs/synthetic/quotas) to `requests`, `limit_requests`, `percent used` and `resets_at`. missing quotas are omitted. failures are logged when logging is configured. if no quota can be returned and an authenticated request failed, the method throws that error.
+aihelper uses the weekly credit balance from the [Synthetic quota response](https://dev.synthetic.new/docs/synthetic/quotas) when available. `regenerates: true` indicates that `resets_at` is the next incremental credit refill. accounts with the legacy request allowance return a `subscription` window with `requests` and `limit_requests`. missing quotas are omitted. failures are logged when logging is configured. if no quota can be returned and an authenticated request failed, the method throws that error.
 
 `getCliUsageLimits()` renews expired native Codex, Claude Code and Antigravity OAuth credentials through the installed CLI before querying usage. No prompt is sent, no model response is generated, and no chat session is persisted. The CLI keeps ownership of token rotation and credential storage. A missing or revoked refresh token still requires signing in again; existing cached usage remains available on failure.
 

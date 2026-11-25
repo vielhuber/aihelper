@@ -3861,6 +3861,37 @@ class Test extends \PHPUnit\Framework\TestCase
         $ai->getCliUsageLimits();
     }
 
+    function test__opencode_prefers_synthetic_weekly_credits_when_available(): void
+    {
+        $nextRegen = date('c', time() + 3600);
+        $quota = [
+            'subscription' => ['limit' => 500, 'requests' => 0, 'renewsAt' => $nextRegen],
+            'planWeeklyLimit' => ['percentRemaining' => 78.53, 'nextRegenAt' => $nextRegen]
+        ];
+        $spent = $quota;
+        $spent['planWeeklyLimit'] = ['percentRemaining' => 0];
+        $almostSpent = $quota;
+        $almostSpent['planWeeklyLimit']['percentRemaining'] = 0.001;
+        $invalid = $quota;
+        $invalid['planWeeklyLimit']['percentRemaining'] = 101;
+        $ai = $this->opencodeQuotaAihelper([$quota, $spent, $almostSpent, $invalid], ['synthetic' => 'fixture-key']);
+        $this->assertSame([[
+            'provider' => 'synthetic',
+            'type' => 'weekly',
+            'scope' => null,
+            'percent used' => 21.47,
+            'resets_at' => $nextRegen,
+            'regenerates' => true,
+            'estimated' => false
+        ]], $ai->getCliUsageLimits());
+        $exhausted = $ai->getCliUsageLimits()[0];
+        $this->assertSame(100.0, $exhausted['percent used']);
+        $this->assertNull($exhausted['resets_at']);
+        $this->assertSame(99.99, $ai->getCliUsageLimits()[0]['percent used']);
+        $this->expectExceptionMessage('Synthetic returned an invalid weekly credit quota.');
+        $ai->getCliUsageLimits();
+    }
+
     function test__opencode_returns_available_quotas_for_both_connected_providers(): void
     {
         $go = $this->opencodeQuotaResponse();
