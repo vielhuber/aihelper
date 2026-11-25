@@ -266,7 +266,9 @@ agy
 
 a successful terminal event followed by exit code `0` may return `success: true` with `response: ''`, including when streaming. missing completion events, aborts and provider errors do not qualify; ordinary empty api responses remain errors and retain their retry behavior.
 
-opencode requires v2. each invocation uses a standalone server. isolated chats read the active go api key from their shared profile's credential database; session databases remain separate. existing v1 message logs and legacy `auth.json` keys remain readable. if opencode omits its final cli event after returning content, aihelper verifies the exact assistant message and successful turn completion in its native database. an unverified turn returns an error instead of replaying the prompt.
+opencode requires v2. each invocation uses a standalone server. log in to OpenCode Go or Synthetic in the native cli. for a dedicated profile, sign in with `XDG_DATA_HOME=<profile>/opencode/data` and `XDG_CONFIG_HOME=<profile>/opencode/config`, then pass that profile directory as `cli_auth_home` to `aihelper::create()`. the model catalog uses the native cli and keeps the provider prefix, for example `synthetic/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017`. isolated chats use the active key for the selected provider and keep their session database separate. existing v1 message logs and legacy `auth.json` keys remain readable.
+
+if opencode omits its final cli event after returning content, aihelper verifies the exact assistant message and successful turn completion in its native database. an unverified turn returns an error instead of replaying the prompt.
 
 `setInputCallback()` supplies follow-up text while any of the four harnesses is running; return `null` when no input is waiting. codex uses its app server, claude code its streaming input, opencode its native session steering API and antigravity its ACP server (agy 1.5 or newer). opencode and antigravity use small Node.js bridges without additional npm packages; opencode's private server is authenticated and bound to loopback. without an input callback, their existing single-prompt transports remain unchanged.
 
@@ -320,20 +322,27 @@ $ai = aihelper::create(
     ]
 );
 // get cli usage limits for claude code, codex, opencode and antigravity
-// exact opencode go limits use the api key from the opencode-go harness profile
-$ai->getCliUsageLimits()
+$ai->getCliUsageLimits();
 // [
 //     ['type' => '5-hour', 'scope' => null, 'percent used' => 20, 'resets_at' => '2026-06-29T17:59:00+02:00'],
 //     ['type' => 'weekly', 'scope' => null, 'percent used' => 10, 'resets_at' => '2026-07-06T03:03:00+02:00'],
 //     ['type' => 'weekly', 'scope' => 'Fable', 'percent used' => 93, 'resets_at' => '2026-07-06T03:03:00+02:00']
 // ]
 
+// list quotas for the active OpenCode Go and Synthetic keys in this profile
+$opencode = aihelper::create(provider: 'opencode', cli_auth_home: '/path/to/profile');
+$opencode->getCliUsageLimits();
+// [
+//     ['provider' => 'opencode-go', 'type' => '5-hour', 'scope' => null, 'percent used' => 20, ...],
+//     ['provider' => 'synthetic', 'type' => 'subscription', 'scope' => null, 'percent used' => 33.33, ...]
+// ]
+
 // get manually redeemable codex reset credits
-$ai->getCliUsageResetCredits()
+$ai->getCliUsageResetCredits();
 // ['available_count' => 1, 'credits' => [['title' => 'Full reset', 'expires_at' => '...']]]
 
 // redeem the next available codex reset credit
-$ai->triggerCliUsageReset()
+$ai->triggerCliUsageReset();
 // ['success' => true, 'status' => 'reset', 'windows_reset' => 2]
 
 // get all requests from a local clis
@@ -352,7 +361,9 @@ aihelper::purgeCliApiRequestLogs(
 );
 ```
 
-`getCliUsageLimits()` renews expired native Codex, Claude Code and Antigravity OAuth credentials through the installed CLI before querying usage. No prompt is sent, no model response is generated, and no chat session is persisted. The CLI keeps ownership of token rotation and credential storage. A missing or revoked refresh token still requires signing in again; existing cached usage remains available on failure. OpenCode Go, proxy-managed credentials, normal chats and reset-credit operations are unchanged.
+aihelper maps the [Synthetic quota response](https://dev.synthetic.new/docs/synthetic/quotas) to `requests`, `limit_requests`, `percent used` and `resets_at`. missing quotas are omitted. failures are logged when logging is configured. if no quota can be returned and an authenticated request failed, the method throws that error.
+
+`getCliUsageLimits()` renews expired native Codex, Claude Code and Antigravity OAuth credentials through the installed CLI before querying usage. No prompt is sent, no model response is generated, and no chat session is persisted. The CLI keeps ownership of token rotation and credential storage. A missing or revoked refresh token still requires signing in again; existing cached usage remains available on failure.
 
 ### streaming
 

@@ -17,6 +17,7 @@ abstract class aihelper
     public ?bool $is_harness = false;
 
     protected ?string $model = null;
+    protected bool $uses_default_model = true;
     protected ?string $system_prompt = null;
     protected array $cli_skills = [];
     protected ?string $effort = null;
@@ -875,6 +876,7 @@ abstract class aihelper
             $this->api_key = $api_key;
         }
         $this->models = $this->fetchModels();
+        $this->uses_default_model = $model === null;
         if ($model === null) {
             $model = $this->getDefaultModel();
         }
@@ -2550,7 +2552,7 @@ abstract class aihelper
                        ORDER BY p.time_created ASC LIMIT 1";
                 $where = [
                     "json_extract(m.data, '$.role') = 'assistant'",
-                    "json_extract(m.data, '$.providerID') = 'opencode-go'"
+                    "json_extract(m.data, '$.providerID') IN ('opencode-go', 'synthetic')"
                 ];
                 $parameters = [];
                 if ($date_from_time !== false) {
@@ -2591,7 +2593,9 @@ abstract class aihelper
                     $request = $make_local(
                         $opencode_database,
                         date(\DateTimeInterface::ATOM, (int) floor((float) $entry['time_created'] / 1000)),
-                        $data['modelID'] ?? null,
+                        ($data['providerID'] ?? null) === 'synthetic' && isset($data['modelID'])
+                            ? 'synthetic/' . $data['modelID']
+                            : $data['modelID'] ?? null,
                         [
                             'input_tokens' => (int) ($tokens['input'] ?? 0),
                             'output_tokens' => (int) ($tokens['output'] ?? 0),
@@ -2880,10 +2884,15 @@ abstract class aihelper
     public function fetchModelsFromModelsDev(): array
     {
         $provider = $this->name;
-        if ($provider === null) {
-            return [];
-        }
-        if (in_array($provider, ['openrouter'], true)) {
+        return $provider === null ? [] : $this->fetchModelsDevProvider($provider);
+    }
+
+    /**
+     * Map metadata for an upstream provider even when it is used through a harness.
+     */
+    protected function fetchModelsDevProvider(string $provider): array
+    {
+        if ($provider === 'openrouter') {
             return [];
         }
 
@@ -11914,7 +11923,7 @@ abstract class ai_harness extends ai_anthropic
         // sourcing nvm only sets a PATH when a default alias exists, so npm-global clis
         // (codex) stay invisible over ssh — the newest installed version is added directly
         return 'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"; ' .
-            '. "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ' .
+            'if [ -r "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; fi; ' .
             'nvm_bin=$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1); ' .
             '[ -n "$nvm_bin" ] && export PATH="$PATH:$nvm_bin"; ';
     }
@@ -12412,12 +12421,6 @@ abstract class ai_harness extends ai_anthropic
             str_contains($serialized, '/SKILL.md');
     }
 
-    protected function harnessEnvironment(): ?array
-    {
-        $overrides = $this->harnessEnvironmentOverrides();
-        return $overrides === [] ? null : array_merge(getenv(), $overrides);
-    }
-
     protected function harnessInput(string $prompt): string
     {
         return $this->appendFileNote($prompt);
@@ -12503,22 +12506,41 @@ abstract class ai_harness extends ai_anthropic
         $this->harness_run_id = md5(uniqid('', true));
         $this->harness_remote_pid_file = null;
         $this->resetNativeEventStream();
+        $arguments = $this->buildArgs();
+        $overrides = $this->harnessEnvironmentOverrides();
+        $sensitive = array_filter(
+            $overrides,
+            fn(string $name): bool => preg_match('/TOKEN|KEY|SECRET|PASSWORD/i', $name) === 1,
+            ARRAY_FILTER_USE_KEY
+        );
+        $remoteSecrets = '';
         if ($this->isRemote()) {
             // the whole invocation becomes one remote shell line: the run id
             // tags the process tree so an abort can find it again, and the
             // working directory is created on the machine that owns it
-            $inner = array_merge([$binary], $this->buildArgs());
+            $inner = array_merge([$binary], $arguments);
+            $exports = ['AIHELPER_RUN_ID=' . escapeshellarg((string) $this->harness_run_id)];
+            foreach (array_diff_key($overrides, $sensitive) as $name => $value) {
+                $exports[] = $name . '=' . escapeshellarg((string) $value);
+            }
+            // Consume secrets before the harness reads its own stdin protocol.
+            $readSecrets = '';
+            foreach ($sensitive as $name => $value) {
+                if (str_contains((string) $value, "\0")) {
+                    throw new \RuntimeException('harness: invalid remote environment value.');
+                }
+                $variable = escapeshellarg($name);
+                $readSecrets .= 'IFS= read -r -d "" ' . $variable . ' && export ' . $variable . ' && ';
+                $remoteSecrets .= $value . "\0";
+            }
             $script =
+                $readSecrets .
                 'mkdir -p ' .
                 escapeshellarg($this->workspace()) .
                 ' && cd ' .
                 escapeshellarg($this->workspace()) .
                 ' && exec ' .
                 implode(' ', array_map('escapeshellarg', $inner));
-            $exports = ['AIHELPER_RUN_ID=' . escapeshellarg((string) $this->harness_run_id)];
-            foreach ($this->harnessEnvironmentOverrides() as $name => $value) {
-                $exports[] = $name . '=' . escapeshellarg((string) $value);
-            }
             $this->harness_remote_pid_file =
                 '/tmp/aihelper-runs/' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $this->harness_run_id) . '.pid';
             $remoteRun =
@@ -12537,7 +12559,7 @@ abstract class ai_harness extends ai_anthropic
                 'export ' . implode(' ', $exports) . '; ' . $remoteRun
             ]);
         } else {
-            $command = array_merge(['setsid', '--wait', $binary], $this->buildArgs());
+            $command = array_merge(['setsid', '--wait', $binary], $arguments);
         }
         // the mcp config carries bearer tokens and must not reach the log
         $loggable = $command;
@@ -12547,16 +12569,10 @@ abstract class ai_harness extends ai_anthropic
             }
         }
         $loggable = implode(' ', $loggable);
-        // a remote run carries the environment inside one shell line, so the
-        // secrets in it have to be replaced by value rather than by position
-        foreach ($this->harnessEnvironmentOverrides() as $secrets__key => $secrets__value) {
-            if (!is_string($secrets__value) || $secrets__value === '') {
-                continue;
+        foreach ($sensitive as $value) {
+            if (is_string($value) && $value !== '') {
+                $loggable = str_replace([escapeshellarg($value), $value], '(redacted)', $loggable);
             }
-            if (preg_match('/TOKEN|KEY|SECRET|PASSWORD/i', (string) $secrets__key) !== 1) {
-                continue;
-            }
-            $loggable = str_replace($secrets__value, '(redacted)', $loggable);
         }
         $this->log($loggable, 'harness command');
 
@@ -12567,7 +12583,7 @@ abstract class ai_harness extends ai_anthropic
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             $this->isRemote() ? null : $this->workspace(),
-            $this->isRemote() ? null : $this->harnessEnvironment()
+            $this->isRemote() || $overrides === [] ? null : array_merge(getenv(), $overrides)
         );
         if (!is_resource($process)) {
             throw new \RuntimeException('harness: failed to spawn ' . $binary);
@@ -12582,6 +12598,9 @@ abstract class ai_harness extends ai_anthropic
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
         try {
+            if ($remoteSecrets !== '' && fwrite($pipes[0], $remoteSecrets) !== strlen($remoteSecrets)) {
+                throw new \RuntimeException('harness: failed to send the remote environment.');
+            }
             $this->harnessStart($pipes, $prompt);
         } catch (\RuntimeException $exception) {
             foreach ($pipes as $pipe) {
@@ -12621,13 +12640,7 @@ abstract class ai_harness extends ai_anthropic
         $exit_code = null;
         $drain_until = null;
         $stderrEntries = [];
-        $sensitiveValues = array_values(
-            array_filter(
-                $this->harnessEnvironmentOverrides(),
-                fn(string $name): bool => preg_match('/TOKEN|KEY|SECRET|PASSWORD/i', $name) === 1,
-                ARRAY_FILTER_USE_KEY
-            )
-        );
+        $sensitiveValues = array_values(array_filter($sensitive, fn($value): bool => is_string($value) && $value !== ''));
         $redact = function (mixed $value) use (&$redact, $sensitiveValues): mixed {
             if (is_array($value)) {
                 foreach ($value as $key => $item) {
@@ -15006,6 +15019,11 @@ class ai_codex extends ai_harness
 
 class ai_opencode extends ai_harness
 {
+    private const PROVIDER_KEY_VARIABLES = [
+        'opencode-go' => 'OPENCODE_API_KEY',
+        'synthetic' => 'SYNTHETIC_API_KEY'
+    ];
+
     protected ?string $openCodeMessageId = null;
 
     /**
@@ -15433,11 +15451,168 @@ class ai_opencode extends ai_harness
 
     public function fetchModels(): array
     {
-        return $this->normalizeAndEnrichModels($this->models);
+        return $this->normalizeAndEnrichModels($this->fetchModelsFromProvider());
+    }
+
+    public function setCliStorage(?string $cli_session_home, ?string $cli_auth_home): static
+    {
+        $previous = $this->cli_auth_home;
+        parent::setCliStorage($cli_session_home, $cli_auth_home);
+        if ($this->session_id !== null && $this->cli_auth_home !== $previous) {
+            $this->models = $this->fetchModels();
+            if ($this->uses_default_model) {
+                $this->model = $this->getDefaultModel();
+            }
+        }
+        return $this;
+    }
+
+    public function fetchModelsFromProvider(): array
+    {
+        $profile = $this->harnessAuthStore('opencode');
+        $providers = [];
+        foreach (array_keys(self::PROVIDER_KEY_VARIABLES) as $provider) {
+            $key = $this->openCodeApiKey($provider);
+            if ($key !== null) {
+                $providers[$provider] = hash('sha256', $key);
+            }
+        }
+        $offline =
+            $profile === null && ($providers === [] || isset($providers['opencode-go']))
+                ? get_class_vars(self::class)['models']
+                : [];
+        if ($providers === []) {
+            return $offline;
+        }
+
+        $binary = parent::resolveBinary();
+        if ($binary === null) {
+            return $offline;
+        }
+        $command = 'env';
+        if ($profile !== null) {
+            $command .=
+                ' -u OPENCODE_CONFIG -u OPENCODE_CONFIG_CONTENT -u OPENCODE_API_KEY -u SYNTHETIC_API_KEY' .
+                ' XDG_DATA_HOME=' .
+                escapeshellarg($profile . '/data') .
+                ' XDG_CONFIG_HOME=' .
+                escapeshellarg($profile . '/config');
+        }
+        if ($profile !== null || $this->isolate_harness_config === true) {
+            $command .= ' OPENCODE_PURE=1 OPENCODE_DISABLE_PROJECT_CONFIG=true';
+        }
+        $command .= ' OPENCODE_DISABLE_FREE_MODELS=1 timeout 12 ' . escapeshellarg($binary) . ' models --standalone';
+        if ($profile === null && $this->isolate_harness_config !== true && $this->workdir !== null) {
+            $command = 'cd ' . escapeshellarg($this->workdir) . ' 2>/dev/null && ' . $command;
+        }
+        if ($this->isRemote()) {
+            $command = implode(
+                ' ',
+                array_map('escapeshellarg', array_merge($this->sshCommand(), [$this->remoteShell($command)]))
+            );
+        }
+        static $catalogs = [];
+        $catalogKey = hash(
+            'sha256',
+            serialize([$command, getcwd(), getenv('XDG_DATA_HOME'), getenv('XDG_CONFIG_HOME'), $providers])
+        );
+        if (($catalogs[$catalogKey]['expires'] ?? 0) <= time()) {
+            exec($command . ' 2>/dev/null', $output, $status);
+            if ($status !== 0) {
+                return $offline;
+            }
+            $catalogs[$catalogKey] = ['ids' => $output, 'expires' => time() + 60];
+        }
+
+        $metadata = [];
+        foreach (array_keys($providers) as $provider) {
+            $metadata[$provider] = array_column($this->fetchModelsDevProvider($provider), null, 'name');
+        }
+        $models = [];
+        foreach ($catalogs[$catalogKey]['ids'] as $id) {
+            $id = trim($id);
+            [$provider, $name] = array_pad(explode('/', $id, 2), 2, '');
+            if (!isset($providers[$provider]) || $name === '' || preg_match('/\s/', $name) === 1) {
+                continue;
+            }
+            $model = $metadata[$provider][$name] ?? [];
+            $model['name'] = $id;
+            $model['default'] = $model['test'] = false;
+            $models[$id] = $model;
+        }
+        if ($models !== []) {
+            $default = isset($models['opencode-go/kimi-k3']) ? 'opencode-go/kimi-k3' : array_key_first($models);
+            $models[$default]['default'] = $models[$default]['test'] = true;
+        }
+        return array_values($models);
     }
 
     public function getCliUsageLimits(): ?array
     {
+        $limits = [];
+        $failure = null;
+        foreach (['opencode-go', 'synthetic'] as $provider) {
+            try {
+                foreach ($this->getOpenCodeUsageLimits($provider) as $limit) {
+                    $limits[] = ['provider' => $provider, ...$limit];
+                }
+            } catch (\RuntimeException $exception) {
+                $failure ??= $exception;
+                $this->log($exception->getMessage(), $provider . ' quota');
+            }
+        }
+        if ($limits === [] && $failure !== null) {
+            throw $failure;
+        }
+        return $limits ?: null;
+    }
+
+    /**
+     * Keep subscription limits and local Go usage statistics scoped to their respective provider.
+     */
+    private function getOpenCodeUsageLimits(string $provider): array
+    {
+        $key = $this->openCodeApiKey($provider);
+        if ($key === null) {
+            return [];
+        }
+        if (preg_match('/[[:space:][:cntrl:]]/', $key) === 1) {
+            throw new \RuntimeException(
+                ($provider === 'synthetic' ? 'Synthetic' : 'OpenCode Go') . ' requires a valid API key.'
+            );
+        }
+        if ($provider === 'synthetic') {
+            $usage = $this->requestOpenCodeUsage($key, $provider)->subscription ?? null;
+            if ($usage === null) {
+                return [];
+            }
+            $requests = $usage->requests ?? null;
+            $limit = $usage->limit ?? null;
+            $renewsAt = $usage->renewsAt ?? null;
+            if (
+                (!is_int($requests) && !is_float($requests)) ||
+                !is_finite((float) $requests) ||
+                $requests < 0 ||
+                (!is_int($limit) && !is_float($limit)) ||
+                !is_finite((float) $limit) ||
+                $limit <= 0 ||
+                !is_string($renewsAt) ||
+                ($resetAt = strtotime($renewsAt)) === false
+            ) {
+                throw new \RuntimeException('Synthetic returned an invalid subscription quota.');
+            }
+            return [
+                [
+                    'type' => 'subscription',
+                    'scope' => null,
+                    'percent used' => $requests >= $limit ? 100.0 : min(99.99, round(($requests / $limit) * 100, 2)),
+                    'resets_at' => date('c', $resetAt),
+                    'estimated' => false,
+                    'requests' => $requests,
+                    'limit_requests' => $limit
+                ]
+            ];
+        }
         $now = time();
         $limits = [
             '5-hour' => ['from' => $now - 5 * 60 * 60, 'limit_usd' => 12.0],
@@ -15446,12 +15621,16 @@ class ai_opencode extends ai_harness
             'monthly' => ['from' => $now - 30 * 24 * 60 * 60, 'limit_usd' => 60.0]
         ];
         $messages = $this->readOpenCodeUsageMessages($limits['monthly']['from'] * 1000);
+        $serverLimits = $this->fetchOpenCodeServerLimits($key);
+        if ($messages === [] && $serverLimits === []) {
+            return [];
+        }
         if ($messages === null) {
             $limits = [];
-            foreach ($this->fetchOpenCodeServerLimits() as $type => $serverLimit) {
+            foreach ($serverLimits as $type => $serverLimit) {
                 $limits[] = ['type' => $type, 'scope' => null, ...$serverLimit, 'estimated' => false];
             }
-            return $limits ?: null;
+            return $limits;
         }
 
         foreach ($limits as $type => $limit) {
@@ -15504,7 +15683,6 @@ class ai_opencode extends ai_harness
             unset($limit);
         }
 
-        $serverLimits = $this->fetchOpenCodeServerLimits();
         foreach ($limits as &$limit) {
             unset($limit['from']);
             $limit['used_usd'] = round($limit['used_usd'], 8);
@@ -15598,17 +15776,9 @@ class ai_opencode extends ai_harness
      *
      * @return array<string, array{'percent used': float, resets_at: string}>
      */
-    protected function fetchOpenCodeServerLimits(): array
+    protected function fetchOpenCodeServerLimits(#[\SensitiveParameter] string $key): array
     {
-        $key = $this->openCodeApiKey();
-        if ($key === null) {
-            return [];
-        }
-        if (preg_match('/[[:space:][:cntrl:]]/', $key) === 1) {
-            throw new \RuntimeException('OpenCode Go requires a valid API key.');
-        }
-
-        $usage = $this->requestOpenCodeUsage($key)->usage ?? null;
+        $usage = $this->requestOpenCodeUsage($key, 'opencode-go')->usage ?? null;
         $limits = [];
         foreach (['rolling' => '5-hour', 'weekly' => 'weekly', 'monthly' => 'monthly'] as $window => $type) {
             $meter = $usage->{$window} ?? null;
@@ -15634,12 +15804,16 @@ class ai_opencode extends ai_harness
     }
 
     /**
-     * Keep the profile key on the OpenCode origin and reject failed quota responses.
+     * Keep the profile key on its provider's origin and reject failed quota responses.
      */
-    protected function requestOpenCodeUsage(#[\SensitiveParameter] string $key): object
+    protected function requestOpenCodeUsage(#[\SensitiveParameter] string $key, string $provider): object
     {
+        [$label, $url] = match ($provider) {
+            'opencode-go' => ['OpenCode Go', 'https://opencode.ai/zen/go/v1/usage'],
+            'synthetic' => ['Synthetic', 'https://api.synthetic.new/v2/quotas']
+        };
         $response = __::curl(
-            url: 'https://opencode.ai/zen/go/v1/usage',
+            url: $url,
             method: 'GET',
             headers: ['Authorization' => 'Bearer ' . $key, 'Accept' => 'application/json'],
             timeout: 15,
@@ -15648,38 +15822,49 @@ class ai_opencode extends ai_harness
         );
         $status = (int) ($response->status ?? 0);
         if (in_array($status, [401, 403], strict: true)) {
-            throw new \RuntimeException('OpenCode Go rejected usage access for the profile API key.');
+            throw new \RuntimeException($label . ' rejected usage access for the profile API key.');
         }
         if ($status !== 200) {
-            throw new \RuntimeException(sprintf('OpenCode Go usage is not available (HTTP %d).', $status));
+            throw new \RuntimeException(sprintf('%s usage is not available (HTTP %d).', $label, $status));
         }
         $payload = $response->result ?? null;
         if (!is_object($payload)) {
-            throw new \RuntimeException('OpenCode Go returned invalid usage JSON.');
+            throw new \RuntimeException($label . ' returned invalid usage JSON.');
         }
         return $payload;
     }
 
     /**
-     * Read the active Go key without sharing the profile's session database.
+     * Read the active provider key without sharing the profile's session database.
      */
-    protected function openCodeApiKey(): ?string
+    protected function openCodeApiKey(string $provider): ?string
     {
-        $base = $this->cli_auth_home !== null
-            ? rtrim($this->cli_auth_home, '/') . '/opencode/data/opencode'
-            : ($this->isRemote() ? $this->userHome() . '/.local/share' : (getenv('XDG_DATA_HOME') ?: $this->userHome() . '/.local/share')) . '/opencode';
-        $query = "SELECT json_extract(value, '$.key') FROM credential
-                  WHERE integration_id = 'opencode-go'
+        if (!isset(self::PROVIDER_KEY_VARIABLES[$provider])) {
+            return null;
+        }
+        $authStore = $this->harnessAuthStore('opencode');
+        $base =
+            $authStore !== null
+                ? $authStore . '/data/opencode'
+                : ($this->isRemote()
+                    ? $this->captureRemoteCommand(
+                        'printf %s "${XDG_DATA_HOME:-$HOME/.local/share}"',
+                        '',
+                        'find the OpenCode data directory'
+                    )
+                    : (getenv('XDG_DATA_HOME') ?: $this->userHome() . '/.local/share')) . '/opencode';
+        $query = "SELECT json_extract(value, '$.key') AS api_key FROM credential
+                  WHERE integration_id = '$provider'
                     AND json_extract(value, '$.type') = 'key'
                   ORDER BY active DESC, time_created DESC, id DESC LIMIT 1";
         $key = null;
         if ($this->isRemote()) {
             $command = array_merge($this->sshCommand(), [
-                'sqlite3 -readonly ' . escapeshellarg($base . '/opencode.db') . ' ' . escapeshellarg($query)
+                'sqlite3 -readonly -json ' . escapeshellarg($base . '/opencode.db') . ' ' . escapeshellarg($query)
             ]);
             exec(implode(' ', array_map('escapeshellarg', $command)) . ' 2>/dev/null', $output, $status);
             if ($status === 0) {
-                $key = trim(implode(PHP_EOL, $output));
+                $key = json_decode(implode(PHP_EOL, $output), true)[0]['api_key'] ?? null;
             }
         }
         if (!$this->isRemote() && is_file($base . '/opencode.db')) {
@@ -15696,8 +15881,15 @@ class ai_opencode extends ai_harness
             return $key;
         }
         $auth = $this->readCliAuthFile($base . '/auth.json');
-        $key = $auth !== null ? (json_decode($auth, true)['opencode-go']['key'] ?? null) : null;
-        return is_string($key) && trim($key) !== '' ? $key : null;
+        $key = $auth !== null ? json_decode($auth, true)[$provider]['key'] ?? null : null;
+        if (is_string($key) && trim($key) !== '') {
+            return $key;
+        }
+        $key =
+            $provider === 'synthetic' && $authStore === null && !$this->isRemote()
+                ? getenv(self::PROVIDER_KEY_VARIABLES[$provider])
+                : false;
+        return $key !== false && trim($key) !== '' ? $key : null;
     }
 
     protected function harnessEnvironmentOverrides(): array
@@ -15710,13 +15902,9 @@ class ai_opencode extends ai_harness
             ],
             $this->harnessMcpTokenEnvironment()
         );
-        $store = $this->harnessStore('opencode');
-        $key = $this->openCodeApiKey();
-        if ($key !== null) {
-            $overrides['OPENCODE_API_KEY'] = $key;
-        }
+        $authStore = $this->harnessAuthStore('opencode');
+        $store = $this->harnessStore('opencode') ?? $authStore;
         if ($store !== null) {
-            $authStore = $this->harnessAuthStore('opencode');
             $native =
                 $authStore !== null
                     ? $authStore . '/data/opencode'
@@ -15724,6 +15912,14 @@ class ai_opencode extends ai_harness
             $this->prepareHarnessStore([$native, $store . '/data/opencode', $store . '/config'], []);
             $overrides['XDG_DATA_HOME'] = $store . '/data';
             $overrides['XDG_CONFIG_HOME'] = $store . '/config';
+        }
+        if ($authStore !== null) {
+            $overrides += array_fill_keys(self::PROVIDER_KEY_VARIABLES, '');
+        }
+        $provider = explode('/', $this->model ?? 'opencode-go', 2)[0];
+        $key = $this->openCodeApiKey($provider);
+        if ($key !== null) {
+            $overrides[self::PROVIDER_KEY_VARIABLES[$provider]] = $key;
         }
         if ($this->isolate_harness_config === true) {
             $overrides['OPENCODE_DISABLE_CLAUDE_CODE_SKILLS'] = 'true';
@@ -15748,7 +15944,8 @@ class ai_opencode extends ai_harness
             $config['mcp']['servers'][$name] = $entry;
         }
         if ($key !== null) {
-            $config['providers']['opencode-go']['settings']['apiKey'] = '{env:OPENCODE_API_KEY}';
+            $config['providers'][$provider]['settings']['apiKey'] =
+                '{env:' . self::PROVIDER_KEY_VARIABLES[$provider] . '}';
         }
         if ($this->isolate_harness_config === true) {
             $config['instructions'] = [];
@@ -15845,17 +16042,15 @@ class ai_opencode extends ai_harness
             $args[] = $path;
         }
         if ($this->model !== null) {
-            $effort = $this->effort;
+            $efforts = ['minimal', 'low', 'medium', 'high', 'max'];
             foreach ($this->models as $model) {
-                if ($model['name'] === $this->model && !in_array($effort, $model['efforts'], true)) {
-                    // v1 ignored unknown variants; retain that behavior for saved preferences.
-                    $effort = null;
+                if ($model['name'] === $this->model) {
+                    $efforts = $model['efforts'];
+                    break;
                 }
             }
             $args[] = '--model';
-            $args[] =
-                $this->model .
-                (in_array($effort, ['minimal', 'low', 'medium', 'high', 'max'], true) ? '#' . $effort : '');
+            $args[] = $this->model . (in_array($this->effort, $efforts, true) ? '#' . $this->effort : '');
         }
         return $args;
     }

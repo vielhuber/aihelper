@@ -1323,7 +1323,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
                     protected function harnessEnvironmentOverrides(): array
                     {
-                        return [];
+                        return $this->isRemote() ? ['SYNTHETIC_API_KEY' => "remote-fixture-key'\n"] : [];
                     }
 
                     protected function harnessUpdate(): ?array
@@ -1333,7 +1333,7 @@ class Test extends \PHPUnit\Framework\TestCase
 
                     protected function sshCommand(bool $withReverseTunnel = false): array
                     {
-                        return ['bash', '-c'];
+                        return ['bash', '-c', 'case "$1" in *remote-fixture-key*) exit 33;; esac; exec bash -c "$1"', 'ssh-fixture'];
                     }
 
                     protected function remoteShell(string $command): string
@@ -1378,6 +1378,11 @@ class Test extends \PHPUnit\Framework\TestCase
                         }
                         return [
                             '-r',
+                            ($this->isRemote()
+                                ? 'if (hash("sha256", (string) getenv("SYNTHETIC_API_KEY")) !== ' .
+                                    var_export(hash('sha256', "remote-fixture-key'\n"), true) .
+                                    ' || stream_get_contents(STDIN) !== "Fixture") { exit(34); } '
+                                : '') .
                             '$counter = ' .
                             var_export($this->fixtureHome . '/calls', true) .
                             '; ' .
@@ -1504,6 +1509,13 @@ class Test extends \PHPUnit\Framework\TestCase
             0,
             2
         ]);
+        $statement->execute([
+            'synthetic',
+            'synthetic',
+            json_encode(['type' => 'key', 'key' => 'synthetic-fixture-key']),
+            1,
+            1
+        ]);
         $statement = null;
         file_put_contents(
             $home . '/profile/opencode/data/opencode/auth.json',
@@ -1512,6 +1524,7 @@ class Test extends \PHPUnit\Framework\TestCase
         try {
             $helper = aihelper::create(
                 provider: 'opencode',
+                model: 'opencode-go/kimi-k3',
                 cli_session_home: $home . '/chat',
                 cli_auth_home: $home . '/profile'
             );
@@ -1527,6 +1540,55 @@ class Test extends \PHPUnit\Framework\TestCase
             $connection->exec('UPDATE credential SET active = NULL');
             $environment = (new ReflectionMethod($helper, 'harnessEnvironmentOverrides'))->invoke($helper);
             $this->assertSame('inactive-fixture-key', $environment['OPENCODE_API_KEY']);
+
+            $synthetic = aihelper::create(
+                provider: 'opencode',
+                model: 'synthetic/hf:sample/model',
+                cli_session_home: $home . '/chat',
+                cli_auth_home: $home . '/profile'
+            );
+            $environment = $this->harnessOverrides($synthetic);
+            $this->assertSame('synthetic-fixture-key', $environment['SYNTHETIC_API_KEY']);
+            $this->assertSame('', $environment['OPENCODE_API_KEY']);
+            $config = file_get_contents($environment['OPENCODE_CONFIG']);
+            $this->assertStringNotContainsString('synthetic-fixture-key', $config);
+            $this->assertSame(
+                ['synthetic' => ['settings' => ['apiKey' => '{env:SYNTHETIC_API_KEY}']]],
+                json_decode($config, true)['providers']
+            );
+
+            if (PHP_OS_FAMILY !== 'Windows') {
+                $remote = new class ($home . '/profile') extends \vielhuber\aihelper\ai_opencode {
+                    public function __construct(string $profile)
+                    {
+                        $this->cli_auth_home = $profile;
+                        $this->ssh_host = 'fixture';
+                    }
+
+                    protected function sshCommand(bool $withReverseTunnel = false): array
+                    {
+                        return ['bash', '-c'];
+                    }
+                };
+                $connection->prepare("UPDATE credential SET value = ? WHERE integration_id = 'synthetic'")->execute([
+                    json_encode(['type' => 'key', 'key' => " synthetic-fixture-key\n"])
+                ]);
+                $this->assertSame(
+                    " synthetic-fixture-key\n",
+                    (new ReflectionMethod($remote, 'openCodeApiKey'))->invoke($remote, 'synthetic')
+                );
+                $previousDataHome = getenv('XDG_DATA_HOME');
+                putenv('XDG_DATA_HOME=' . $home . '/profile/opencode/data');
+                try {
+                    $remote->setCliStorage(null, null);
+                    $this->assertSame(
+                        " synthetic-fixture-key\n",
+                        (new ReflectionMethod($remote, 'openCodeApiKey'))->invoke($remote, 'synthetic')
+                    );
+                } finally {
+                    putenv($previousDataHome === false ? 'XDG_DATA_HOME' : 'XDG_DATA_HOME=' . $previousDataHome);
+                }
+            }
         } finally {
             $connection = null;
             __::rrmdir($home);
@@ -1583,7 +1645,20 @@ class Test extends \PHPUnit\Framework\TestCase
                 'cost' => 99
             ])
         ]);
+        $insert->execute([
+            'synthetic',
+            'fixture-session',
+            'assistant',
+            3,
+            $created + 1,
+            json_encode([
+                'model' => ['providerID' => 'synthetic', 'id' => 'hf:sample/model'],
+                'cost' => 0.75,
+                'tokens' => ['input' => 25, 'output' => 5]
+            ])
+        ]);
         $insert = null;
+        file_put_contents($home . '/opencode/data/opencode/auth.json', '{"opencode-go":{"key":"fixture-key"}}');
         $previous = getenv('XDG_DATA_HOME');
         try {
             $helper = new class ($home) extends \vielhuber\aihelper\ai_opencode {
@@ -1591,7 +1666,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 {
                     $this->cli_auth_home = $home;
                 }
-                protected function fetchOpenCodeServerLimits(): array
+                protected function fetchOpenCodeServerLimits(string $key): array
                 {
                     return [];
                 }
@@ -1614,7 +1689,7 @@ class Test extends \PHPUnit\Framework\TestCase
                         return ['bash', '-c'];
                     }
 
-                    protected function fetchOpenCodeServerLimits(): array
+                    protected function fetchOpenCodeServerLimits(string $key): array
                     {
                         return [];
                     }
@@ -1631,11 +1706,15 @@ class Test extends \PHPUnit\Framework\TestCase
                     fn(array $request): bool => ($request['session_id'] ?? '') === 'fixture-session'
                 )
             );
-            $this->assertCount(1, $requests);
-            $this->assertSame('glm-5.2', $requests[0]['model']);
-            $this->assertSame(100, $requests[0]['usage']['input_tokens']);
-            $this->assertSame(1500, $requests[0]['duration_in_ms']);
-            $this->assertSame('fixture question', $requests[0]['request_body']['messages'][0]['content']);
+            $this->assertCount(2, $requests);
+            $requestsByModel = array_column($requests, null, 'model');
+            $this->assertSame(100, $requestsByModel['glm-5.2']['usage']['input_tokens']);
+            $this->assertSame(1500, $requestsByModel['glm-5.2']['duration_in_ms']);
+            $this->assertSame(
+                'fixture question',
+                $requestsByModel['glm-5.2']['request_body']['messages'][0]['content']
+            );
+            $this->assertSame(25, $requestsByModel['synthetic/hf:sample/model']['usage']['input_tokens']);
         } finally {
             $connection = null;
             $previous === false ? putenv('XDG_DATA_HOME') : putenv('XDG_DATA_HOME=' . $previous);
@@ -2585,8 +2664,7 @@ class Test extends \PHPUnit\Framework\TestCase
                 'gpt-5.6-sol' => ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
                 'gpt-5.5-codex' => ['minimal', 'low', 'medium', 'high', 'xhigh']
             ],
-            'claudecode' => ['low', 'medium', 'high', 'xhigh', 'max'],
-            'opencode' => ['minimal', 'low', 'medium', 'high', 'max']
+            'claudecode' => ['low', 'medium', 'high', 'xhigh', 'max']
         ];
         $antigravity = array_column(aihelper::create(provider: 'antigravity')->models, 'efforts', 'name');
         $this->assertSame(['low', 'medium', 'high'], $antigravity['gemini-3.8-flash']);
@@ -2597,19 +2675,6 @@ class Test extends \PHPUnit\Framework\TestCase
             $harness = aihelper::create(provider: $provider);
             foreach ($harness->models as $model) {
                 $modelEfforts = $provider === 'codex' ? ($efforts[$model['name']] ?? null) : $efforts;
-                if ($provider === 'opencode') {
-                    $modelEfforts = [
-                        'opencode-go/kimi-k3' => ['max'],
-                        'opencode-go/glm-5.2' => ['high', 'max'],
-                        'opencode-go/minimax-m3' => [],
-                        'opencode-go/deepseek-v4-pro' => ['high', 'max'],
-                        'opencode-go/mimo-v2.5-pro' => [],
-                        'opencode-go/kimi-k2.7-code' => [],
-                        'opencode-go/hy3' => ['low', 'high'],
-                        'opencode-go/qwen3.7-plus' => ['high', 'max'],
-                        'opencode-go/mimo-v2.5' => []
-                    ][$model['name']] ?? $efforts;
-                }
                 $this->assertSame($modelEfforts !== [], $model['supports_effort'] ?? false, (string) ($model['name'] ?? 'unknown'));
                 $this->assertNotNull($modelEfforts, (string) ($model['name'] ?? 'unknown'));
                 $this->assertSame($modelEfforts, $model['efforts'] ?? [], (string) ($model['name'] ?? 'unknown'));
@@ -3196,20 +3261,95 @@ class Test extends \PHPUnit\Framework\TestCase
         }
     }
 
-    function test__opencode_exposes_only_its_harness_models(): void
+    function test__opencode_discovers_models_in_the_authentication_profile(): void
     {
-        $this->skipOnCi();
-        $harness = aihelper::create(provider: 'opencode');
-
-        $this->assertNotNull($harness);
-        $this->assertNotEmpty($harness->models);
-        foreach ($harness->models as $model) {
-            $this->assertStringStartsWith('opencode-go/', $model['name']);
+        if (PHP_OS_FAMILY === 'Windows' || trim((string) shell_exec('command -v timeout')) === '') {
+            $this->markTestSkipped('The OpenCode catalog command requires a POSIX shell and timeout.');
         }
-        $this->assertSame(
-            1,
-            count(array_filter($harness->models, fn(array $model): bool => ($model['default'] ?? false) === true))
+        class_exists(aihelper::class);
+        $home = sys_get_temp_dir() . '/aihelper-opencode-models-' . bin2hex(random_bytes(8));
+        mkdir($home . '/.opencode/bin', 0700, true);
+        $cli = $home . '/.opencode/bin/opencode';
+        file_put_contents(
+            $cli,
+            <<<'SH'
+            #!/bin/sh
+            [ "$*" = 'models --standalone' ] || exit 1
+            [ -f "$XDG_DATA_HOME/opencode/auth.json" ] || exit 1
+            if grep -q 'rotated-profile-key' "$XDG_DATA_HOME/opencode/auth.json"; then
+                printf '%s\n' 'synthetic/hf:sample/rotated'
+                exit 0
+            fi
+            printf '%s\n' 'synthetic/hf:sample/first' 'synthetic/hf:sample/new-model' 'opencode-go/kimi-k3' 'opencode/free'
+            SH
         );
+        chmod($cli, 0700);
+        $previousHome = getenv('HOME');
+        $previousKey = getenv('SYNTHETIC_API_KEY');
+        $previousDataHome = getenv('XDG_DATA_HOME');
+        putenv('HOME=' . $home);
+        putenv('SYNTHETIC_API_KEY=ambient-fixture-key');
+        try {
+            foreach (['go' => 'opencode-go', 'synthetic' => 'synthetic'] as $profile => $provider) {
+                $credentialHome = $home . '/' . $profile . '/opencode/data/opencode';
+                mkdir($credentialHome, 0700, true);
+                file_put_contents(
+                    $credentialHome . '/auth.json',
+                    json_encode([
+                        $provider => ['type' => 'api', 'key' => $profile . '-profile-key']
+                    ])
+                );
+            }
+            $synthetic = new class (effort: 'xhigh', cli_auth_home: $home . '/synthetic') extends
+                \vielhuber\aihelper\ai_opencode
+            {
+                protected function fetchModelsDevApi(): ?object
+                {
+                    return json_decode('{"synthetic":{"models":{"hf:sample/first":{
+                        "id":"hf:sample/first","limit":{"context":51200,"output":8192},
+                        "reasoning":true,"reasoning_options":[{"type":"effort","values":["low","xhigh"]}]
+                    }}}}');
+                }
+            };
+            $fixture = $synthetic::class;
+            $go = new $fixture(cli_auth_home: $home . '/go');
+            $this->assertSame(['opencode-go/kimi-k3'], array_column($go->models, 'name'));
+            $this->assertSame(
+                ['synthetic/hf:sample/first', 'synthetic/hf:sample/new-model'],
+                array_column($synthetic->models, 'name')
+            );
+            $this->assertSame([true, false], array_column($synthetic->models, 'default'));
+            $this->assertSame(51200, $synthetic->models[0]['context_length']);
+            $this->assertSame(['low', 'xhigh'], $synthetic->models[0]['efforts']);
+            $args = (new ReflectionMethod($synthetic, 'buildArgs'))->invoke($synthetic);
+            $this->assertContains('synthetic/hf:sample/first#xhigh', $args);
+
+            $empty = aihelper::create(provider: 'opencode', cli_auth_home: $home . '/empty');
+            $this->assertSame([], $empty->models);
+
+            $explicit = new $fixture(model: 'opencode-go/kimi-k3', cli_auth_home: $home . '/go');
+            foreach ([$go, $explicit] as $harness) {
+                $harness->setCliStorage($home . '/chat', $home . '/synthetic');
+                $this->assertSame(array_column($synthetic->models, 'name'), array_column($harness->models, 'name'));
+            }
+            $this->assertContains('synthetic/hf:sample/first', (new ReflectionMethod($go, 'buildArgs'))->invoke($go));
+            $this->assertContains('opencode-go/kimi-k3', (new ReflectionMethod($explicit, 'buildArgs'))->invoke($explicit));
+
+            putenv('XDG_DATA_HOME=' . $home . '/synthetic/opencode/data');
+            $native = new $fixture(cli_workdir: $home . '/workspace-not-yet-created');
+            $this->assertSame(array_column($synthetic->models, 'name'), array_column($native->models, 'name'));
+
+            file_put_contents(
+                $home . '/synthetic/opencode/data/opencode/auth.json',
+                '{"synthetic":{"type":"api","key":"rotated-profile-key"}}'
+            );
+            $this->assertSame(['synthetic/hf:sample/rotated'], array_column($synthetic->fetchModels(), 'name'));
+        } finally {
+            putenv($previousHome === false ? 'HOME' : 'HOME=' . $previousHome);
+            putenv($previousKey === false ? 'SYNTHETIC_API_KEY' : 'SYNTHETIC_API_KEY=' . $previousKey);
+            putenv($previousDataHome === false ? 'XDG_DATA_HOME' : 'XDG_DATA_HOME=' . $previousDataHome);
+            __::rrmdir($home);
+        }
     }
 
     function test__harness_waits_for_process_group_leader(): void
@@ -3528,9 +3668,22 @@ class Test extends \PHPUnit\Framework\TestCase
 
         $previousDataHome = getenv('XDG_DATA_HOME');
         putenv('XDG_DATA_HOME=' . $dataHome);
-        $limits = aihelper::create(provider: 'opencode')->getCliUsageLimits();
+        class_exists(aihelper::class);
+        $helper = new class extends \vielhuber\aihelper\ai_opencode {
+            public function __construct() {}
+
+            protected function fetchOpenCodeServerLimits(string $key): array
+            {
+                return [];
+            }
+        };
+        $this->assertNull($helper->getCliUsageLimits());
+        file_put_contents($dataHome . '/opencode/auth.json', '{"opencode-go":{"key":"fixture-key"}}');
+        $limits = $helper->getCliUsageLimits();
+        unlink($dataHome . '/opencode/auth.json');
         $previousDataHome === false ? putenv('XDG_DATA_HOME') : putenv('XDG_DATA_HOME=' . $previousDataHome);
 
+        $this->assertSame('opencode-go', $limits[0]['provider']);
         $this->assertSame('5-hour', $limits[0]['type']);
         $this->assertSame(1, $limits[0]['requests']);
         $this->assertSame(2.08, $limits[0]['percent used']);
@@ -3557,7 +3710,12 @@ class Test extends \PHPUnit\Framework\TestCase
                 return $this->messages;
             }
 
-            protected function fetchOpenCodeServerLimits(): array
+            protected function openCodeApiKey(string $provider): ?string
+            {
+                return $provider === 'opencode-go' ? 'fixture-key' : null;
+            }
+
+            protected function fetchOpenCodeServerLimits(string $key): array
             {
                 return $this->serverLimits;
             }
@@ -3572,13 +3730,14 @@ class Test extends \PHPUnit\Framework\TestCase
         ])->getCliUsageLimits();
 
         $this->assertSame([
-            ['type' => 'monthly', 'scope' => null, 'percent used' => 39.1, 'resets_at' => $reset, 'estimated' => false]
+            ['provider' => 'opencode-go', 'type' => 'monthly', 'scope' => null, 'percent used' => 39.1, 'resets_at' => $reset, 'estimated' => false]
         ], $limits);
     }
 
     function test__opencode_usage_without_any_data_remains_unavailable(): void
     {
         $this->assertNull($this->opencodeUsageAihelper(null, [])->getCliUsageLimits());
+        $this->assertNull($this->opencodeUsageAihelper([], [])->getCliUsageLimits());
     }
 
     function test__opencode_usage_keeps_local_statistics_when_server_limits_are_available(): void
@@ -3598,18 +3757,19 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertTrue($limits[0]['estimated']);
     }
 
-    private function opencodeQuotaAihelper(array $responses, string $key = 'test-key'): object
+    private function opencodeQuotaAihelper(array $responses, array $keys = ['opencode-go' => 'test-key']): object
     {
         class_exists(aihelper::class);
-        return new class ($responses, $key) extends \vielhuber\aihelper\ai_opencode {
+        return new class ($responses, $keys) extends \vielhuber\aihelper\ai_opencode {
             public array $requests = [];
+            public array $providers = [];
             public ?array $messages = null;
 
-            public function __construct(private array $responses, private string $key) {}
+            public function __construct(private array $responses, private array $keys) {}
 
-            protected function openCodeApiKey(): ?string
+            protected function openCodeApiKey(string $provider): ?string
             {
-                return $this->key;
+                return $this->keys[$provider] ?? null;
             }
 
             protected function readOpenCodeUsageMessages(int $from): ?array
@@ -3617,9 +3777,10 @@ class Test extends \PHPUnit\Framework\TestCase
                 return $this->messages;
             }
 
-            protected function requestOpenCodeUsage(string $key): object
+            protected function requestOpenCodeUsage(string $key, string $provider): object
             {
                 $this->requests[] = $key;
+                $this->providers[] = $provider;
                 $response = array_shift($this->responses);
                 if ($response instanceof \RuntimeException) {
                     throw $response;
@@ -3646,6 +3807,7 @@ class Test extends \PHPUnit\Framework\TestCase
         $result = $ai->getCliUsageLimits();
         $this->assertTrue(array_is_list($result));
         $this->assertSame([false, false, false], array_column($result, 'estimated'));
+        $this->assertSame(array_fill(0, 3, 'opencode-go'), array_column($result, 'provider'));
         $limits = array_column($result, null, 'type');
 
         $this->assertSame(0.0, $limits['5-hour']['percent used']);
@@ -3655,6 +3817,68 @@ class Test extends \PHPUnit\Framework\TestCase
         $this->assertSame(strtotime('2026-09-28T00:00:00Z'), strtotime($limits['weekly']['resets_at']));
         $this->assertSame(strtotime('2026-10-01T00:00:00Z'), strtotime($limits['monthly']['resets_at']));
         $this->assertSame(['test-key'], $ai->requests);
+        $this->assertSame(['opencode-go'], $ai->providers);
+    }
+
+    function test__opencode_reads_synthetic_subscription_quota(): void
+    {
+        $subscription = ['limit' => 135, 'requests' => 45.5, 'renewsAt' => '2026-12-01T14:36:14.288Z'];
+        $ai = $this->opencodeQuotaAihelper(
+            [
+                ['subscription' => $subscription],
+                ['subscription' => array_replace($subscription, ['requests' => 134.999])],
+                ['subscription' => array_replace($subscription, ['requests' => 135])],
+                ['subscription' => null]
+            ],
+            ['synthetic' => 'synthetic-fixture-key']
+        );
+        $quota = $ai->getCliUsageLimits()[0];
+        $this->assertSame('synthetic', $quota['provider']);
+        $this->assertSame('subscription', $quota['type']);
+        $this->assertSame(33.7, $quota['percent used']);
+        $this->assertSame(45.5, $quota['requests']);
+        $this->assertSame(135, $quota['limit_requests']);
+        $this->assertSame(strtotime($subscription['renewsAt']), strtotime($quota['resets_at']));
+        $this->assertFalse($quota['estimated']);
+        $this->assertSame(99.99, $ai->getCliUsageLimits()[0]['percent used']);
+        $this->assertSame(100.0, $ai->getCliUsageLimits()[0]['percent used']);
+        $this->assertNull($ai->getCliUsageLimits());
+        $this->assertSame(array_fill(0, 4, 'synthetic'), $ai->providers);
+    }
+
+    function test__opencode_rejects_a_malformed_synthetic_subscription_quota(): void
+    {
+        $ai = $this->opencodeQuotaAihelper([
+            [
+                'subscription' => [
+                    'limit' => 0,
+                    'requests' => 7,
+                    'renewsAt' => '2026-12-01T14:36:14.288Z'
+                ]
+            ]
+        ], ['synthetic' => 'synthetic-fixture-key']);
+        $this->expectExceptionMessage('Synthetic returned an invalid subscription quota.');
+        $ai->getCliUsageLimits();
+    }
+
+    function test__opencode_returns_available_quotas_for_both_connected_providers(): void
+    {
+        $go = $this->opencodeQuotaResponse();
+        $synthetic = ['subscription' => ['limit' => 135, 'requests' => 135, 'renewsAt' => '2026-12-01T14:36:14Z']];
+        $error = new \RuntimeException('HTTP 503');
+        foreach (
+            [
+                [[$go, $synthetic], ['opencode-go', 'opencode-go', 'opencode-go', 'synthetic']],
+                [[$go, $error], ['opencode-go', 'opencode-go', 'opencode-go']],
+                [[$error, $synthetic], ['synthetic']]
+            ] as [$responses, $providers]
+        ) {
+            $ai = $this->opencodeQuotaAihelper($responses, ['opencode-go' => 'go-key', 'synthetic' => 'synthetic-key']);
+            $limits = $ai->getCliUsageLimits();
+            $this->assertSame($providers, array_column($limits, 'provider'));
+            $this->assertSame(['opencode-go', 'synthetic'], $ai->providers);
+            $this->assertSame(['go-key', 'synthetic-key'], $ai->requests);
+        }
     }
 
     function test__opencode_quota_clamps_exhausted_limits(): void
@@ -3720,7 +3944,7 @@ class Test extends \PHPUnit\Framework\TestCase
     function test__opencode_quota_rejects_injected_api_keys(): void
     {
         foreach (["key\r\nInjected: header", 'key other'] as $key) {
-            $ai = $this->opencodeQuotaAihelper([], $key);
+            $ai = $this->opencodeQuotaAihelper([], ['opencode-go' => $key]);
             try {
                 $ai->getCliUsageLimits();
                 $this->fail('Invalid key must be rejected before making a request.');
